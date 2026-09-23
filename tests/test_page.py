@@ -31,4 +31,5 @@ def test_settings_page_and_provider_controls():
     assert 'id="connection-form"' in settings.text
     assert "OpenAI" in settings.text
     assert client.get("/static/settings.js").status_code == 200
+    assert "Сбросить ключ" in client.get("/static/settings.js").text
     assert "срез на момент проверки" in home.lower()

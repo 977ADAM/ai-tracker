@@ -79,3 +79,17 @@ def test_builtin_key_only_edit(tmp_path):
     assert saved["model"] == "GigaChat"
     assert store.get_key("gigachat") == "abc"
     assert saved["scope"] == "GIGACHAT_API_CORP"
+
+
+def test_reset_builtin_with_environment_key_and_no_saved_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
+    class StrictSecrets(MemorySecrets):
+        def delete_password(self, service, username):
+            if (service, username) not in self.values:
+                raise RuntimeError("missing key")
+            super().delete_password(service, username)
+    secrets = StrictSecrets()
+    store = ConnectionStore(tmp_path, secrets)
+    store.delete_connection("deepseek")
+    assert store.get_key("deepseek") == "env-key"
+    assert secrets.values == {}

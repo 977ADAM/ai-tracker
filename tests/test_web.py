@@ -112,3 +112,22 @@ def test_settings_api_never_returns_key(tmp_path):
     assert "secret" not in client.get("/api/providers").text
     assert client.post("/api/providers", json={"name": "Bad", "kind": "openai", "endpoint": "http://localhost/chat/completions", "model": "x", "api_key": "secret"}).status_code == 400
     assert client.delete(f"/api/providers/{created.json()['id']}").status_code == 200
+
+
+def test_provider_constructor_failure_is_isolated(tmp_path):
+    store = ConnectionStore(tmp_path, MemorySecrets())
+    store.save_connection({"api_key": "one"}, "gigachat")
+    store.save_connection({"api_key": "two"}, "deepseek")
+    class Stub:
+        def answer(self, prompt): return "Ромашка"
+        def close(self): pass
+    def factory(connection, key):
+        if connection["id"] == "gigachat":
+            raise OSError("private path or key must not leak")
+        return Stub()
+    client = TestClient(create_app(store=store, provider_factory=factory, allowed_hosts=["testserver"]))
+    response = client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat", "deepseek"]})
+    assert response.status_code == 200
+    assert response.json()["checks"][0]["summary"]["failed"] == 1
+    assert response.json()["checks"][1]["summary"]["successful"] == 1
+    assert "private path" not in response.text

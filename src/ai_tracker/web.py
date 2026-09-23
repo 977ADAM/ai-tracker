@@ -97,6 +97,8 @@ def create_app(provider: AnswerProvider | None = None, store: ConnectionStore | 
                     setup_error = "Добавьте API-ключ в настройках подключения"
             except (ConnectionError, ProviderError) as exc:
                 setup_error = str(exc)
+            except Exception:
+                setup_error = "Не удалось подготовить подключение к API модели"
 
             results = []
             successful = failed = mentioned = 0
@@ -110,13 +112,20 @@ def create_app(provider: AnswerProvider | None = None, store: ConnectionStore | 
                         failed += 1
                         results.append({"prompt": prompt, "answer": None, "mentioned": None, "error": str(exc)})
                         continue
+                    except Exception:
+                        failed += 1
+                        results.append({"prompt": prompt, "answer": None, "mentioned": None, "error": "Не удалось получить ответ API модели"})
+                        continue
                     found = mentions_brand(answer, check_input.brand)
                     successful += 1
                     mentioned += int(found)
                     results.append({"prompt": prompt, "answer": answer, "mentioned": found, "error": None})
             finally:
                 if client is not None and client is not provider:
-                    client.close()
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
             checks.append({"provider_id": id, "provider_name": connection["name"], "summary": {"successful": successful, "failed": failed, "mentioned": mentioned}, "results": results})
 
         response = {"brand": check_input.brand, "domain": check_input.domain, "checks": checks}

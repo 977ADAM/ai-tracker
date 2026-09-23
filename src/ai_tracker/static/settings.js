@@ -28,7 +28,12 @@ async function loadConnections() {
       edit.type = 'button'; edit.className = 'secondary-button'; edit.textContent = 'Настроить';
       edit.addEventListener('click', () => editConnection(connection));
       actions.append(edit);
-      if (!['gigachat', 'deepseek'].includes(connection.id)) {
+      if (['gigachat', 'deepseek'].includes(connection.id) && connection.configured) {
+        const reset = document.createElement('button');
+        reset.type = 'button'; reset.className = 'text-button'; reset.textContent = 'Сбросить ключ';
+        reset.addEventListener('click', () => resetKey(connection));
+        actions.append(reset);
+      } else if (!['gigachat', 'deepseek'].includes(connection.id)) {
         const remove = document.createElement('button');
         remove.type = 'button'; remove.className = 'text-button'; remove.textContent = 'Удалить';
         remove.addEventListener('click', () => removeConnection(connection));
@@ -75,6 +80,17 @@ async function removeConnection(connection) {
     if (editing === connection.id) resetForm();
     await loadConnections();
   } catch (error) { showMessage(settingsError, error.message || 'Не удалось удалить подключение'); }
+}
+
+async function resetKey(connection) {
+  if (!confirm(`Удалить сохранённый ключ «${connection.name}»? Если ключ задан через переменную среды, подключение останется активным.`)) return;
+  try {
+    const response = await fetch(`/api/providers/${encodeURIComponent(connection.id)}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Не удалось сбросить ключ');
+    if (editing === connection.id) resetForm();
+    await loadConnections();
+  } catch (error) { showMessage(settingsError, error.message || 'Не удалось сбросить ключ'); }
 }
 
 form.addEventListener('submit', async (event) => {

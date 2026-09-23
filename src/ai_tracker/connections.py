@@ -100,15 +100,21 @@ class ConnectionStore:
             if os.path.exists(temp):
                 os.unlink(temp)
 
+    def _saved_key(self, connection_id: str) -> str | None:
+        try:
+            return self.secrets.get_password(SERVICE, connection_id)
+        except Exception as exc:
+            raise ConnectionError("Системное хранилище ключей недоступно") from exc
+
     def get_key(self, connection_id: str) -> str | None:
         try:
-            saved = self.secrets.get_password(SERVICE, connection_id)
-        except Exception as exc:
+            saved = self._saved_key(connection_id)
+        except ConnectionError:
             if connection_id == "gigachat" and os.getenv("GIGACHAT_AUTH_KEY"):
                 return os.getenv("GIGACHAT_AUTH_KEY")
             if connection_id == "deepseek" and os.getenv("DEEPSEEK_API_KEY"):
                 return os.getenv("DEEPSEEK_API_KEY")
-            raise ConnectionError("Системное хранилище ключей недоступно") from exc
+            raise
         if saved:
             return saved
         if connection_id == "gigachat":
@@ -169,7 +175,7 @@ class ConnectionStore:
         key = payload.get("api_key")
         if key is not None and (not isinstance(key, str) or len(key) > 10000):
             raise ConnectionError("Некорректный API-ключ")
-        old_key = self.get_key(updated["id"])
+        old_key = self._saved_key(updated["id"])
         changed_key = isinstance(key, str) and bool(key.strip())
         if changed_key:
             try:
@@ -194,7 +200,7 @@ class ConnectionStore:
         data = self._read()
         if connection_id not in [item["id"] for item in self._all()]:
             raise ConnectionError("Подключение не найдено")
-        old_key = self.get_key(connection_id)
+        old_key = self._saved_key(connection_id)
         if old_key:
             try:
                 self.secrets.delete_password(SERVICE, connection_id)
