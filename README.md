@@ -6,8 +6,18 @@
 
 Нужны Python 3.13+, [uv](https://docs.astral.sh/uv/) и ключ авторизации [GigaChat API](https://developers.sber.ru/docs/ru/gigachat/api/reference/rest/gigachat-api). Ключ берётся в личном кабинете GigaChat API; в переменную ниже указывайте строку ключа без префикса `Basic`.
 
+GigaChat также требует [корневой сертификат НУЦ Минцифры](https://developers.sber.ru/docs/ru/gigachat/certificates) для HTTPS-подключения. Скачайте PEM-сертификат по ссылке из официальной инструкции Сбера. Чтобы Python доверял и обычным сайтам, и GigaChat, добавьте его к стандартному набору сертификатов из `certifi`:
+
 ```sh
 uv sync
+cp "$(uv run python -m certifi)" .gigachat-ca-bundle.pem
+cat /путь/к/russian_trusted_root_ca_pem.crt >> .gigachat-ca-bundle.pem
+export SSL_CERT_FILE="$PWD/.gigachat-ca-bundle.pem"
+```
+
+Замените `/путь/к/...` на путь к скачанному файлу. Если вы уже используете PEM-набор доверенных сертификатов с корневым сертификатом Минцифры, укажите его полный путь в `SSL_CERT_FILE`. [HTTPX читает эту переменную](https://www.python-httpx.org/environment_variables/) и продолжает проверять сертификаты; отключать проверку TLS не нужно.
+
+```sh
 export GIGACHAT_AUTH_KEY='ваш_ключ_авторизации'
 uv run ai-tracker
 ```
