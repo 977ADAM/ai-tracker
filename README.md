@@ -50,6 +50,8 @@ export SSL_CERT_FILE="$PWD/.gigachat-ca-bundle.pem"
 
 ## Проверки
 
+Тесты фронтенда находятся в `frontend/tests/`, тесты Python API — в `backend/tests/`.
+
 ```sh
 make test
 make check

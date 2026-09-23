@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import CheckPage from './+page.svelte';
-import { load as loadCheckPage } from './+page.server';
-import SettingsPage from './settings/+page.svelte';
+import CheckPage from '../src/routes/+page.svelte';
+import { load as loadCheckPage } from '../src/routes/+page.server';
+import SettingsPage from '../src/routes/settings/+page.svelte';
 import type { PublicProvider } from '$lib/types';
 
 const gigachat: PublicProvider = { id: 'gigachat', name: 'GigaChat', kind: 'gigachat', endpoint: null, model: 'GigaChat', configured: true };
@@ -49,6 +49,48 @@ it('shows provider errors separately from missed mentions', async () => {
   await waitFor(() => expect(screen.getByText('Сервис недоступен')).toBeTruthy());
   expect(screen.getAllByText('Ошибка')).toHaveLength(1);
   expect(screen.getAllByText('Нет упоминания')).toHaveLength(1);
+});
+
+it('summarizes mentions using only successful answers and lists every provider result', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ brand: 'Ромашка', domain: '', checks: [
+    { provider_id: 'gigachat', provider_name: 'GigaChat', summary: { successful: 2, failed: 0, mentioned: 1 }, results: [
+      { prompt: 'Первый вопрос', answer: 'Ромашка', mentioned: true, error: null },
+      { prompt: 'Второй вопрос', answer: 'Другой бренд', mentioned: false, error: null }
+    ] },
+    { provider_id: 'deepseek', provider_name: 'DeepSeek', summary: { successful: 1, failed: 1, mentioned: 1 }, results: [
+      { prompt: 'Первый вопрос', answer: null, mentioned: null, error: 'Лимит API' },
+      { prompt: 'Второй вопрос', answer: 'Ромашка', mentioned: true, error: null }
+    ] }
+  ] }), { headers: { 'content-type': 'application/json' } }));
+
+  render(CheckPage, { data: { providers: [gigachat, deepseek], loadError: '' } });
+  await fireEvent.click(screen.getByRole('checkbox', { name: /DeepSeek/ }));
+  await fireEvent.input(screen.getByLabelText(/Название бренда/), { target: { value: 'Ромашка' } });
+  await fireEvent.input(screen.getByLabelText(/Вопросы клиентов/), { target: { value: 'Первый вопрос\nВторой вопрос' } });
+  await fireEvent.click(screen.getByRole('button', { name: /Проверить бренд/ }));
+
+  const table = await screen.findByRole('table', { name: 'Таблица результатов' });
+  expect(table.querySelectorAll('tbody tr')).toHaveLength(4);
+  expect(screen.getByText('67%')).toBeTruthy();
+  expect(screen.getByText('2 из 3 успешных ответов')).toBeTruthy();
+  expect(screen.getByText('1 ошибка API')).toBeTruthy();
+});
+
+it('does not report zero visibility when every provider request failed', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ brand: 'Ромашка', domain: '', checks: [
+    { provider_id: 'gigachat', provider_name: 'GigaChat', summary: { successful: 0, failed: 1, mentioned: 0 }, results: [
+      { prompt: 'Первый вопрос', answer: null, mentioned: null, error: 'Лимит API' }
+    ] }
+  ] }), { headers: { 'content-type': 'application/json' } }));
+
+  render(CheckPage, { data: { providers: [gigachat], loadError: '' } });
+  await fireEvent.input(screen.getByLabelText(/Название бренда/), { target: { value: 'Ромашка' } });
+  await fireEvent.input(screen.getByLabelText(/Вопросы клиентов/), { target: { value: 'Первый вопрос' } });
+  await fireEvent.click(screen.getByRole('button', { name: /Проверить бренд/ }));
+
+  await screen.findByRole('table', { name: 'Таблица результатов' });
+  expect(screen.getByText('Нет успешных ответов')).toBeTruthy();
+  expect(screen.queryByText('0%')).toBeNull();
 });
 
 it('rejects more than 20 prompts before calling the BFF', async () => {

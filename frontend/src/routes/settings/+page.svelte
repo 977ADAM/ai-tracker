@@ -104,52 +104,92 @@
 
 <svelte:head><title>ИИ-трекинг · Настройки API</title></svelte:head>
 
-<main class="mx-auto max-w-7xl px-4 pb-12 sm:px-6 lg:px-8">
-  <section class="max-w-3xl py-12 sm:py-16">
-    <p class="mb-4 text-xs font-extrabold tracking-[0.19em] text-emerald-700 uppercase">Модели и ключи</p>
-    <h1 class="text-4xl leading-tight font-bold tracking-tight text-slate-900 sm:text-6xl">Подключения API</h1>
-    <p class="mt-5 text-base leading-7 text-slate-600 sm:text-lg">Настройте GigaChat, DeepSeek или добавьте OpenAI-совместимую модель. Ключи сохраняет Python в системном хранилище и не показывает после сохранения.</p>
+<main class="mx-auto max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
+  <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-6 text-xs font-medium text-muted">
+    <a href="/" class="hover:text-accent focus-visible:outline-2 focus-visible:outline-accent">Проверка</a>
+    <span aria-hidden="true">/</span>
+    <span class="text-ink">Настройки API</span>
+  </nav>
+
+  <section class="rounded-3xl border border-line bg-white px-6 py-9 shadow-sm sm:px-10 sm:py-11">
+    <p class="text-xs font-bold tracking-[0.16em] text-accent uppercase">Управление моделями</p>
+    <h1 class="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">Подключения API</h1>
+    <p class="mt-4 max-w-3xl text-sm leading-7 text-muted sm:text-base">Настройте GigaChat, DeepSeek или добавьте OpenAI-совместимую модель. Ключи сохраняет Python в системном хранилище и не показывает после сохранения.</p>
   </section>
 
-  {#if error}<p role="alert" class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>{/if}
-  {#if notice}<p role="status" class="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p>{/if}
+  {#if error}<p role="alert" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>{/if}
+  {#if notice}<p role="status" class="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p>{/if}
 
-  <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(330px,0.95fr)]">
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-labelledby="connections-title">
-      <div class="mb-6 flex items-start gap-3"><span class="step-mark">01</span><div><h2 id="connections-title" class="text-xl font-bold">Доступные подключения</h2><p class="text-sm text-slate-500">Ключ можно заменить или сбросить в любой момент</p></div></div>
+  <div class="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
+    <section class="overflow-hidden rounded-3xl border border-line bg-white shadow-sm" aria-labelledby="connections-title">
+      <div class="border-b border-line px-6 py-5 sm:px-8">
+        <p class="text-xs font-bold tracking-[0.14em] text-accent uppercase">Шаг 1 · Выберите модель</p>
+        <h2 id="connections-title" class="mt-1 text-xl font-bold tracking-tight sm:text-2xl">Доступные подключения</h2>
+        <p class="mt-1 text-sm text-muted">Ключ можно заменить или сбросить в любой момент.</p>
+      </div>
       {#if connections.length}
-        <div class="space-y-3">
+        <div class="divide-y divide-line">
           {#each connections as connection (connection.id)}
-            <article class="rounded-xl border border-slate-200 p-4 sm:p-5">
-              <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="text-lg font-bold text-slate-900">{connection.name}</h3><p class="mt-1 text-sm text-slate-600">{connection.model}</p></div><span class:hit-badge={connection.configured} class:miss-badge={!connection.configured} class="rounded-full px-3 py-1 text-xs font-bold">{connection.configured ? 'Готово к проверке' : 'Нужен API-ключ'}</span></div>
-              {#if connection.endpoint}<p class="mt-3 break-all text-xs text-slate-500">{connection.endpoint}</p>{/if}
-              <div class="mt-4 flex flex-wrap gap-3 text-sm font-semibold">
-                <button type="button" class="text-emerald-700 hover:underline" disabled={busy} onclick={() => edit(connection)} aria-label={`Настроить ${connection.name}`}>Настроить</button>
+            <article class="px-6 py-5 sm:px-8">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0"><h3 class="text-lg font-bold">{connection.name}</h3><p class="mt-1 text-sm text-muted">{connection.model}</p></div>
+                <span class={`rounded-full px-3 py-1 text-xs font-semibold ${connection.configured ? 'bg-accent-soft text-accent-dark' : 'bg-amber-50 text-amber-800'}`}>{connection.configured ? 'Готово к проверке' : 'Нужен API-ключ'}</span>
+              </div>
+              {#if connection.endpoint}<p class="mt-3 break-all rounded-lg bg-canvas px-3 py-2 text-xs text-muted">{connection.endpoint}</p>{/if}
+              <div class="mt-4 flex flex-wrap gap-4 text-sm font-semibold">
+                <button type="button" class="rounded-sm text-accent hover:text-accent-dark hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50" disabled={busy} onclick={() => edit(connection)} aria-label={`Настроить ${connection.name}`}>Настроить</button>
                 {#if connection.id === 'gigachat' || connection.id === 'deepseek'}
-                  {#if connection.configured}<button type="button" class="text-slate-500 hover:underline" disabled={busy} onclick={() => remove(connection)} aria-label={`Сбросить ключ ${connection.name}`}>Сбросить ключ</button>{/if}
+                  {#if connection.configured}<button type="button" class="rounded-sm text-muted hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50" disabled={busy} onclick={() => remove(connection)} aria-label={`Сбросить ключ ${connection.name}`}>Сбросить ключ</button>{/if}
                 {:else}
-                  <button type="button" class="text-red-600 hover:underline" disabled={busy} onclick={() => remove(connection)} aria-label={`Удалить ${connection.name}`}>Удалить</button>
+                  <button type="button" class="rounded-sm text-rose-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600 disabled:opacity-50" disabled={busy} onclick={() => remove(connection)} aria-label={`Удалить ${connection.name}`}>Удалить</button>
                 {/if}
               </div>
             </article>
           {/each}
         </div>
       {:else}
-        <p class="rounded-xl bg-slate-50 p-5 text-sm text-slate-600">Подключения пока не загружены. Проверьте Python API и обновите страницу.</p>
+        <p class="px-6 py-8 text-sm text-muted sm:px-8">Подключения пока не загружены. Проверьте Python API и обновите страницу.</p>
       {/if}
     </section>
 
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-labelledby="form-title">
-      <div class="mb-6 flex items-start gap-3"><span class="step-mark">02</span><div><h2 id="form-title" class="text-xl font-bold">{editing ? `Настроить ${name}` : 'Добавить подключение'}</h2><p class="text-sm text-slate-500">OpenAI Chat Completions API</p></div></div>
-      <form onsubmit={save} novalidate class="space-y-5">
-        <div><label class="field-label" for="connection-name">Название подключения</label><input id="connection-name" class="field-input" type="text" maxlength="100" bind:value={name} disabled={preset} placeholder="Например, Моя модель" /></div>
-        <div><label class="field-label" for="endpoint">Адрес API</label><input id="endpoint" class="field-input" type="url" maxlength="2048" bind:value={endpoint} disabled={preset} placeholder="https://api.example.com/v1/chat/completions" /><p class="field-help">Публичный HTTPS-адрес, заканчивающийся на /chat/completions. Ключ передаётся этому API.</p></div>
-        <div><label class="field-label" for="model">Модель</label><input id="model" class="field-input" type="text" maxlength="100" bind:value={model} disabled={preset} placeholder="Название модели в API" /></div>
-        {#if editing === 'gigachat'}<div><label class="field-label" for="scope">Область доступа GigaChat</label><select id="scope" class="field-input" bind:value={scope}><option value="GIGACHAT_API_PERS">Персональный</option><option value="GIGACHAT_API_B2B">Бизнес</option><option value="GIGACHAT_API_CORP">Корпоративный</option></select></div>{/if}
-        <div><label class="field-label" for="api-key">API-ключ</label><input id="api-key" class="field-input" type="password" autocomplete="new-password" bind:value={apiKey} placeholder={editing ? 'Оставьте пустым, чтобы сохранить прежний' : 'Введите ключ'} /><p class="field-help">При редактировании пустое поле оставляет сохранённый ключ. После сохранения ключ здесь не отображается.</p></div>
-        <div class="flex flex-wrap gap-3"><button type="submit" class="rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white hover:bg-emerald-800 disabled:opacity-60" disabled={busy}>{busy ? 'Сохраняем…' : 'Сохранить подключение'}</button>{#if editing}<button type="button" class="rounded-xl border border-slate-200 px-5 py-3 font-semibold text-slate-600" onclick={resetForm} disabled={busy}>Отмена</button>{/if}</div>
+    <section class="overflow-hidden rounded-3xl border border-line bg-white shadow-sm" aria-labelledby="form-title">
+      <div class="border-b border-line px-6 py-5 sm:px-8">
+        <p class="text-xs font-bold tracking-[0.14em] text-accent uppercase">Шаг 2 · Параметры доступа</p>
+        <h2 id="form-title" class="mt-1 text-xl font-bold tracking-tight sm:text-2xl">{editing ? `Настроить ${name}` : 'Добавить подключение'}</h2>
+        <p class="mt-1 text-sm text-muted">OpenAI Chat Completions API</p>
+      </div>
+      <form onsubmit={save} novalidate class="space-y-5 px-6 py-7 sm:px-8">
+        <div>
+          <label class="mb-2 block text-sm font-semibold" for="connection-name">Название подключения</label>
+          <input id="connection-name" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500" type="text" maxlength="100" bind:value={name} disabled={preset} placeholder="Например, Моя модель" />
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-semibold" for="endpoint">Адрес API</label>
+          <input id="endpoint" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500" type="url" maxlength="2048" bind:value={endpoint} disabled={preset} placeholder="https://api.example.com/v1/chat/completions" />
+          <p class="mt-2 text-xs leading-5 text-muted">Публичный HTTPS-адрес, заканчивающийся на /chat/completions. Ключ передаётся этому API.</p>
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-semibold" for="model">Модель</label>
+          <input id="model" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500" type="text" maxlength="100" bind:value={model} disabled={preset} placeholder="Название модели в API" />
+        </div>
+        {#if editing === 'gigachat'}
+          <div>
+            <label class="mb-2 block text-sm font-semibold" for="scope">Область доступа GigaChat</label>
+            <select id="scope" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" bind:value={scope}><option value="GIGACHAT_API_PERS">Персональный</option><option value="GIGACHAT_API_B2B">Бизнес</option><option value="GIGACHAT_API_CORP">Корпоративный</option></select>
+          </div>
+        {/if}
+        <div>
+          <label class="mb-2 block text-sm font-semibold" for="api-key">API-ключ</label>
+          <input id="api-key" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="password" autocomplete="new-password" bind:value={apiKey} placeholder={editing ? 'Оставьте пустым, чтобы сохранить прежний' : 'Введите ключ'} />
+          <p class="mt-2 text-xs leading-5 text-muted">При редактировании пустое поле оставляет сохранённый ключ. После сохранения ключ здесь не отображается.</p>
+        </div>
+        <div class="flex flex-wrap gap-3 border-t border-line pt-5">
+          <button type="submit" class="min-h-11 rounded-xl bg-accent px-5 py-3 text-sm font-bold text-white transition hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60" disabled={busy}>{busy ? 'Сохраняем…' : 'Сохранить подключение'}</button>
+          {#if editing}<button type="button" class="min-h-11 rounded-xl border border-line px-5 py-3 text-sm font-semibold text-muted transition hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onclick={resetForm} disabled={busy}>Отмена</button>{/if}
+        </div>
       </form>
     </section>
   </div>
-  <aside class="mt-6 rounded-xl bg-emerald-50 p-5 text-sm leading-6 text-emerald-950">Встроенное подключение можно вернуть к ключу из переменной среды: сбросьте сохранённый ключ. Подключения и ключи хранятся локально на этом компьютере.</aside>
+
+  <aside class="mt-8 rounded-2xl border border-line bg-accent-soft px-6 py-5 text-sm leading-6 text-ink">Встроенное подключение можно вернуть к ключу из переменной среды: сбросьте сохранённый ключ. Подключения и ключи хранятся локально на этом компьютере.</aside>
 </main>

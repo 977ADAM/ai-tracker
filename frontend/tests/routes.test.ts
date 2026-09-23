@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { GET, POST } from './providers/+server';
-import { PUT, DELETE } from './providers/[id]/+server';
-import { POST as CHECK } from './check/+server';
+import { GET, POST } from '../src/routes/api/providers/+server';
+import { PUT, DELETE } from '../src/routes/api/providers/[id]/+server';
+import { POST as CHECK } from '../src/routes/api/check/+server';
 
 afterEach(() => vi.restoreAllMocks());
 

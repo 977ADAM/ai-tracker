@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { providerPath, proxyJson } from './python-api';
+import { providerPath, proxyJson } from '../src/lib/server/python-api';
 
 const base = 'http://127.0.0.1:5173';
 function request(path: string, method = 'GET', payload?: unknown, headers: Record<string, string> = {}) {
