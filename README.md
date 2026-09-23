@@ -4,14 +4,26 @@
 
 ## Запуск
 
-Нужны Python 3.13+ и [uv](https://docs.astral.sh/uv/). Установите зависимости и запустите локальный сервер:
+Нужны Python 3.13+, [uv](https://docs.astral.sh/uv/) и Node.js 20.19+. Установите зависимости и запустите приложение:
 
 ```sh
 uv sync
-uv run ai-tracker
+npm install
+npm run dev
 ```
 
-Откройте [http://127.0.0.1:8000/settings](http://127.0.0.1:8000/settings), настройте GigaChat или DeepSeek и вернитесь к проверке. Ключ GigaChat берётся в личном кабинете [GigaChat API](https://developers.sber.ru/docs/ru/gigachat/api/reference/rest/gigachat-api); вводите строку без префикса `Basic`. Для DeepSeek нужен ключ его API. Ключи сохраняются в системном хранилище паролей через `keyring`; если оно недоступно, сохранение ключа не выполняется. Параметры подключений записываются в `~/.config/ai-tracker/providers.json` (можно изменить каталог через `AI_TRACKER_CONFIG_DIR`).
+Откройте [http://127.0.0.1:5173/settings](http://127.0.0.1:5173/settings), настройте GigaChat или DeepSeek и вернитесь к проверке. SvelteKit показывает страницы и принимает запросы браузера на порту 5173. Python API работает только на `127.0.0.1:8000`; сервер SvelteKit передаёт ему запросы. Браузер не обращается к Python напрямую. Для другого локального порта Python укажите серверную переменную `AI_TRACKER_API_URL=http://127.0.0.1:НОМЕР_ПОРТА`.
+
+Для запуска собранной версии выполните:
+
+```sh
+npm run build
+npm run start
+```
+
+Она открывается по адресу [http://127.0.0.1:5173](http://127.0.0.1:5173). Обе команды запуска автоматически поднимают Python API и веб-интерфейс; останавливайте их вместе через Ctrl+C.
+
+Ключ GigaChat берётся в личном кабинете [GigaChat API](https://developers.sber.ru/docs/ru/gigachat/api/reference/rest/gigachat-api); вводите строку без префикса `Basic`. Для DeepSeek нужен ключ его API. Ключи сохраняет Python в системном хранилище паролей через `keyring`; если оно недоступно, сохранение ключа не выполняется. Параметры подключений записываются в `~/.config/ai-tracker/providers.json` (можно изменить каталог через `AI_TRACKER_CONFIG_DIR`). SvelteKit не хранит ключи и не возвращает их в браузер после сохранения.
 
 В настройках можно добавить другой сервис формата OpenAI Chat Completions: публичный HTTPS-адрес, заканчивающийся на `/chat/completions`, ID модели и API-ключ. Новые подключения сохраняются после перезапуска. Ключ будет отправляться на указанный вами адрес API при проверке.
 
@@ -36,5 +48,8 @@ export SSL_CERT_FILE="$PWD/.gigachat-ca-bundle.pem"
 ## Проверки
 
 ```sh
+npm test
+npm run check
+npm run build
 uv run --with pytest pytest -q
 ```

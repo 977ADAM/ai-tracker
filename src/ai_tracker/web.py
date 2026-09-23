@@ -1,12 +1,10 @@
-"""Local API and pages for checking mentions across saved AI providers."""
+"""Local API for checking mentions across saved AI providers."""
 
 import os
 from pathlib import Path
 from typing import Callable
 
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .checks import mentions_brand, normalize_request
@@ -25,20 +23,10 @@ def default_provider(connection: dict, key: str) -> AnswerProvider:
 def create_app(provider: AnswerProvider | None = None, store: ConnectionStore | None = None,
                provider_factory: Callable[[dict, str], AnswerProvider] | None = None,
                allowed_hosts: list[str] | None = None) -> FastAPI:
-    application = FastAPI(title="ИИ-трекинг")
+    application = FastAPI(title="ИИ-трекинг API")
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["localhost", "127.0.0.1"])
-    static_dir = Path(__file__).with_name("static")
-    application.mount("/static", StaticFiles(directory=static_dir), name="static")
     active_store = store or ConnectionStore(Path(os.getenv("AI_TRACKER_CONFIG_DIR", Path.home() / ".config" / "ai-tracker")), KeyringSecrets())
     factory = provider_factory or default_provider
-
-    @application.get("/", include_in_schema=False)
-    def home() -> FileResponse:
-        return FileResponse(static_dir / "index.html")
-
-    @application.get("/settings", include_in_schema=False)
-    def settings() -> FileResponse:
-        return FileResponse(static_dir / "settings.html")
 
     @application.get("/api/providers")
     def list_providers() -> list[dict]:

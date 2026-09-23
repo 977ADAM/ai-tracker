@@ -17,6 +17,14 @@ class FakeProvider:
         return "Ромашка рекомендует этот вариант"
 
 
+def test_python_app_exposes_api_only(tmp_path):
+    client = TestClient(create_app(store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"]))
+    assert client.get("/").status_code == 404
+    assert client.get("/settings").status_code == 404
+    assert client.get("/static/app.js").status_code == 404
+    assert client.get("/api/providers").status_code == 200
+
+
 def test_returns_answers_and_summary(tmp_path):
     provider = FakeProvider()
     response = TestClient(create_app(provider, store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"])).post(
