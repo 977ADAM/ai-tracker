@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 RESULT_MENTIONED = "mentioned"
 RESULT_ABSENT = "absent"
 RESULT_ERROR = "error"
+
+ResultStatus = Literal["mentioned", "absent", "error"]
 
 KIND_OPENAI = "openai"
 KIND_GIGACHAT = "gigachat"
@@ -56,7 +58,7 @@ class PromptResult:
     answer: str | None
     mentioned: bool | None
     error: str | None
-    status: str
+    status: ResultStatus
 
     def as_dict(self) -> dict[str, Any]:
         return {
