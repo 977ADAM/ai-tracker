@@ -1,9 +1,12 @@
 """Local web endpoint for a one-off GigaChat brand check."""
 
 import os
+from pathlib import Path
 from typing import Protocol
 
 from fastapi import Body, FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .checks import mentions_brand, normalize_request
 from .gigachat import GigaChatClient, ProviderError
@@ -15,6 +18,12 @@ class AnswerProvider(Protocol):
 
 def create_app(provider: AnswerProvider | None = None) -> FastAPI:
     application = FastAPI(title="ИИ-трекинг")
+    static_dir = Path(__file__).with_name("static")
+    application.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    @application.get("/", include_in_schema=False)
+    def home() -> FileResponse:
+        return FileResponse(static_dir / "index.html")
 
     @application.post("/api/check")
     def check(payload: object = Body(...)) -> dict:
