@@ -3,19 +3,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const backend = resolve(root, 'backend');
+const frontend = resolve(root, 'frontend');
 
 export function commands(mode) {
   if (mode !== 'dev' && mode !== 'start') throw new Error('Unknown run mode');
-  const python = { command: 'uv', args: ['run', 'ai-tracker'], env: {} };
+  const python = { command: 'uv', args: ['run', 'ai-tracker'], cwd: backend, env: {} };
   const web = mode === 'dev'
-    ? { command: process.execPath, args: ['node_modules/vite/bin/vite.js', 'dev', '--host', '127.0.0.1', '--port', '5173', '--strictPort'], env: {} }
-    : { command: process.execPath, args: ['build/index.js'], env: { HOST: '127.0.0.1', PORT: '5173', ORIGIN: 'http://127.0.0.1:5173' } };
+    ? { command: process.execPath, args: ['../node_modules/vite/bin/vite.js', 'dev', '--host', '127.0.0.1', '--port', '5173', '--strictPort'], cwd: frontend, env: {} }
+    : { command: process.execPath, args: ['build/index.js'], cwd: frontend, env: { HOST: '127.0.0.1', PORT: '5173', ORIGIN: 'http://127.0.0.1:5173' } };
   return [python, web];
 }
 
 export function startProcesses(specs, { stdio = 'inherit' } = {}) {
   const children = specs.map((spec) => spawn(spec.command, spec.args, {
-    cwd: root, stdio, env: { ...process.env, ...spec.env }
+    cwd: spec.cwd ?? root, stdio, env: { ...process.env, ...spec.env }
   }));
   let stopping = false;
   let exitCode = 0;

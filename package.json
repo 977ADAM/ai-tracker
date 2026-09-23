@@ -1,27 +1,12 @@
 {
-  "name": "ai-tracker-web",
+  "name": "ai-tracker",
   "private": true,
-  "type": "module",
+  "workspaces": ["frontend"],
   "scripts": {
     "dev": "node scripts/run-local.mjs dev",
-    "build": "vite build",
     "start": "node scripts/run-local.mjs start",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test": "node --test scripts/run-local.test.mjs && vitest run --passWithNoTests"
-  },
-  "devDependencies": {
-    "@sveltejs/adapter-node": "^5.0.0",
-    "@sveltejs/kit": "^2.0.0",
-    "@sveltejs/vite-plugin-svelte": "^6.0.0",
-    "@tailwindcss/vite": "^4.0.0",
-    "@testing-library/svelte": "^5.0.0",
-    "@types/node": "^24.0.0",
-    "jsdom": "^27.0.0",
-    "svelte": "^5.0.0",
-    "svelte-check": "^4.0.0",
-    "tailwindcss": "^4.0.0",
-    "typescript": "^5.0.0",
-    "vite": "^7.0.0",
-    "vitest": "^4.0.0"
+    "build": "npm run build --workspace frontend",
+    "check": "npm run check --workspace frontend",
+    "test": "node --test scripts/run-local.test.mjs && npm run test --workspace frontend"
   }
 }

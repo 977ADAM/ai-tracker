@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { resolve } from 'node:path';
 import { commands, startProcesses } from './run-local.mjs';
 
 test('dev and built modes bind the web process to loopback', () => {
@@ -34,4 +35,16 @@ test('a missing executable stops the other child and exits nonzero', async () =>
   ]).finally(() => clearTimeout(timeout));
   assert.equal(code, 1);
   assert.ok(running.children[1].exitCode !== null || running.children[1].signalCode !== null);
+});
+
+test('each service starts in its own project directory', async () => {
+  const directory = resolve('scripts');
+  const running = startProcesses([
+    { command: process.execPath, args: ['-p', 'process.cwd()'], cwd: directory }
+  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let output = '';
+  running.children[0].stdout.setEncoding('utf8');
+  running.children[0].stdout.on('data', (chunk) => { output += chunk; });
+  assert.equal(await running.done, 0);
+  assert.equal(output.trim(), directory);
 });

@@ -1,6 +1,6 @@
 {
   "extends": "./.svelte-kit/tsconfig.json",
-  "exclude": ["src/ai_tracker/**", "node_modules/**"],
+  "exclude": ["node_modules/**"],
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,

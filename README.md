@@ -7,10 +7,12 @@
 Нужны Python 3.13+, [uv](https://docs.astral.sh/uv/) и Node.js 20.19+. Установите зависимости и запустите приложение:
 
 ```sh
-uv sync
+(cd backend && uv sync)
 npm install
 npm run dev
 ```
+
+Исходники веб-интерфейса и его настройки находятся в `frontend/`, Python API и его тесты — в `backend/`. Корневые команды запускают обе части вместе.
 
 Откройте [http://127.0.0.1:5173/settings](http://127.0.0.1:5173/settings), настройте GigaChat или DeepSeek и вернитесь к проверке. SvelteKit показывает страницы и принимает запросы браузера на порту 5173. Python API работает только на `127.0.0.1:8000`; сервер SvelteKit передаёт ему запросы. Браузер не обращается к Python напрямую. Для другого локального порта Python укажите серверную переменную `AI_TRACKER_API_URL=http://127.0.0.1:НОМЕР_ПОРТА`.
 
@@ -32,7 +34,7 @@ npm run start
 GigaChat также требует [корневой сертификат НУЦ Минцифры](https://developers.sber.ru/docs/ru/gigachat/certificates) для HTTPS-подключения. Скачайте PEM-сертификат по ссылке из официальной инструкции Сбера. Чтобы Python доверял и обычным сайтам, и GigaChat, добавьте его к стандартному набору сертификатов из `certifi`:
 
 ```sh
-cp "$(uv run python -m certifi)" .gigachat-ca-bundle.pem
+cp "$(cd backend && uv run python -m certifi)" .gigachat-ca-bundle.pem
 cat /путь/к/russian_trusted_root_ca_pem.crt >> .gigachat-ca-bundle.pem
 export SSL_CERT_FILE="$PWD/.gigachat-ca-bundle.pem"
 ```
@@ -51,5 +53,5 @@ export SSL_CERT_FILE="$PWD/.gigachat-ca-bundle.pem"
 npm test
 npm run check
 npm run build
-uv run --with pytest pytest -q
+(cd backend && uv run --with pytest pytest -q)
 ```
