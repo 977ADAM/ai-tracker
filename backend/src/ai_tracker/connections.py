@@ -11,10 +11,7 @@ from uuid import uuid4
 
 
 SERVICE = "ai-tracker"
-PRESETS = {
-    "gigachat": {"id": "gigachat", "name": "GigaChat", "kind": "gigachat", "endpoint": None, "model": "GigaChat", "scope": "GIGACHAT_API_PERS"},
-    "deepseek": {"id": "deepseek", "name": "DeepSeek", "kind": "openai", "endpoint": "https://api.deepseek.com/chat/completions", "model": "deepseek-flash"},
-}
+PRESETS = {}
 
 
 class ConnectionError(ValueError):
@@ -126,9 +123,6 @@ class ConnectionStore:
     def _all(self) -> list[dict]:
         data = self._read()
         presets = [dict(value, **data.get(key, {})) for key, value in PRESETS.items()]
-        if "gigachat" not in data:
-            presets[0]["scope"] = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
-        presets[0]["model"] = os.getenv("GIGACHAT_MODEL", "GigaChat")
         return presets + data.get("custom", [])
 
     def list_connections(self) -> list[dict]:
