@@ -1,7 +1,7 @@
 [project]
 name = "ai-tracker"
 version = "0.1.0"
-description = "Add your description here"
+description = "Локальный API проверки упоминаний бренда в ответах ИИ-моделей"
 readme = "README.md"
 authors = [
     { name = "977ADAM", email = "977team.95@gmail.com" }
@@ -14,5 +14,18 @@ dependencies = [
     "uvicorn>=0.30,<1"
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8"
+]
+
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]

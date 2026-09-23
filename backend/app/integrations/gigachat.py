@@ -1,23 +1,30 @@
-"""Small client for the official GigaChat API."""
+"""Adapter for the official GigaChat API, which authenticates with OAuth."""
+
+from __future__ import annotations
 
 import time
 from uuid import uuid4
 
 import httpx
 
-from .providers import ProviderError
-
+from app.core.errors import ProviderError
 
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 CHAT_URL = "https://api.giga.chat/v1/chat/completions"
+DEFAULT_MODEL = "GigaChat"
+CONNECT_TIMEOUT = 20
+READ_TIMEOUT = 60
+TOKEN_SAFETY_MARGIN = 60
 
 
 class GigaChatClient:
+    """Acquires one access token per run and reuses it for every prompt."""
+
     def __init__(
         self,
         auth_key: str,
         scope: str,
-        model: str = "GigaChat",
+        model: str = DEFAULT_MODEL,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.auth_key = auth_key
@@ -25,15 +32,14 @@ class GigaChatClient:
         self.model = model
         self.http = httpx.Client(
             transport=transport,
-            timeout=httpx.Timeout(connect=20, read=60, write=20, pool=20),
+            timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=CONNECT_TIMEOUT, pool=CONNECT_TIMEOUT),
         )
         self._token: str | None = None
         self._token_expiry = 0.0
 
     def _access_token(self) -> str:
-        if self._token and time.time() < self._token_expiry - 60:
+        if self._token and time.time() < self._token_expiry - TOKEN_SAFETY_MARGIN:
             return self._token
-
         try:
             response = self.http.post(
                 AUTH_URL,

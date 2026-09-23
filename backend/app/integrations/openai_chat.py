@@ -1,11 +1,18 @@
 """Adapter for bearer-token Chat Completions APIs."""
 
+from __future__ import annotations
+
 import httpx
 
-from .providers import ProviderError
+from app.core.errors import ProviderError
+
+CONNECT_TIMEOUT = 20
+READ_TIMEOUT = 60
 
 
 class OpenAIChatClient:
+    """Sends one user message and returns the assistant text."""
+
     def __init__(
         self,
         api_key: str,
@@ -22,11 +29,14 @@ class OpenAIChatClient:
         self.http = httpx.Client(
             transport=transport,
             follow_redirects=False,
-            timeout=httpx.Timeout(connect=20, read=60, write=20, pool=20),
+            timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=CONNECT_TIMEOUT, pool=CONNECT_TIMEOUT),
         )
 
     def answer(self, prompt: str) -> str:
-        body = {"model": self.model, "messages": [{"role": "user", "content": prompt}]}
+        body: dict[str, object] = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
         if self.thinking_disabled:
             body["thinking"] = {"type": "disabled"}
         try:
@@ -38,13 +48,7 @@ class OpenAIChatClient:
         except httpx.RequestError as exc:
             raise ProviderError("Не удалось установить соединение с API модели") from exc
 
-        if response.status_code in (401, 403):
-            raise ProviderError("Ошибка авторизации: проверьте ключ API")
-        if response.status_code == 429:
-            raise ProviderError("Превышен лимит запросов API. Повторите позже")
-        if response.status_code < 200 or response.status_code >= 300:
-            raise ProviderError("Сервис модели временно недоступен")
-
+        self._check_status(response)
         try:
             content = response.json()["choices"][0]["message"]["content"]
             if not isinstance(content, str) or not content.strip():
@@ -55,3 +59,12 @@ class OpenAIChatClient:
 
     def close(self) -> None:
         self.http.close()
+
+    @staticmethod
+    def _check_status(response: httpx.Response) -> None:
+        if response.status_code in (401, 403):
+            raise ProviderError("Ошибка авторизации: проверьте ключ API")
+        if response.status_code == 429:
+            raise ProviderError("Превышен лимит запросов API. Повторите позже")
+        if not 200 <= response.status_code < 300:
+            raise ProviderError("Сервис модели временно недоступен")
