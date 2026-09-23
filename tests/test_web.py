@@ -2,6 +2,8 @@ from fastapi.testclient import TestClient
 
 from ai_tracker.gigachat import ProviderError
 from ai_tracker.web import create_app
+from ai_tracker.connections import ConnectionStore
+from test_connections import MemorySecrets
 
 
 class FakeProvider:
@@ -15,9 +17,9 @@ class FakeProvider:
         return "Ромашка рекомендует этот вариант"
 
 
-def test_returns_answers_and_summary():
+def test_returns_answers_and_summary(tmp_path):
     provider = FakeProvider()
-    response = TestClient(create_app(provider)).post(
+    response = TestClient(create_app(provider, store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"])).post(
         "/api/check",
         json={"brand": " Ромашка ", "domain": " example.ru ", "prompts": ["успех", "другой"]},
     )
@@ -35,8 +37,8 @@ def test_returns_answers_and_summary():
     assert provider.prompts == ["успех", "другой"]
 
 
-def test_partial_failure_is_not_negative_mention():
-    response = TestClient(create_app(FakeProvider())).post(
+def test_partial_failure_is_not_negative_mention(tmp_path):
+    response = TestClient(create_app(FakeProvider(), store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"])).post(
         "/api/check", json={"brand": "Ромашка", "prompts": ["успех", "ошибка"]}
     )
     assert response.status_code == 200
@@ -46,19 +48,67 @@ def test_partial_failure_is_not_negative_mention():
     }
 
 
-def test_invalid_request_does_not_call_provider():
+def test_invalid_request_does_not_call_provider(tmp_path):
     provider = FakeProvider()
-    response = TestClient(create_app(provider)).post(
+    response = TestClient(create_app(provider, store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"])).post(
         "/api/check", json={"brand": "", "prompts": ["вопрос"]}
     )
     assert response.status_code == 400
     assert provider.prompts == []
 
 
-def test_missing_credentials_is_service_error(monkeypatch):
+def test_missing_credentials_is_service_error(monkeypatch, tmp_path):
     monkeypatch.delenv("GIGACHAT_AUTH_KEY", raising=False)
-    response = TestClient(create_app()).post(
+    response = TestClient(create_app(store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"])).post(
         "/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"]}
     )
-    assert response.status_code == 503
-    assert "GIGACHAT_AUTH_KEY" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["checks"][0]["summary"]["failed"] == 1
+
+
+def test_multiple_providers_are_isolated(tmp_path):
+    secrets = MemorySecrets()
+    store = ConnectionStore(tmp_path, secrets)
+    store.save_connection({"api_key": "one"}, "gigachat")
+    store.save_connection({"api_key": "two"}, "deepseek")
+    calls = []
+
+    class Stub:
+        def __init__(self, id):
+            self.id = id
+
+        def answer(self, prompt):
+            calls.append((self.id, prompt))
+            if self.id == "deepseek":
+                raise ProviderError("Сервис временно недоступен")
+            return "Ромашка"
+
+        def close(self):
+            pass
+
+    client = TestClient(create_app(store=store, provider_factory=lambda connection, key: Stub(connection["id"]), allowed_hosts=["testserver"]))
+    response = client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat", "deepseek"]})
+    assert response.status_code == 200
+    checks = response.json()["checks"]
+    assert checks[0]["summary"] == {"successful": 1, "failed": 0, "mentioned": 1}
+    assert checks[1]["summary"] == {"successful": 0, "failed": 1, "mentioned": 0}
+    assert calls == [("gigachat", "вопрос"), ("deepseek", "вопрос")]
+
+
+def test_invalid_provider_selection_prevents_calls(tmp_path):
+    store = ConnectionStore(tmp_path, MemorySecrets())
+    calls = []
+    client = TestClient(create_app(store=store, provider_factory=lambda c, k: calls.append(c), allowed_hosts=["testserver"]))
+    for ids in (["missing"], ["gigachat", "gigachat"], ["gigachat"] * 6, []):
+        assert client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ids}).status_code == 400
+    assert calls == []
+
+
+def test_settings_api_never_returns_key(tmp_path):
+    client = TestClient(create_app(store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"]))
+    created = client.post("/api/providers", json={"name": "Test", "kind": "openai", "endpoint": "https://api.example.com/v1/chat/completions", "model": "x", "api_key": "secret"})
+    assert created.status_code == 200
+    assert "secret" not in created.text
+    assert "secret" not in client.get("/api/providers").text
+    assert client.post("/api/providers", json={"name": "Bad", "kind": "openai", "endpoint": "http://localhost/chat/completions", "model": "x", "api_key": "secret"}).status_code == 400
+    assert client.delete(f"/api/providers/{created.json()['id']}").status_code == 200
