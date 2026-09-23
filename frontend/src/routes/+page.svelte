@@ -71,7 +71,7 @@
 
 <svelte:head><title>ИИ-трекинг · Проверка бренда</title></svelte:head>
 
-<main class="mx-auto max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
+<main class="mx-48 max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
   <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-6 text-xs font-medium text-muted">
     <a href="/" class="hover:text-accent focus-visible:outline-2 focus-visible:outline-accent">Инструменты</a>
     <span aria-hidden="true">/</span>
@@ -83,7 +83,7 @@
     <div class="pointer-events-none absolute -right-8 -bottom-48 size-96 rounded-full bg-accent/30 blur-3xl" aria-hidden="true"></div>
     <div class="relative max-w-4xl">
       <p class="mb-5 text-xs font-bold tracking-[0.16em] text-emerald-200 uppercase">Мониторинг бренда в ИИ-ответах Google & ChatGPT</p>
-      <h1 class="max-w-3xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl lg:text-5xl">Узнайте, упоминает ли ИИ ваш бренд</h1>
+      <h1 class="max-w-4xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl lg:text-5xl">Узнайте, упоминает ли ИИ ваш бренд</h1>
       <p class="mt-6 max-w-3xl text-sm leading-7 text-emerald-50/90 sm:text-base">
         Анализируйте AI-ответы в поисковой выдаче Google и Yandex для ваших ключевых слов. Инструмент показывает наличие AI-ответа, проверяет представленность вашего сайта и бренда в источниках ответов, определяет позицию домена, а также выводит топ доменов и URL, наиболее часто упоминаемых в AI-ответах.
       </p>
@@ -91,30 +91,22 @@
   </section>
 
   <section class="mt-8 overflow-hidden rounded-3xl border border-line bg-white shadow-sm shadow-ink/5" aria-labelledby="check-title">
-    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-5 sm:px-8">
-      <div>
-        <p class="text-xs font-bold tracking-[0.14em] text-accent uppercase">Шаг 1 · Параметры</p>
-        <h2 id="check-title" class="mt-1 text-xl font-bold tracking-tight sm:text-2xl">Настройте проверку</h2>
-      </div>
-      <span class="rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-dark">До 20 вопросов за запуск</span>
-    </div>
-
     <form onsubmit={submit} novalidate class="space-y-7 px-6 py-7 sm:px-8">
       <div class="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
         <div>
           <label for="prompts" class="mb-2 block text-sm font-semibold text-ink">Вопросы клиентов <span class="text-rose-600">*</span></label>
-          <textarea id="prompts" class="block min-h-56 w-full resize-y rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm leading-6 text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" bind:value={promptsText} placeholder="Как выбрать сервис доставки цветов?&#10;Где заказать букет сегодня?"></textarea>
+          <textarea id="prompts" class="block min-h-56 w-full resize-y rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm leading-6 text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" bind:value={promptsText}></textarea>
           <div class="mt-2 flex justify-between gap-4 text-xs text-muted"><p>Каждый вопрос — с новой строки, до 500 символов</p><span class="shrink-0">{prompts.length} / 20</span></div>
         </div>
         <div class="space-y-5">
           <div>
             <label for="brand" class="mb-2 block text-sm font-semibold text-ink">Название бренда <span class="text-rose-600">*</span></label>
-            <input id="brand" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength="100" bind:value={brand} placeholder="Например, Ромашка" />
+            <input id="brand" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength="100" bind:value={brand} />
             <p class="mt-2 text-xs text-muted">Ищем именно это название в тексте ответа</p>
           </div>
           <div>
             <label for="domain" class="mb-2 block text-sm font-semibold text-ink">Сайт <span class="font-normal text-muted">необязательно</span></label>
-            <input id="domain" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength="253" bind:value={domain} placeholder="example.ru" />
+            <input id="domain" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength="253" bind:value={domain} />
             <p class="mt-2 text-xs text-muted">Покажем для контекста; ссылки пока не проверяем</p>
           </div>
         </div>
