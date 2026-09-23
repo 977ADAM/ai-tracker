@@ -17,7 +17,7 @@ install:
 	cd frontend && npm ci
 
 backend:
-	@cd backend && uv run uvicorn app.web:app --reload --host 127.0.0.1 --port 8000
+	@cd backend && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 frontend:
 	cd frontend && npm run dev
