@@ -91,7 +91,6 @@
             </label>
           {/each}
         </div>
-        <p class="mt-3 text-xs text-muted">{data.form ? `Выберите до ${data.form.limits.max_providers} моделей.` : 'Выберите модели.'} <a class="font-semibold text-accent underline underline-offset-2 hover:text-accent-dark" href="/settings">Настроить API</a></p>
       </fieldset>
 
       {#if error}<p role="alert" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>{/if}
