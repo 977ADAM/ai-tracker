@@ -1,4 +1,4 @@
-import type { PageServerLoad } from '../$types';
+import type { PageServerLoad } from '$lib/types';
 import type { PublicProvider } from '$lib/types';
 import { publicProvider, pythonApi } from '$lib/server/python-api';
 
@@ -9,7 +9,8 @@ export const load = (async () => {
     const value: unknown = await response.json();
     if (!Array.isArray(value)) throw new Error('Invalid provider list');
     return { providers: value.map((item) => publicProvider(item) as PublicProvider), loadError: '' };
-  } catch {
-    return { providers: [] as PublicProvider[], loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+  } catch (err) {
+    console.error('[providers] load failed:', err);
+    return { providers: [], loadError: '...' };
   }
 }) satisfies PageServerLoad;
