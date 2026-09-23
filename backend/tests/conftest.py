@@ -1,19 +1,25 @@
-"""Shared fixtures: a temporary config dir, fake credentials, and an HTTP client."""
+"""Shared fixtures: a temporary config dir, fake credentials, and an HTTP client.
+
+`app.main` assembles the application at import, so the fixtures here swap its
+container through FastAPI's dependency overrides instead of rebuilding the app.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.deps import build_container, get_container
 from app.core.config import Settings
 from app.db.connections import ConnectionRepository
-from app.main import create_app
+from app.main import app as application
 from tests.fakes import TEST_PRESETS, MemorySecrets
 
-TEST_HOST = "testserver"
+# The trusted-host guard allows loopback only, so the test client speaks as 127.0.0.1.
+TEST_BASE_URL = "http://127.0.0.1"
 
 ENV_KEY_VARIABLES = ("GIGACHAT_AUTH_KEY", "DEEPSEEK_API_KEY")
 
@@ -37,8 +43,8 @@ def config_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def settings(config_dir: Path) -> Settings:
-    """A settings object that allows the test client host and ships test presets."""
-    return Settings(config_dir=config_dir, allowed_hosts=(TEST_HOST,), presets=TEST_PRESETS)
+    """Test settings: a temporary config dir and injected built-in templates."""
+    return Settings(config_dir=config_dir, presets=TEST_PRESETS)
 
 
 @pytest.fixture
@@ -56,11 +62,21 @@ def repository(settings: Settings, secrets: MemorySecrets) -> ConnectionReposito
 def make_client(
     settings: Settings,
     secrets: MemorySecrets,
-) -> Callable[..., TestClient]:
-    def build(**overrides: object) -> TestClient:
-        return TestClient(create_app(settings, secrets=secrets, **overrides))
+) -> Iterator[Callable[..., TestClient]]:
+    def build(
+        *,
+        client_options: dict[str, object] | None = None,
+        **overrides: object,
+    ) -> TestClient:
+        application.dependency_overrides[get_container] = lambda: build_container(
+            settings,
+            secrets=secrets,
+            **overrides,
+        )
+        return TestClient(application, base_url=TEST_BASE_URL, **(client_options or {}))
 
-    return build
+    yield build
+    application.dependency_overrides.clear()
 
 
 @pytest.fixture

@@ -1,44 +1,49 @@
-"""Composition root: build the FastAPI application and wire its dependencies."""
+"""Composition root: assemble the FastAPI application.
+
+The application is built once at import, so `uvicorn app.main:app` needs no
+factory call. Tests replace `get_container` through `dependency_overrides`.
+"""
 
 from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.deps import build_container
-from app.api.errors import register_error_handlers
+from app.api.errors import app_error_handler, unhandled_error_handler
 from app.api.router import api_router
 from app.core.config import Settings
-from app.db.connections import ConnectionRepository
-from app.db.secrets import SecretStore
-from app.domain.providers import ProviderFactory
+from app.core.errors import AppError
 
 TITLE = "ИИ-трекинг API"
+API_PREFIX = "/api"
+
+# No-op when the host application (or pytest) already configured logging.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
+
+log = logging.getLogger("ai_tracker")
 
 
-def create_app(
-    settings: Settings | None = None,
-    *,
-    repository: ConnectionRepository | None = None,
-    secrets: SecretStore | None = None,
-    provider_factory: ProviderFactory | None = None,
-) -> FastAPI:
-    """Build one app instance. Tests pass a settings object and fake collaborators."""
-    resolved = settings or Settings.from_env()
-    application = FastAPI(title=TITLE)
-    application.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=list(resolved.allowed_hosts),
-    )
-    application.state.container = build_container(
-        resolved,
-        repository=repository,
-        secrets=secrets,
-        provider_factory=provider_factory,
-    )
-    register_error_handlers(application)
-    application.include_router(api_router)
-    return application
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    settings: Settings = application.state.settings
+    log.info("ИИ-трекинг API запущен: настройки подключений в %s", settings.config_dir)
+    yield
+    log.info("ИИ-трекинг API остановлен")
 
 
-app = create_app()
+settings = Settings.from_env()
+container = build_container(settings)
+
+app = FastAPI(title=TITLE, lifespan=lifespan)
+
+app.state.settings = settings
+app.state.container = container
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
+app.add_exception_handler(AppError, app_error_handler)
+app.add_exception_handler(Exception, unhandled_error_handler)
+app.include_router(api_router, prefix=API_PREFIX)

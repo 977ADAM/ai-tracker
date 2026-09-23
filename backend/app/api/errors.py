@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+import logging
+
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.core.errors import AppError, ConfigurationError, StorageError, ValidationError
+
+log = logging.getLogger("ai_tracker")
 
 # The BFF reads a plain string `detail`, so every handler below keeps that shape.
 STATUS_BY_ERROR: tuple[tuple[type[AppError], int], ...] = (
@@ -23,8 +27,11 @@ def status_for(error: AppError) -> int:
 
 
 async def app_error_handler(request: Request, error: AppError) -> JSONResponse:
+    """Report an expected application error with its user-facing message."""
     return JSONResponse({"detail": str(error)}, status_code=status_for(error))
 
 
-def register_error_handlers(application: FastAPI) -> None:
-    application.add_exception_handler(AppError, app_error_handler)
+async def unhandled_error_handler(request: Request, error: Exception) -> JSONResponse:
+    """Keep an unexpected crash JSON-shaped and free of internals."""
+    log.exception("Необработанная ошибка при обработке %s", request.url.path)
+    return JSONResponse({"detail": "Внутренняя ошибка сервиса"}, status_code=500)

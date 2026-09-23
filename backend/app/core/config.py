@@ -21,8 +21,8 @@ DEFAULT_ENV_API_KEYS = {
 
 # Built-in connection templates. Empty means the app ships no preconfigured
 # connections and every connection is created by the user in the settings
-# screen. Inject ConnectionPreset values here (or through create_app) to ship
-# templates again; the preset code paths stay covered by the test suite.
+# screen. Fill this tuple to ship templates again; the preset code paths stay
+# covered by the test suite, which injects its own Settings.
 BUILTIN_PRESETS: tuple[ConnectionPreset, ...] = ()
 
 
