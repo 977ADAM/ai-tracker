@@ -5,13 +5,11 @@ from uuid import uuid4
 
 import httpx
 
+from .providers import ProviderError
+
 
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 CHAT_URL = "https://api.giga.chat/v1/chat/completions"
-
-
-class ProviderError(Exception):
-    """A safe error message intended for the app user."""
 
 
 class GigaChatClient:
@@ -84,6 +82,9 @@ class GigaChatClient:
         except (ValueError, TypeError, KeyError, IndexError) as exc:
             raise ProviderError("Некорректный ответ GigaChat") from exc
         return content
+
+    def close(self) -> None:
+        self.http.close()
 
     @staticmethod
     def _check_status(response: httpx.Response) -> None:

@@ -66,3 +66,9 @@ def test_timeout_is_safe_error():
     with pytest.raises(ProviderError, match="соединение") as error:
         client.answer("вопрос")
     assert "hidden-address" not in str(error.value)
+
+
+def test_close_releases_http_client():
+    client = GigaChatClient("key", "GIGACHAT_API_PERS")
+    client.close()
+    assert client.http.is_closed
