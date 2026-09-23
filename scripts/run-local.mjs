@@ -9,7 +9,7 @@ export function commands(mode) {
   const python = { command: 'uv', args: ['run', 'ai-tracker'], env: {} };
   const web = mode === 'dev'
     ? { command: process.execPath, args: ['node_modules/vite/bin/vite.js', 'dev', '--host', '127.0.0.1', '--port', '5173', '--strictPort'], env: {} }
-    : { command: process.execPath, args: ['build/index.js'], env: { HOST: '127.0.0.1', PORT: '5173' } };
+    : { command: process.execPath, args: ['build/index.js'], env: { HOST: '127.0.0.1', PORT: '5173', ORIGIN: 'http://127.0.0.1:5173' } };
   return [python, web];
 }
 
@@ -34,7 +34,7 @@ export function startProcesses(specs, { stdio = 'inherit' } = {}) {
         console.error(`Не удалось запустить ${index === 0 ? 'Python API' : 'SvelteKit'}: ${error.code || 'ошибка процесса'}`);
         stop();
       });
-      child.on('exit', (code, signal) => {
+      child.on('close', (code, signal) => {
         if (!stopping) {
           exitCode = code || (signal ? 1 : 0);
           if (exitCode) console.error('Один из локальных сервисов остановился. Проверьте, не занят ли его порт.');

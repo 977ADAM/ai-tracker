@@ -8,6 +8,7 @@ test('dev and built modes bind the web process to loopback', () => {
   assert.deepEqual(python.args, ['run', 'ai-tracker']);
   assert.match(dev.args.join(' '), /127\.0\.0\.1/);
   assert.equal(built.env.HOST, '127.0.0.1');
+  assert.equal(built.env.ORIGIN, 'http://127.0.0.1:5173');
 });
 
 test('stopping the runner terminates both children', async () => {
@@ -19,4 +20,18 @@ test('stopping the runner terminates both children', async () => {
   running.stop();
   await running.done;
   assert.ok(running.children.every((child) => child.exitCode !== null || child.signalCode !== null));
+});
+
+test('a missing executable stops the other child and exits nonzero', async () => {
+  const running = startProcesses([
+    { command: 'definitely-missing-ai-tracker-command', args: [] },
+    { command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }
+  ], { stdio: 'ignore' });
+  let timeout;
+  const code = await Promise.race([
+    running.done,
+    new Promise((_, reject) => { timeout = setTimeout(() => { running.stop(); reject(new Error('runner did not finish')); }, 1000); })
+  ]).finally(() => clearTimeout(timeout));
+  assert.equal(code, 1);
+  assert.ok(running.children[1].exitCode !== null || running.children[1].signalCode !== null);
 });
