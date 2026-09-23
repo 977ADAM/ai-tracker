@@ -1,4 +1,4 @@
-import type { RequestHandler } from './$types';
+import type { RequestHandler } from '$lib/types';
 import { providerPath, proxyJson } from '$lib/server/python-api';
 
 export const PUT: RequestHandler = ({ request, params }) => {
