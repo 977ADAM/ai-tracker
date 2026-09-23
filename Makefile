@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install backend frontend frontend-prod build check test verify
+.PHONY: help install backend frontend frontend-prod build check
 
 help:
 	@echo "install  Install Python and Node.js dependencies"
@@ -30,9 +30,3 @@ build:
 
 check:
 	cd frontend && npm run check
-
-test:
-	cd frontend && npm test
-	cd backend && uv run --with pytest pytest -q
-
-verify: test check build
