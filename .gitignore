@@ -9,3 +9,8 @@ wheels/
 # Virtual environments
 .venv
 .gigachat-ca-bundle.pem
+
+# SvelteKit and Node
+node_modules/
+.svelte-kit/
+.vite/
