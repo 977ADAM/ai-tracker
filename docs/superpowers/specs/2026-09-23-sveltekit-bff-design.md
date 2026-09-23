@@ -6,6 +6,8 @@ Make SvelteKit 2, Svelte 5, and Tailwind CSS the local app's user interface. The
 
 The product remains a local, single-user brand mention checker. It preserves GigaChat, DeepSeek, custom OpenAI-compatible connections, up to 20 prompts, 1–5 selected providers, per-provider result groups, and the distinction between API answers and web/search citations. A single-command local start is the working assumption; the user has not selected a different launch workflow.
 
+ChatGPT and Яндекс (Алиса AI) are planned for a later stage. This migration does not add their dedicated connection templates or adapters. It preserves the existing provider registry and connection settings so those services can be added without rebuilding the frontend workflow. A service with an OpenAI Chat Completions-compatible API may use the current custom-connection form; a service with a different protocol will need a Python adapter and registry entry in that later stage. The product should describe API answers accurately and not imply that an API call reproduces the consumer chat application's answer.
+
 ## Alternatives considered
 
 1. **Thin BFF (selected).** SvelteKit server routes forward validated requests to the existing FastAPI endpoints. Python remains the sole source of provider and secret rules. This minimizes duplicated behavior and keeps the migration focused on the UI and server boundary.
