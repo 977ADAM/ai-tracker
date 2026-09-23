@@ -11,7 +11,15 @@ from uuid import uuid4
 
 
 SERVICE = "ai-tracker"
-PRESETS = {}
+PRESETS = {
+    "gigachat": {"id": "gigachat", "name": "GigaChat", "kind": "gigachat", "endpoint": None, "model": "GigaChat", "scope": "GIGACHAT_API_PERS"},
+    "deepseek": {"id": "deepseek", "name": "DeepSeek", "kind": "openai", "endpoint": "https://api.deepseek.com/chat/completions", "model": "deepseek-flash"},
+}
+SCOPE_OPTIONS = [
+    {"value": "GIGACHAT_API_PERS", "label": "Персональный"},
+    {"value": "GIGACHAT_API_B2B", "label": "Бизнес"},
+    {"value": "GIGACHAT_API_CORP", "label": "Корпоративный"},
+]
 
 
 class ConnectionError(ValueError):
@@ -132,7 +140,14 @@ class ConnectionStore:
                 configured = bool(self.get_key(item["id"]))
             except ConnectionError:
                 configured = False
-            result.append(dict(item, configured=configured))
+            preset = item["id"] in PRESETS
+            fields = ["scope", "api_key"] if item["id"] == "gigachat" else ["api_key"] if preset else ["name", "endpoint", "model", "api_key"]
+            result.append(dict(item, configured=configured, editable_fields=fields, can_reset=preset, can_delete=not preset,
+                               status_label="Готово к проверке" if configured else "Нужен API-ключ",
+                               delete_label="Сбросить ключ" if preset else "Удалить",
+                               delete_prompt=(f"Удалить сохранённый ключ «{item['name']}»? Ключ из переменной среды может сохранить подключение активным." if preset
+                                              else f"Удалить подключение «{item['name']}» и его ключ?"),
+                               delete_success="Сохранённый ключ сброшен" if preset else "Подключение удалено"))
         return result
 
     def save_connection(self, payload: dict, connection_id: str | None = None) -> dict:
@@ -148,7 +163,7 @@ class ConnectionStore:
                 raise ConnectionError("У встроенного подключения можно изменить только ключ и область доступа")
             updated = dict(previous)
             if "scope" in payload:
-                if payload["scope"] not in {"GIGACHAT_API_PERS", "GIGACHAT_API_B2B", "GIGACHAT_API_CORP"}:
+                if payload["scope"] not in {option["value"] for option in SCOPE_OPTIONS}:
                     raise ConnectionError("Некорректная область доступа GigaChat")
                 updated["scope"] = payload["scope"]
             if "scope" in payload:
@@ -160,7 +175,7 @@ class ConnectionStore:
                 raise ConnectionError("Укажите название до 100 символов")
             if not isinstance(model, str) or not 1 <= len(model.strip()) <= 100:
                 raise ConnectionError("Укажите модель до 100 символов")
-            if merged.get("kind") != "openai":
+            if merged.get("kind", "openai") != "openai":
                 raise ConnectionError("Поддерживается только OpenAI-совместимый API")
             endpoint = validate_endpoint(merged.get("endpoint"))
             updated = {"id": connection_id or str(uuid4()), "name": name.strip(), "kind": "openai", "endpoint": endpoint, "model": model.strip()}

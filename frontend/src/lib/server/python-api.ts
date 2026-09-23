@@ -1,4 +1,4 @@
-import type { ApiPath } from '$lib/types';
+import type { ApiPath, FormConfig, PublicProvider } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -27,7 +27,7 @@ export function providerPath(id: string): ApiPath {
 }
 
 function validPath(path: ApiPath): boolean {
-  if (path === '/api/providers' || path === '/api/check') return true;
+  if (path === '/api/providers' || path === '/api/check' || path === '/api/form') return true;
   if (!path.startsWith('/api/providers/')) return false;
   try { return providerPath(decodeURIComponent(path.slice('/api/providers/'.length))) === path; }
   catch { return false; }
@@ -35,16 +35,24 @@ function validPath(path: ApiPath): boolean {
 
 export function publicProvider(value: unknown): Record<string, unknown> {
   const item = record(value);
-  const allowed = ['id', 'name', 'kind', 'endpoint', 'model', 'scope', 'configured'] as const;
+  const allowed = ['id', 'name', 'kind', 'endpoint', 'model', 'scope', 'configured', 'editable_fields', 'can_reset', 'can_delete', 'status_label', 'delete_label', 'delete_prompt', 'delete_success'] as const;
   return Object.fromEntries(allowed.filter((key) => key in item).map((key) => [key, item[key]]));
 }
 
 export function publicCheck(value: unknown): Record<string, unknown> {
   const item = record(value);
-  if (!Array.isArray(item.checks)) throw new Error('Invalid checks');
+  if (!Array.isArray(item.checks) || !Array.isArray(item.rows)) throw new Error('Invalid checks');
+  const summary = record(item.summary);
+  const publicResult = (raw: unknown) => {
+    const result = record(raw);
+    return { prompt: result.prompt, answer: result.answer, mentioned: result.mentioned, error: result.error, status: result.status };
+  };
   return {
     brand: item.brand,
     domain: item.domain,
+    summary: { successful: summary.successful, failed: summary.failed, mentioned: summary.mentioned, mention_percent: summary.mention_percent,
+      visibility_label: summary.visibility_label, mentions_label: summary.mentions_label, errors_label: summary.errors_label },
+    rows: item.rows.map((raw) => ({ ...publicResult(raw), provider_name: record(raw).provider_name })),
     checks: item.checks.map((raw) => {
       const group = record(raw);
       const summary = record(group.summary);
@@ -53,19 +61,42 @@ export function publicCheck(value: unknown): Record<string, unknown> {
         provider_id: group.provider_id,
         provider_name: group.provider_name,
         summary: { successful: summary.successful, failed: summary.failed, mentioned: summary.mentioned },
-        results: group.results.map((rawResult) => {
-          const result = record(rawResult);
-          return { prompt: result.prompt, answer: result.answer, mentioned: result.mentioned, error: result.error };
-        })
+        results: group.results.map(publicResult)
       };
     })
   };
+}
+
+export function publicForm(value: unknown): Record<string, unknown> {
+  const item = record(value);
+  const limits = record(item.limits);
+  if (!Array.isArray(item.scope_options) || !Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids)) throw new Error('Invalid form');
+  return { limits: { max_prompts: limits.max_prompts, max_providers: limits.max_providers, max_prompt_length: limits.max_prompt_length,
+    max_brand_length: limits.max_brand_length, max_domain_length: limits.max_domain_length },
+    new_provider_fields: item.new_provider_fields, default_provider_ids: item.default_provider_ids, scope_options: item.scope_options.map((option) => {
+      const entry = record(option);
+      return { value: entry.value, label: entry.label };
+    }) };
 }
 
 export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<Response> {
   if (!validPath(path)) throw new Error('Invalid Python API path');
   const signal = init.signal ?? (path === '/api/check' ? undefined : AbortSignal.timeout(10_000));
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
+}
+
+export async function loadPageData(): Promise<{ providers: PublicProvider[]; form: FormConfig | null; loadError: string }> {
+  try {
+    const [providerResponse, formResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form')]);
+    if (!providerResponse.ok || !formResponse.ok ||
+        !/^application\/json(?:\s*;|$)/i.test(providerResponse.headers.get('content-type') || '') ||
+        !/^application\/json(?:\s*;|$)/i.test(formResponse.headers.get('content-type') || '')) throw new Error('Invalid API response');
+    const providers: unknown = await providerResponse.json();
+    if (!Array.isArray(providers)) throw new Error('Invalid providers');
+    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), form: publicForm(await formResponse.json()) as FormConfig, loadError: '' };
+  } catch {
+    return { providers: [], form: null, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+  }
 }
 
 export async function proxyJson(request: Request, path: ApiPath, method: string): Promise<Response> {
@@ -104,6 +135,7 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       if (!Array.isArray(value)) throw new Error('Invalid providers');
       return json(value.map(publicProvider), upstream.status);
     }
+    if (path === '/api/form' && method === 'GET') return json(publicForm(value), upstream.status);
     if (path.startsWith('/api/providers/') && method === 'DELETE') return json({ deleted: record(value).deleted === true }, upstream.status);
     if (path.startsWith('/api/providers') && method !== 'DELETE') return json(publicProvider(value), upstream.status);
     if (path === '/api/check') return json(publicCheck(value), upstream.status);

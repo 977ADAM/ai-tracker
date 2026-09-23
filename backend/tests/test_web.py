@@ -35,12 +35,14 @@ def test_returns_answers_and_summary(tmp_path):
     body = response.json()
     assert body["brand"] == "Ромашка"
     assert body["domain"] == "example.ru"
-    assert body["summary"] == {"successful": 2, "failed": 0, "mentioned": 2}
+    assert body["summary"] == {"successful": 2, "failed": 0, "mentioned": 2, "mention_percent": 100,
+                               "visibility_label": "100%", "mentions_label": "2 из 2 успешных ответов", "errors_label": "0 ошибок API"}
     assert body["results"][0] == {
         "prompt": "успех",
         "answer": "Ромашка рекомендует этот вариант",
         "mentioned": True,
         "error": None,
+        "status": "mentioned",
     }
     assert provider.prompts == ["успех", "другой"]
 
@@ -50,9 +52,10 @@ def test_partial_failure_is_not_negative_mention(tmp_path):
         "/api/check", json={"brand": "Ромашка", "prompts": ["успех", "ошибка"]}
     )
     assert response.status_code == 200
-    assert response.json()["summary"] == {"successful": 1, "failed": 1, "mentioned": 1}
+    assert response.json()["summary"] == {"successful": 1, "failed": 1, "mentioned": 1, "mention_percent": 100,
+                                           "visibility_label": "100%", "mentions_label": "1 из 1 успешных ответов", "errors_label": "1 ошибка API"}
     assert response.json()["results"][1] == {
-        "prompt": "ошибка", "answer": None, "mentioned": None, "error": "Сервис временно недоступен"
+        "prompt": "ошибка", "answer": None, "mentioned": None, "error": "Сервис временно недоступен", "status": "error"
     }
 
 
@@ -139,3 +142,47 @@ def test_provider_constructor_failure_is_isolated(tmp_path):
     assert response.json()["checks"][0]["summary"]["failed"] == 1
     assert response.json()["checks"][1]["summary"]["successful"] == 1
     assert "private path" not in response.text
+
+
+def test_api_owns_form_rules_and_provider_actions(tmp_path):
+    client = TestClient(create_app(store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"]))
+    form = client.get("/api/form").json()
+    assert form["limits"]["max_prompts"] == 20
+    assert form["limits"]["max_providers"] == 5
+    assert form["scope_options"][0]["value"] == "GIGACHAT_API_PERS"
+    assert form["default_provider_ids"] == []
+    providers = client.get("/api/providers").json()
+    assert providers[0]["editable_fields"] == ["scope", "api_key"]
+    assert providers[0]["can_reset"] is True
+    assert providers[1]["editable_fields"] == ["api_key"]
+    assert providers[1]["can_reset"] is True
+
+
+def test_form_default_selection_comes_from_python_provider_state(tmp_path):
+    store = ConnectionStore(tmp_path, MemorySecrets())
+    store.save_connection({"api_key": "ready"}, "deepseek")
+    client = TestClient(create_app(store=store, allowed_hosts=["testserver"]))
+    assert client.get("/api/form").json()["default_provider_ids"] == ["deepseek"]
+
+
+def test_check_accepts_raw_form_text_and_returns_ready_report(tmp_path):
+    provider = FakeProvider()
+    client = TestClient(create_app(provider, store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"]))
+    response = client.post("/api/check", json={"brand": " Ромашка ", "prompts_text": "успех\n\nошибка\nдругой", "provider_ids": ["gigachat"]})
+    assert response.status_code == 200
+    report = response.json()
+    assert report["summary"] == {"successful": 2, "failed": 1, "mentioned": 2, "mention_percent": 100,
+                                 "visibility_label": "100%", "mentions_label": "2 из 2 успешных ответов", "errors_label": "1 ошибка API"}
+    assert [row["prompt"] for row in report["rows"]] == ["успех", "ошибка", "другой"]
+    assert report["rows"][1]["provider_name"] == "GigaChat"
+    assert report["rows"][1]["status"] == "error"
+    assert report["rows"][0]["status"] == "mentioned"
+    assert provider.prompts == ["успех", "ошибка", "другой"]
+    too_many = client.post("/api/check", json={"brand": "Ромашка", "prompts_text": "\n".join(["вопрос"] * 21), "provider_ids": ["gigachat"]})
+    assert too_many.status_code == 400
+
+
+def test_report_has_no_percent_when_every_call_fails(tmp_path):
+    client = TestClient(create_app(FakeProvider(), store=ConnectionStore(tmp_path, MemorySecrets()), allowed_hosts=["testserver"]))
+    response = client.post("/api/check", json={"brand": "Ромашка", "prompts_text": "ошибка"})
+    assert response.json()["summary"]["mention_percent"] is None

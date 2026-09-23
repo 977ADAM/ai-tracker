@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import CheckPage from '../src/routes/+page.svelte';
-import { load as loadCheckPage } from '../src/routes/+page.server';
+import { load as loadCheckPage } from '../src/routes/examination/+page.server';
 import SettingsPage from '../src/routes/settings/+page.svelte';
 import type { PublicProvider } from '$lib/types';
 

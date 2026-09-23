@@ -16,6 +16,11 @@ afterEach(() => {
 });
 
 describe('Python API bridge', () => {
+  it('forwards form metadata from Python without adding local rules', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 100, max_domain_length: 253 }, new_provider_fields: ['name', 'endpoint', 'model', 'api_key'], default_provider_ids: ['deepseek'], scope_options: [{ value: 'GIGACHAT_API_PERS', label: 'Персональный' }] }), { headers: { 'content-type': 'application/json' } }));
+    const response = await proxyJson(request('/api/form'), '/api/form', 'GET');
+    expect((await response.json()).limits.max_prompts).toBe(20);
+  });
   it('returns only public provider fields', async () => {
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify([
       { id: 'deepseek', name: 'DeepSeek', kind: 'openai', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', configured: true, api_key: 'private' }
@@ -78,7 +83,7 @@ describe('Python API bridge', () => {
   });
 
   it('keeps grouped results and upstream validation status without secret fields', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ brand: 'Ромашка', domain: '', checks: [{ provider_id: 'deepseek', provider_name: 'DeepSeek', summary: { successful: 1, failed: 0, mentioned: 1 }, results: [{ prompt: 'Вопрос', answer: 'Ромашка', mentioned: true, error: null, api_key: 'leak' }] }], api_key: 'leak' }), { headers: { 'content-type': 'application/json' } })).mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Некорректный запрос' }), { status: 400, headers: { 'content-type': 'application/json' } }));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ brand: 'Ромашка', domain: '', summary: { successful: 1, failed: 0, mentioned: 1, mention_percent: 100, visibility_label: '100%', mentions_label: '1 из 1 успешных ответов', errors_label: '0 ошибок API' }, rows: [{ provider_name: 'DeepSeek', prompt: 'Вопрос', answer: 'Ромашка', mentioned: true, error: null, status: 'mentioned', api_key: 'leak' }], checks: [{ provider_id: 'deepseek', provider_name: 'DeepSeek', summary: { successful: 1, failed: 0, mentioned: 1 }, results: [{ prompt: 'Вопрос', answer: 'Ромашка', mentioned: true, error: null, status: 'mentioned', api_key: 'leak' }] }], api_key: 'leak' }), { headers: { 'content-type': 'application/json' } })).mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Некорректный запрос' }), { status: 400, headers: { 'content-type': 'application/json' } }));
     const good = await proxyJson(request('/api/check', 'POST', { brand: 'Ромашка', prompts: ['Вопрос'], provider_ids: ['deepseek'] }), '/api/check', 'POST');
     const body = await good.json();
     expect(body.checks[0].results[0].answer).toBe('Ромашка');

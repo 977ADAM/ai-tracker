@@ -1,44 +1,17 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { CheckResponse, PublicProvider } from '$lib/types';
+  import type { CheckResponse, FormConfig, PublicProvider } from '$lib/types';
 
-  type Data = { providers: PublicProvider[]; loadError: string };
+  type Data = { providers: PublicProvider[]; form?: FormConfig | null; loadError: string };
   let { data }: { data: Data } = $props();
 
-  const initial = untrack(() => data.providers.find((provider) => provider.id === 'gigachat' && provider.configured)
-    ?? data.providers.find((provider) => provider.configured));
-  let selected = $state<string[]>(initial ? [initial.id] : []);
+  let selected = $state<string[]>(untrack(() => data.form?.default_provider_ids ?? []));
   let brand = $state('');
   let domain = $state('');
   let promptsText = $state('');
-  let prompts = $derived(promptsText.split(/\r?\n/).map((prompt) => prompt.trim()).filter(Boolean));
   let loading = $state(false);
   let error = $state(untrack(() => data.loadError));
   let report = $state<CheckResponse | null>(null);
-  let summary = $derived(report ? report.checks.reduce(
-    (total, check) => ({
-      successful: total.successful + check.summary.successful,
-      failed: total.failed + check.summary.failed,
-      mentioned: total.mentioned + check.summary.mentioned
-    }),
-    { successful: 0, failed: 0, mentioned: 0 }
-  ) : null);
-  let resultRows = $derived(report ? report.checks.flatMap((check) =>
-    check.results.map((result) => ({ providerName: check.provider_name, ...result }))
-  ) : []);
-  let mentionPercent = $derived(summary && summary.successful > 0
-    ? Math.round((summary.mentioned / summary.successful) * 100)
-    : null);
-
-  function errorCountLabel(count: number): string {
-    const lastTwo = count % 100;
-    const last = count % 10;
-    const word = lastTwo >= 11 && lastTwo <= 14 ? 'ошибок'
-      : last === 1 ? 'ошибка'
-      : last >= 2 && last <= 4 ? 'ошибки'
-      : 'ошибок';
-    return `${count} ${word} API`;
-  }
 
   function toggleProvider(id: string) {
     selected = selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id];
@@ -47,16 +20,12 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     error = '';
-    if (!selected.length || selected.length > 5) { error = 'Выберите от 1 до 5 настроенных моделей'; return; }
-    if (!brand.trim()) { error = 'Укажите название бренда'; return; }
-    if (!prompts.length || prompts.length > 20) { error = 'Укажите от 1 до 20 вопросов'; return; }
-    if (prompts.some((prompt) => prompt.length > 500)) { error = 'Каждый вопрос должен быть не длиннее 500 символов'; return; }
     loading = true;
     report = null;
     try {
       const response = await fetch('/api/check', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ brand: brand.trim(), domain: domain.trim(), prompts, provider_ids: selected })
+        body: JSON.stringify({ brand, domain, prompts_text: promptsText, provider_ids: selected })
       });
       const value = await response.json();
       if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'Не удалось выполнить проверку');
@@ -82,10 +51,10 @@
     <div class="pointer-events-none absolute -top-32 -right-24 size-96 rounded-full border border-white/15" aria-hidden="true"></div>
     <div class="pointer-events-none absolute -right-8 -bottom-48 size-96 rounded-full bg-accent/30 blur-3xl" aria-hidden="true"></div>
     <div class="relative max-w-4xl">
-      <p class="mb-5 text-xs font-bold tracking-[0.16em] text-emerald-200 uppercase">Мониторинг бренда в ИИ-ответах Google & ChatGPT</p>
+      <p class="mb-5 text-xs font-bold tracking-[0.16em] text-emerald-200 uppercase">Проверка ответов подключённых моделей</p>
       <h1 class="max-w-4xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl lg:text-5xl">Узнайте, упоминает ли ИИ ваш бренд</h1>
       <p class="mt-6 max-w-3xl text-sm leading-7 text-emerald-50/90 sm:text-base">
-        Анализируйте AI-ответы в поисковой выдаче Google и Yandex для ваших ключевых слов. Инструмент показывает наличие AI-ответа, проверяет представленность вашего сайта и бренда в источниках ответов, определяет позицию домена, а также выводит топ доменов и URL, наиболее часто упоминаемых в AI-ответах.
+        Задайте вопросы выбранным моделям и узнайте, встретилось ли название бренда в их ответах. Результат показывает ответы API на момент проверки.
       </p>
     </div>
   </section>
@@ -96,17 +65,17 @@
         <div>
           <label for="prompts" class="mb-2 block text-sm font-semibold text-ink">Вопросы клиентов <span class="text-rose-600">*</span></label>
           <textarea id="prompts" class="block min-h-56 w-full resize-y rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm leading-6 text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" bind:value={promptsText}></textarea>
-          <div class="mt-2 flex justify-between gap-4 text-xs text-muted"><p>Каждый вопрос — с новой строки, до 500 символов</p><span class="shrink-0">{prompts.length} / 20</span></div>
+          <div class="mt-2 flex justify-between gap-4 text-xs text-muted"><p>Каждый вопрос — с новой строки{data.form ? `, до ${data.form.limits.max_prompt_length} символов` : ''}</p><span class="shrink-0">{data.form ? `До ${data.form.limits.max_prompts} вопросов` : ''}</span></div>
         </div>
         <div class="space-y-5">
           <div>
             <label for="brand" class="mb-2 block text-sm font-semibold text-ink">Название бренда <span class="text-rose-600">*</span></label>
-            <input id="brand" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength="100" bind:value={brand} />
+            <input id="brand" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength={data.form?.limits.max_brand_length} bind:value={brand} />
             <p class="mt-2 text-xs text-muted">Ищем именно это название в тексте ответа</p>
           </div>
           <div>
             <label for="domain" class="mb-2 block text-sm font-semibold text-ink">Сайт <span class="font-normal text-muted">необязательно</span></label>
-            <input id="domain" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength="253" bind:value={domain} />
+            <input id="domain" class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15" type="text" maxlength={data.form?.limits.max_domain_length} bind:value={domain} />
             <p class="mt-2 text-xs text-muted">Покажем для контекста; ссылки пока не проверяем</p>
           </div>
         </div>
@@ -118,17 +87,17 @@
           {#each data.providers as provider (provider.id)}
             <label class:opacity-60={!provider.configured} class="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-white px-4 py-3 transition hover:border-accent/50">
               <input type="checkbox" class="mt-1 size-4 accent-accent" checked={selected.includes(provider.id)} disabled={!provider.configured} onchange={() => toggleProvider(provider.id)} />
-              <span class="min-w-0"><span class="block font-semibold text-ink">{provider.name}</span><span class="mt-0.5 block truncate text-xs text-muted">{provider.configured ? provider.model : 'Нужен API-ключ'}</span></span>
+              <span class="min-w-0"><span class="block font-semibold text-ink">{provider.name}</span><span class="mt-0.5 block truncate text-xs text-muted">{provider.configured ? provider.model : provider.status_label}</span></span>
             </label>
           {/each}
         </div>
-        <p class="mt-3 text-xs text-muted">Выберите от 1 до 5 моделей. <a class="font-semibold text-accent underline underline-offset-2 hover:text-accent-dark" href="/settings">Настроить API</a></p>
+        <p class="mt-3 text-xs text-muted">{data.form ? `Выберите до ${data.form.limits.max_providers} моделей.` : 'Выберите модели.'} <a class="font-semibold text-accent underline underline-offset-2 hover:text-accent-dark" href="/settings">Настроить API</a></p>
       </fieldset>
 
       {#if error}<p role="alert" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>{/if}
       <div class="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
         <p class="max-w-xl text-xs leading-5 text-muted">Вопросы отправляются выбранным моделям по очереди. Результат отражает ответы API на момент проверки.</p>
-        <button type="submit" disabled={loading} class="inline-flex min-h-12 items-center justify-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-wait disabled:opacity-60">{loading ? 'Проверяем…' : 'Проверить бренд'}<span aria-hidden="true">↗</span></button>
+        <button type="submit" disabled={loading || !data.form} class="inline-flex min-h-12 items-center justify-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-wait disabled:opacity-60">{loading ? 'Проверяем…' : 'Проверить бренд'}<span aria-hidden="true">↗</span></button>
       </div>
     </form>
   </section>
@@ -139,16 +108,16 @@
       <h2 class="mt-5 text-xl font-bold">Спрашиваем модели…</h2>
       <p class="mt-2 text-sm text-muted">Проверяем вопросы по очереди.</p>
     </section>
-  {:else if report && summary}
+  {:else if report}
     <section class="mt-10" aria-labelledby="summary-title">
       <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div><p class="text-xs font-bold tracking-[0.14em] text-accent uppercase">Шаг 2 · Результаты</p><h2 id="summary-title" class="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Сводка проверки</h2></div>
         <p class="text-xs text-muted">Бренд: {report.brand}{report.domain ? ` · Сайт: ${report.domain}` : ''}</p>
       </div>
       <div class="grid gap-4 sm:grid-cols-3">
-        <article class="rounded-2xl border border-line bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-muted">Видимость бренда</p><p class="mt-4 text-4xl font-bold tracking-tight text-accent">{mentionPercent === null ? '—' : `${mentionPercent}%`}</p><p class="mt-2 text-xs text-muted">{summary.successful ? `${summary.mentioned} из ${summary.successful} успешных ответов` : 'Нет успешных ответов'}</p></article>
-        <article class="rounded-2xl border border-line bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-muted">Успешные ответы</p><p class="mt-4 text-4xl font-bold tracking-tight text-ink">{summary.successful}</p><p class="mt-2 text-xs text-muted">От {report.checks.length} выбранных моделей</p></article>
-        <article class="rounded-2xl border border-line bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-muted">Ошибки запросов</p><p class="mt-4 text-4xl font-bold tracking-tight text-ink">{summary.failed}</p><p class="mt-2 text-xs text-muted">{errorCountLabel(summary.failed)}</p></article>
+        <article class="rounded-2xl border border-line bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-muted">Видимость бренда</p><p class="mt-4 text-4xl font-bold tracking-tight text-accent">{report.summary.visibility_label}</p><p class="mt-2 text-xs text-muted">{report.summary.mentions_label}</p></article>
+        <article class="rounded-2xl border border-line bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-muted">Успешные ответы</p><p class="mt-4 text-4xl font-bold tracking-tight text-ink">{report.summary.successful}</p><p class="mt-2 text-xs text-muted">От {report.checks.length} выбранных моделей</p></article>
+        <article class="rounded-2xl border border-line bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-muted">Ошибки запросов</p><p class="mt-4 text-4xl font-bold tracking-tight text-ink">{report.summary.failed}</p><p class="mt-2 text-xs text-muted">{report.summary.errors_label}</p></article>
       </div>
     </section>
 
@@ -158,8 +127,8 @@
         <table aria-label="Таблица результатов" class="w-full min-w-160 border-collapse text-left text-sm">
           <thead class="bg-canvas text-xs font-bold tracking-wide text-muted uppercase"><tr><th scope="col" class="px-6 py-3 sm:px-8">Вопрос</th><th scope="col" class="px-6 py-3">Модель</th><th scope="col" class="px-6 py-3">Ответ API</th><th scope="col" class="px-6 py-3">Бренд</th></tr></thead>
           <tbody class="divide-y divide-line">
-            {#each resultRows as row}
-              <tr class="align-top"><th scope="row" class="max-w-80 px-6 py-4 font-semibold text-ink sm:px-8">{row.prompt}</th><td class="px-6 py-4 text-muted">{row.providerName}</td><td class="px-6 py-4 text-muted">{row.error ? 'Ошибка API' : 'Получен'}</td><td class="px-6 py-4"><span class={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.error ? 'bg-rose-50 text-rose-700' : row.mentioned ? 'bg-accent-soft text-accent-dark' : 'bg-slate-100 text-slate-600'}`}>{row.error ? '—' : row.mentioned ? 'Есть' : 'Нет'}</span></td></tr>
+            {#each report.rows as row}
+              <tr class="align-top"><th scope="row" class="max-w-80 px-6 py-4 font-semibold text-ink sm:px-8">{row.prompt}</th><td class="px-6 py-4 text-muted">{row.provider_name}</td><td class="px-6 py-4 text-muted">{row.error ? 'Ошибка API' : 'Получен'}</td><td class="px-6 py-4"><span class={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.error ? 'bg-rose-50 text-rose-700' : row.mentioned ? 'bg-accent-soft text-accent-dark' : 'bg-slate-100 text-slate-600'}`}>{row.error ? '—' : row.mentioned ? 'Есть' : 'Нет'}</span></td></tr>
             {/each}
           </tbody>
         </table>

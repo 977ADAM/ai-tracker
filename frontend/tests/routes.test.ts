@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { GET, POST } from '../src/routes/api/providers/+server';
 import { PUT, DELETE } from '../src/routes/api/providers/[id]/+server';
 import { POST as CHECK } from '../src/routes/api/check/+server';
+import { GET as FORM } from '../src/routes/api/form/+server';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -12,11 +13,13 @@ it('routes browser requests to fixed Python paths', async () => {
   await PUT({ params: { id: 'deepseek' }, request: new Request('http://127.0.0.1:5173/api/providers/deepseek', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"api_key":"x"}' }) } as never);
   await DELETE({ params: { id: 'deepseek' }, request: new Request('http://127.0.0.1:5173/api/providers/deepseek', { method: 'DELETE' }) } as never);
   await CHECK({ request: new Request('http://127.0.0.1:5173/api/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"brand":"Ромашка"}' }) } as never);
+  await FORM({ request: new Request('http://127.0.0.1:5173/api/form') } as never);
   expect(spy.mock.calls.map(([url]) => url)).toEqual([
     'http://127.0.0.1:8000/api/providers',
     'http://127.0.0.1:8000/api/providers',
     'http://127.0.0.1:8000/api/providers/deepseek',
     'http://127.0.0.1:8000/api/providers/deepseek',
-    'http://127.0.0.1:8000/api/check'
+    'http://127.0.0.1:8000/api/check',
+    'http://127.0.0.1:8000/api/form'
   ]);
 });
