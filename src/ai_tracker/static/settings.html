@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ИИ-трекинг · Настройки API</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/settings.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header"><div class="shell header-inner"><a class="brand-mark" href="/"><span class="mark">✳</span><span>ИИ-трекинг</span></a><nav><a class="nav-link" href="/">Проверка</a><a class="nav-link" href="/settings">Настройки API</a></nav></div></header>
+    <main class="shell settings-main">
+      <section class="hero"><p class="eyebrow">ПОДКЛЮЧЕНИЯ</p><h1>Настройки API</h1><p class="hero-copy">Подключите GigaChat, DeepSeek или другой OpenAI-совместимый сервис. Ключи сохраняются в системном хранилище паролей этого компьютера.</p></section>
+      <div class="settings-grid">
+        <section class="panel settings-panel"><h2>Ваши подключения</h2><p id="settings-error" class="form-error" role="alert" hidden></p><div id="connections" class="connections" aria-live="polite">Загружаем подключения…</div></section>
+        <section class="panel settings-panel"><h2 id="form-title">Добавить подключение</h2><p class="muted">Поддерживается API формата OpenAI Chat Completions.</p>
+          <form id="connection-form" novalidate>
+            <div class="field"><label for="connection-name">Название</label><input id="connection-name" name="name" maxlength="100" placeholder="Например, моя модель" required></div>
+            <div class="field"><label for="endpoint">HTTPS-адрес API</label><input id="endpoint" name="endpoint" type="url" placeholder="https://api.example.com/v1/chat/completions" required><small>Адрес должен оканчиваться на /chat/completions</small></div>
+            <div class="field"><label for="model">Модель</label><input id="model" name="model" maxlength="100" placeholder="model-id" required></div>
+            <div class="field" id="scope-field" hidden><label for="scope">Область доступа GigaChat</label><select id="scope" name="scope"><option>GIGACHAT_API_PERS</option><option>GIGACHAT_API_B2B</option><option>GIGACHAT_API_CORP</option></select></div>
+            <div class="field"><label for="api-key">API-ключ</label><input id="api-key" name="api_key" type="password" autocomplete="new-password" placeholder="Введите ключ"><small>При редактировании пустое поле сохраняет прежний ключ. Сохранённый ключ здесь не показывается.</small></div>
+            <p class="muted">Ключ отправляется только на указанный адрес API при проверке. Для GigaChat он используется для получения токена.</p>
+            <p id="form-error" class="form-error" role="alert" hidden></p>
+            <div class="button-row"><button class="primary-button" type="submit">Сохранить подключение</button><button class="secondary-button" id="cancel-edit" type="button" hidden>Отмена</button></div>
+          </form>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

@@ -18,3 +18,17 @@ def test_browser_assets_are_served():
     client = TestClient(create_app(allowed_hosts=["testserver"]))
     assert client.get("/static/app.js").status_code == 200
     assert client.get("/static/style.css").status_code == 200
+
+
+def test_settings_page_and_provider_controls():
+    client = TestClient(create_app(allowed_hosts=["testserver"]))
+    home = client.get("/").text
+    settings = client.get("/settings")
+    assert settings.status_code == 200
+    assert 'id="provider-list"' in home
+    assert 'href="/settings"' in home
+    assert 'id="connections"' in settings.text
+    assert 'id="connection-form"' in settings.text
+    assert "OpenAI" in settings.text
+    assert client.get("/static/settings.js").status_code == 200
+    assert "срез на момент проверки" in home.lower()

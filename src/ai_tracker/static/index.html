@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f3ef">
-    <title>ИИ-трекинг · Проверка бренда в GigaChat</title>
+    <title>ИИ-трекинг · Проверка бренда в ответах ИИ</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/app.js" defer></script>
   </head>
@@ -12,21 +12,22 @@
     <header class="site-header">
       <div class="shell header-inner">
         <a class="brand-mark" href="/" aria-label="ИИ-трекинг, главная"><span class="mark">✳</span><span>ИИ-трекинг</span></a>
-        <span class="header-label"><span class="status-dot"></span> Локальная проверка · GigaChat API</span>
+        <nav><a class="nav-link" href="/">Проверка</a><a class="nav-link" href="/settings">Настройки API</a></nav>
       </div>
     </header>
 
     <main class="shell">
       <section class="hero" aria-labelledby="page-title">
-        <p class="eyebrow">ПЕРВАЯ ВЕРСИЯ · GIGACHAT</p>
+        <p class="eyebrow">СРАВНЕНИЕ ОТВЕТОВ ИИ</p>
         <h1 id="page-title">Узнайте, упоминает ли ИИ ваш бренд</h1>
-        <p class="hero-copy">Задайте вопросы, которые могут задавать ваши клиенты. Мы покажем ответы GigaChat и отметим, где встретилось название бренда.</p>
+        <p class="hero-copy">Задайте вопросы клиентов, выберите модели и посмотрите, где в их ответах встречается название бренда.</p>
       </section>
 
       <div class="workspace">
         <section class="panel form-panel" aria-labelledby="form-title">
           <div class="panel-heading"><span class="step">01</span><div><h2 id="form-title">Настройте проверку</h2><p>На один запуск — до 20 вопросов</p></div></div>
           <form id="check-form" novalidate>
+            <div class="field"><label>Модели для проверки</label><div id="provider-list" class="provider-list" aria-live="polite">Загружаем подключения…</div><small>Можно выбрать от 1 до 5 моделей. <a href="/settings">Добавить или настроить API</a></small></div>
             <div class="field">
               <label for="brand">Название бренда <span class="required">*</span></label>
               <input id="brand" name="brand" type="text" maxlength="100" required placeholder="Например, Ромашка">
@@ -49,17 +50,16 @@
 
         <section class="panel report-panel" aria-labelledby="report-title">
           <div class="panel-heading"><span class="step">02</span><div><h2 id="report-title">Отчёт</h2><p id="report-subtitle">Результаты появятся здесь</p></div></div>
-          <div id="empty-state" class="empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>Пока нет проверки</h3><p>Введите бренд и вопросы слева, чтобы увидеть, как GigaChat отвечает на каждый из них.</p></div>
-          <div id="loading-state" class="loading-state" hidden><span class="spinner" aria-hidden="true"></span><h3>Спрашиваем GigaChat</h3><p>Проверяем вопросы по очереди. Это может занять немного времени.</p></div>
+          <div id="empty-state" class="empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>Пока нет проверки</h3><p>Выберите модели, введите бренд и вопросы, чтобы сравнить ответы.</p></div>
+          <div id="loading-state" class="loading-state" hidden><span class="spinner" aria-hidden="true"></span><h3>Спрашиваем модели</h3><p>Проверяем вопросы по очереди. Это может занять немного времени.</p></div>
           <div id="report" hidden>
-            <div class="summary"><div><span class="summary-label">Упоминаний</span><strong id="mention-count">0 / 0</strong></div><div><span class="summary-label">Ошибок запроса</span><strong id="error-count">0</strong></div></div>
             <p class="report-context" id="report-context"></p>
             <div id="results" class="results"></div>
           </div>
         </section>
       </div>
 
-      <aside class="method-note"><span class="note-icon" aria-hidden="true">i</span><div><strong>Как читать результат</strong><p>Это срез на момент проверки через GigaChat API. Ответы ИИ могут меняться при повторном запросе. Мы не проверяем ссылки, поисковую выдачу или видимость сайта в интернете.</p></div></aside>
+      <aside class="method-note"><span class="note-icon" aria-hidden="true">i</span><div><strong>Как читать результат</strong><p>Это срез на момент проверки через API выбранных моделей. Ответы ИИ могут меняться при повторном запросе. Мы не проверяем ссылки, поисковую выдачу или видимость сайта в интернете.</p></div></aside>
     </main>
   </body>
 </html>

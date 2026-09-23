@@ -104,6 +104,10 @@ class ConnectionStore:
         try:
             saved = self.secrets.get_password(SERVICE, connection_id)
         except Exception as exc:
+            if connection_id == "gigachat" and os.getenv("GIGACHAT_AUTH_KEY"):
+                return os.getenv("GIGACHAT_AUTH_KEY")
+            if connection_id == "deepseek" and os.getenv("DEEPSEEK_API_KEY"):
+                return os.getenv("DEEPSEEK_API_KEY")
             raise ConnectionError("Системное хранилище ключей недоступно") from exc
         if saved:
             return saved
@@ -116,10 +120,20 @@ class ConnectionStore:
     def _all(self) -> list[dict]:
         data = self._read()
         presets = [dict(value, **data.get(key, {})) for key, value in PRESETS.items()]
+        if "gigachat" not in data:
+            presets[0]["scope"] = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
+        presets[0]["model"] = os.getenv("GIGACHAT_MODEL", "GigaChat")
         return presets + data.get("custom", [])
 
     def list_connections(self) -> list[dict]:
-        return [dict(item, configured=bool(self.get_key(item["id"]))) for item in self._all()]
+        result = []
+        for item in self._all():
+            try:
+                configured = bool(self.get_key(item["id"]))
+            except ConnectionError:
+                configured = False
+            result.append(dict(item, configured=configured))
+        return result
 
     def save_connection(self, payload: dict, connection_id: str | None = None) -> dict:
         if not isinstance(payload, dict):
