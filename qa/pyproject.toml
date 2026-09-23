@@ -1,0 +1,20 @@
+[project]
+name = "ai-tracker-qa"
+version = "0.1.0"
+description = "Сквозные проверки интерфейса ИИ-трекинга в настоящем браузере"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # 1.62 ships chromium build 1234, which is already in the local browser cache.
+    "playwright>=1.62,<1.63",
+    "pytest>=8",
+    "pytest-playwright>=0.6,<1",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --tracing=retain-on-failure --screenshot=only-on-failure"
