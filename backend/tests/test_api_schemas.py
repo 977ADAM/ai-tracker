@@ -111,7 +111,7 @@ def test_openapi_documents_every_operation(client):
 
     assert set(spec["paths"]) == {
         "/api/form", "/api/providers", "/api/providers/{connection_id}", "/api/check",
-        "/api/providers/settings", "/api/providers/settings/{group_id}",
+        "/api/providers/settings", "/api/providers/settings/file", "/api/providers/settings/{group_id}",
     }
     for path, operations in spec["paths"].items():
         for method, operation in operations.items():
