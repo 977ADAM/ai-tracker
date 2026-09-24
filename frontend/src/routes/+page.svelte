@@ -1,10 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import type { CheckResponse, FormConfig, PublicProvider } from '$lib/types';
-
+  
   type Data = { providers: PublicProvider[]; form?: FormConfig | null; loadError: string };
   let { data }: { data: Data } = $props();
-
+  
   let selected = $state<string[]>(untrack(() => data.form?.default_provider_ids ?? []));
   let brand = $state('');
   let domain = $state('');
@@ -12,11 +14,11 @@
   let loading = $state(false);
   let error = $state(untrack(() => data.loadError));
   let report = $state<CheckResponse | null>(null);
-
+  
   function toggleProvider(id: string) {
     selected = selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id];
   }
-
+  
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     error = '';
@@ -35,6 +37,13 @@
     } finally {
       loading = false;
     }
+  }
+
+  marked.setOptions({ breaks: true, gfm: true });
+
+  function renderMarkdown(text: string): string {
+    const html = marked.parse(text, { async: false }) as string;
+    return DOMPurify.sanitize(html);
   }
 </script>
 
@@ -143,9 +152,15 @@
             <div class="divide-y divide-line">
               {#each check.results as result, index (`${check.provider_id}-${index}`)}
                 <article class="px-6 py-5 sm:px-8">
-                  <div class="flex flex-wrap items-start justify-between gap-3"><h4 class="max-w-2xl text-sm font-semibold leading-6">{result.prompt}</h4><span class={`rounded-full px-3 py-1 text-xs font-semibold ${result.error ? 'bg-rose-50 text-rose-700' : result.mentioned ? 'bg-accent-soft text-accent-dark' : 'bg-slate-100 text-slate-600'}`}>{result.error ? 'Ошибка' : result.mentioned ? 'Бренд упомянут' : 'Нет упоминания'}</span></div>
-                  <p class="mt-4 text-xs font-bold tracking-wide text-muted uppercase">{result.error ? 'Причина' : 'Ответ модели'}</p>
-                  <p class="mt-2 max-h-72 overflow-auto text-sm leading-7 wrap-anywhere whitespace-pre-wrap text-ink/85">{result.error || result.answer || ''}</p>
+                    <div class="flex flex-wrap items-start justify-between gap-3"><h4 class="max-w-2xl text-sm font-semibold leading-6">{result.prompt}</h4><span class={`rounded-full px-3 py-1 text-xs font-semibold ${result.error ? 'bg-rose-50 text-rose-700' : result.mentioned ? 'bg-accent-soft text-accent-dark' : 'bg-slate-100 text-slate-600'}`}>{result.error ? 'Ошибка' : result.mentioned ? 'Бренд упомянут' : 'Нет упоминания'}</span></div>
+                    <p class="mt-4 text-xs font-bold tracking-wide text-muted uppercase">{result.error ? 'Причина' : 'Ответ модели'}</p>
+                    {#if result.error}
+                        <p class="mt-2 max-h-72 overflow-auto text-sm leading-7 wrap-anywhere whitespace-pre-wrap text-rose-700">{result.error}</p>
+                    {:else}
+                        <div class="prose prose-sm max-w-none mt-2 max-h-72 overflow-auto text-ink/85">
+                        {@html renderMarkdown(result.answer ?? '')}
+                        </div>
+                    {/if}
                 </article>
               {/each}
             </div>
