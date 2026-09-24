@@ -11,6 +11,7 @@ import pytest
 from app.core.errors import ConfigurationError, StorageError
 from app.db.connections import ConnectionRepository
 from app.domain.connections import new_custom_connection
+from app.domain.provider_groups import ProviderGroup, ProviderModel
 from tests.fakes import ENDPOINT, MemorySecrets, StrictSecrets, ToggleSecrets
 
 CUSTOM_PAYLOAD = {"name": "Тест", "kind": "openai", "endpoint": ENDPOINT, "model": "example-model"}
@@ -196,3 +197,73 @@ def test_resetting_a_preset_without_a_saved_key_does_not_touch_the_store(config_
 def test_find_returns_none_for_an_unknown_connection(config_dir, secrets, settings):
     repository = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
     assert repository.find("nope") is None
+
+
+def test_legacy_custom_connection_becomes_a_provider_group(config_dir, secrets):
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "providers.json").write_text(json.dumps({
+        "custom": [{"id": "old", "name": "Old", "kind": "openai", "endpoint": ENDPOINT, "model": "legacy-model"}],
+        "presets": {},
+    }), encoding="utf-8")
+    secrets.set_password("ai-tracker", "old", SECRET)
+    repository = ConnectionRepository(config_dir, secrets)
+
+    group = repository.groups()[0]
+    assert (group.id, group.models[0].id, group.models[0].model) == ("old", "old", "legacy-model")
+    assert repository.group_key("old") == SECRET
+
+
+def test_provider_group_round_trip_shares_one_key(config_dir, secrets):
+    repository = ConnectionRepository(config_dir, secrets)
+    group = ProviderGroup(
+        id="group-1", name="Demo", endpoint=ENDPOINT,
+        models=(ProviderModel(id="model-1", model="api-a", name="A"), ProviderModel(id="model-2", model="api-b", name="B")),
+    )
+
+    repository.save_group(group, SECRET)
+
+    saved = ConnectionRepository(config_dir, secrets).groups()
+    assert saved == [group]
+    assert repository.group_key("group-1") == SECRET
+    assert SECRET not in metadata_text(config_dir)
+    assert json.loads(metadata_text(config_dir))["version"] == 2
+
+
+def test_malformed_legacy_group_migration_leaves_file_untouched(config_dir, secrets):
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "providers.json"
+    path.write_text(json.dumps({"custom": [{"id": "bad", "name": "Bad", "endpoint": ENDPOINT, "model": []}]}), encoding="utf-8")
+    before = path.read_text(encoding="utf-8")
+    repository = ConnectionRepository(config_dir, secrets)
+
+    with pytest.raises(StorageError):
+        repository.groups()
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_failed_group_write_restores_previous_key(config_dir, secrets, monkeypatch):
+    repository = ConnectionRepository(config_dir, secrets)
+    group = ProviderGroup(id="group-1", name="Demo", endpoint=ENDPOINT, models=(ProviderModel(id="model-1", model="api-a", name="A"),))
+    repository.save_group(group, "old-key")
+    before = metadata_text(config_dir)
+    monkeypatch.setattr("app.db.connections.os.replace", lambda *_args: (_ for _ in ()).throw(OSError("disk")))
+
+    with pytest.raises(StorageError):
+        repository.save_group(replace(group, name="Changed"), "new-key")
+
+    monkeypatch.undo()
+    assert metadata_text(config_dir) == before
+    assert repository.group_key("group-1") == "old-key"
+
+
+def test_legacy_connection_methods_work_after_group_migration(config_dir, secrets):
+    repository = ConnectionRepository(config_dir, secrets)
+    group = ProviderGroup(id="group-1", name="Demo", endpoint=ENDPOINT, models=(ProviderModel(id="model-1", model="api-a", name="A"),))
+    repository.save_group(group, SECRET)
+
+    legacy_view = repository.find("model-1")
+    assert legacy_view is not None
+    repository.save(replace(legacy_view, model="api-b"), None)
+    assert repository.groups()[0].models[0].model == "api-b"
+    repository.delete("model-1")
+    assert repository.groups() == []

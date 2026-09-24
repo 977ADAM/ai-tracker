@@ -15,10 +15,13 @@ from app.core.errors import ConfigurationError, StorageError
 from app.db.secrets import SecretStore
 from app.domain.connections import connection_from_preset
 from app.domain.models import Connection
+from app.domain.provider_groups import ProviderGroup, ProviderModel
 
 CUSTOM_KEY = "custom"
 PRESET_OVERRIDES_KEY = "presets"
 METADATA_FILE = "providers.json"
+GROUPS_KEY = "groups"
+CURRENT_VERSION = 2
 
 
 class ConnectionRepository:
@@ -51,8 +54,64 @@ class ConnectionRepository:
         overrides = data[PRESET_OVERRIDES_KEY]
         connections = [self._apply_override(self._preset_connection(preset), overrides.get(preset.id))
                        for preset in self.presets]
-        connections.extend(self._custom_connection(item) for item in data[CUSTOM_KEY])
+        if data.get("version") == CURRENT_VERSION:
+            for group in self.groups():
+                connections.extend(
+                    Connection(id=model.id, name=f"{group.name} · {model.name}", kind=group.kind,
+                               model=model.model, endpoint=group.endpoint)
+                    for model in group.models
+                )
+        else:
+            connections.extend(self._custom_connection(item) for item in data[CUSTOM_KEY])
         return [connection for connection in connections if connection is not None]
+
+    def groups(self) -> list[ProviderGroup]:
+        data = self._read()
+        if data.get("version") == CURRENT_VERSION:
+            return [self._group_from_metadata(item) for item in data[GROUPS_KEY]]
+        groups: list[ProviderGroup] = []
+        for item in data[CUSTOM_KEY]:
+            if not isinstance(item, dict) or not all(isinstance(item.get(field), str) and item[field]
+                                                      for field in ("id", "name", "model", "endpoint")):
+                raise StorageError("Не удалось прочитать настройки подключений")
+            groups.append(ProviderGroup(
+                id=item["id"], name=item["name"], endpoint=item["endpoint"],
+                models=(ProviderModel(id=item["id"], model=item["model"], name=item["model"]),),
+            ))
+        return groups
+
+    def group(self, group_id: str) -> ProviderGroup | None:
+        return next((group for group in self.groups() if group.id == group_id), None)
+
+    def group_key(self, group_id: str) -> str | None:
+        return self.key(group_id)
+
+    def save_group(self, group: ProviderGroup, api_key: str | None = None) -> None:
+        data = self._read()
+        previous_key = self._saved_key(group.id)
+        if api_key is not None:
+            self._store_key(group.id, api_key)
+        try:
+            groups = [item for item in self.groups() if item.id != group.id]
+            self._write({"version": CURRENT_VERSION, GROUPS_KEY: [item.metadata() for item in (*groups, group)],
+                         PRESET_OVERRIDES_KEY: data[PRESET_OVERRIDES_KEY]})
+        except StorageError:
+            self._restore_key(group.id, previous_key)
+            raise
+
+    def delete_group(self, group_id: str) -> None:
+        data = self._read()
+        previous_key = self._saved_key(group_id)
+        if previous_key:
+            self._drop_key(group_id)
+        try:
+            groups = [item for item in self.groups() if item.id != group_id]
+            self._write({"version": CURRENT_VERSION, GROUPS_KEY: [item.metadata() for item in groups],
+                         PRESET_OVERRIDES_KEY: data[PRESET_OVERRIDES_KEY]})
+        except StorageError:
+            if previous_key:
+                self._restore_key(group_id, previous_key)
+            raise
 
     def find(self, connection_id: str) -> Connection | None:
         return next((item for item in self.all() if item.id == connection_id), None)
@@ -60,6 +119,13 @@ class ConnectionRepository:
     def save(self, connection: Connection, api_key: str | None = None) -> None:
         """Persist metadata and, when a new key is given, the key itself."""
         data = self._read()
+        if data.get("version") == CURRENT_VERSION and not connection.preset:
+            group = next((item for item in self.groups() if any(model.id == connection.id for model in item.models)), None)
+            if group is not None:
+                models = tuple(replace(model, model=connection.model) if model.id == connection.id else model
+                               for model in group.models)
+                self.save_group(replace(group, endpoint=connection.endpoint or group.endpoint, models=models), api_key)
+                return
         previous_key = self._saved_key(connection.id)
         if api_key is not None:
             self._store_key(connection.id, api_key)
@@ -74,6 +140,15 @@ class ConnectionRepository:
     def delete(self, connection_id: str) -> None:
         """Remove a connection and its saved key."""
         data = self._read()
+        if data.get("version") == CURRENT_VERSION:
+            group = next((item for item in self.groups() if any(model.id == connection_id for model in item.models)), None)
+            if group is not None:
+                remaining = tuple(model for model in group.models if model.id != connection_id)
+                if remaining:
+                    self.save_group(replace(group, models=remaining))
+                else:
+                    self.delete_group(group.id)
+                return
         previous_key = self._saved_key(connection_id)
         if previous_key:
             self._drop_key(connection_id)
@@ -90,6 +165,11 @@ class ConnectionRepository:
 
     def key(self, connection_id: str) -> str | None:
         """A saved key wins; otherwise the environment fallback applies."""
+        data = self._read()
+        if data.get("version") == CURRENT_VERSION:
+            group = next((item for item in self.groups() if any(model.id == connection_id for model in item.models)), None)
+            if group is not None:
+                connection_id = group.id
         try:
             saved = self._saved_key(connection_id)
         except ConfigurationError:
@@ -146,6 +226,12 @@ class ConnectionRepository:
 
     def _normalize(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Return the current layout, absorbing the older top-level preset format."""
+        if raw.get("version") == CURRENT_VERSION:
+            groups = raw.get(GROUPS_KEY)
+            overrides = raw.get(PRESET_OVERRIDES_KEY)
+            if not isinstance(groups, list) or not isinstance(overrides, dict):
+                raise StorageError("Не удалось прочитать настройки подключений")
+            return {"version": CURRENT_VERSION, GROUPS_KEY: groups, PRESET_OVERRIDES_KEY: overrides}
         custom = raw.get(CUSTOM_KEY)
         overrides = raw.get(PRESET_OVERRIDES_KEY)
         normalized: dict[str, Any] = {
@@ -161,6 +247,23 @@ class ConnectionRepository:
             ):
                 normalized[PRESET_OVERRIDES_KEY][preset.id] = {"scope": legacy["scope"]}
         return normalized
+
+    @staticmethod
+    def _group_from_metadata(item: object) -> ProviderGroup:
+        if not isinstance(item, dict) or not all(isinstance(item.get(field), str) and item[field]
+                                                  for field in ("id", "name", "endpoint")):
+            raise StorageError("Не удалось прочитать настройки подключений")
+        models = item.get("models")
+        if not isinstance(models, list) or not models:
+            raise StorageError("Не удалось прочитать настройки подключений")
+        parsed: list[ProviderModel] = []
+        for model in models:
+            if not isinstance(model, dict) or not all(isinstance(model.get(field), str) and model[field]
+                                                       for field in ("id", "model", "name")):
+                raise StorageError("Не удалось прочитать настройки подключений")
+            parsed.append(ProviderModel(id=model["id"], model=model["model"], name=model["name"]))
+        return ProviderGroup(id=item["id"], name=item["name"], endpoint=item["endpoint"],
+                             models=tuple(parsed), kind=item.get("kind", "openai"))
 
     def _write(self, data: dict[str, Any]) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
