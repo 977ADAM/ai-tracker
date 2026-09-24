@@ -9,7 +9,6 @@ from app.db.connections import ConnectionRepository
 from app.domain.connections import api_key_from_payload
 from app.domain.provider_groups import ProviderGroup, build_group
 
-
 MAX_CONFIGURATION_FILE_BYTES = 256 * 1024
 
 
