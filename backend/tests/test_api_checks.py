@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.fakes import ENDPOINT, MENTION_ANSWER, ProviderFactorySpy
+from tests.fakes import ENDPOINT, MENTION_ANSWER, FakeProvider, ProviderFactorySpy
 
 
 def configure(client, name: str = "Тест") -> str:
@@ -114,3 +114,58 @@ def test_check_reports_an_unreadable_configuration(client, config_dir):
 
     assert response.status_code == 400
     assert isinstance(response.json()["detail"], str)
+
+
+def test_models_share_a_key_but_are_checked_separately(make_client):
+    calls = []
+
+    def factory(connection, key):
+        calls.append((connection.id, connection.model, connection.endpoint, key))
+        return FakeProvider(connection.id)
+
+    client = make_client(provider_factory=factory)
+    group = client.post("/api/providers/settings", json={
+        "name": "Demo", "endpoint": ENDPOINT, "api_key": "shared-secret",
+        "models": [{"model": "api-a", "name": "A"}, {"model": "api-b", "name": "B"}],
+    }).json()
+    ids = [model["id"] for model in group["models"]]
+
+    choices = [item for item in client.get("/api/providers").json() if item["id"] in ids]
+    assert [item["name"] for item in choices] == ["Demo · A", "Demo · B"]
+    response = client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ids})
+
+    assert response.status_code == 200
+    assert [item["provider_id"] for item in response.json()["checks"]] == ids
+    assert calls == [(ids[0], "api-a", ENDPOINT, "shared-secret"), (ids[1], "api-b", ENDPOINT, "shared-secret")]
+
+
+def test_removed_model_is_rejected_before_any_api_call(make_client):
+    spy = ProviderFactorySpy()
+    client = make_client(provider_factory=spy)
+    group = client.post("/api/providers/settings", json={
+        "name": "Demo", "endpoint": ENDPOINT, "api_key": "shared-secret",
+        "models": [{"model": "api-a", "name": "A"}, {"model": "api-b", "name": "B"}],
+    }).json()
+    removed = group["models"][1]["id"]
+    client.put(f"/api/providers/settings/{group['id']}", json={
+        "name": "Demo", "endpoint": ENDPOINT, "models": [group["models"][0]],
+    })
+
+    response = client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": [removed]})
+    assert response.status_code == 400
+    assert spy.keys == []
+
+
+def test_one_model_failure_keeps_its_sibling_result(make_client):
+    client = make_client(provider_factory=ProviderFactorySpy())
+    group = client.post("/api/providers/settings", json={
+        "name": "Demo", "endpoint": ENDPOINT, "api_key": "shared-secret",
+        "models": [{"model": "api-a", "name": "A"}, {"model": "api-b", "name": "B"}],
+    }).json()
+    ids = [model["id"] for model in group["models"]]
+    spy = ProviderFactorySpy(explode_ids=(ids[0],))
+    client = make_client(provider_factory=spy)
+
+    response = client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ids})
+    assert response.status_code == 200
+    assert [item["summary"]["successful"] for item in response.json()["checks"]] == [0, 1]
