@@ -119,7 +119,9 @@
   {:else if report}
     <section class="mt-10" aria-labelledby="summary-title">
       <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div><p class="text-xs font-bold tracking-[0.14em] text-accent uppercase">Шаг 2 · Результаты</p><h2 id="summary-title" class="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Сводка проверки</h2></div>
+        <div>
+            <h2 id="summary-title" class="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Сводка проверки</h2>
+        </div>
         <p class="text-xs text-muted">Бренд: {report.brand}{report.domain ? ` · Сайт: ${report.domain}` : ''}</p>
       </div>
       <div class="grid gap-4 sm:grid-cols-3">
