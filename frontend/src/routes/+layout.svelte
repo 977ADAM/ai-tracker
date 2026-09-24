@@ -94,7 +94,7 @@
     <div class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
       <div
         id="settings-panel"
-        class="pointer-events-auto flex h-full max-h-[1000px] w-full max-w-[1120px] flex-col overflow-hidden rounded-2xl bg-shell text-shell-ink shadow-2xl"
+        class="pointer-events-auto flex h-full max-h-[800px] w-full max-w-[800px] flex-col overflow-hidden rounded-2xl bg-shell text-shell-ink shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
