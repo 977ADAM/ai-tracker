@@ -64,6 +64,6 @@ def missing_services(application: Application) -> list[str]:
     """Names of the services that are not answering, in the order they are needed."""
     probes = (
         ("Python API", f"{application.api_url}/api/providers"),
-        ("интерфейс SvelteKit", application.url("/settings")),
+        ("интерфейс SvelteKit", application.url("/")),
     )
     return [name for name, url in probes if not reachable(url)]
