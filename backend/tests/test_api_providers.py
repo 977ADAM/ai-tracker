@@ -126,6 +126,29 @@ def test_settings_rejects_invalid_endpoint_and_long_name(client):
     assert client.post("/api/providers/settings", json={**SETTINGS_BODY, "name": "x" * 101}).status_code == 400
 
 
+def test_configuration_file_shows_metadata_without_the_key(client, config_dir):
+    missing = client.get("/api/providers/settings/file")
+    assert missing.status_code == 200
+    assert missing.json() == {"path": str(config_dir / "providers.json"), "exists": False, "content": None}
+
+    assert client.post("/api/providers/settings", json=SETTINGS_BODY).status_code == 200
+    shown = client.get("/api/providers/settings/file")
+    assert shown.status_code == 200
+    body = shown.json()
+    assert body["path"] == str(config_dir / "providers.json")
+    assert body["exists"] is True
+    assert "shared-secret" not in body["content"]
+    assert "groups" in body["content"]
+
+
+def test_configuration_file_shows_broken_json_as_text(client, config_dir):
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "providers.json").write_text("{", encoding="utf-8")
+    shown = client.get("/api/providers/settings/file")
+    assert shown.status_code == 200
+    assert shown.json() == {"path": str(config_dir / "providers.json"), "exists": True, "content": "{"}
+
+
 def test_settings_delete_drops_shared_key(client, secrets):
     group_id = client.post("/api/providers/settings", json=SETTINGS_BODY).json()["id"]
     assert secrets.get_password("ai-tracker", group_id) == "shared-secret"
