@@ -52,6 +52,25 @@ class SettingsPage:
     def rail(self) -> Locator:
         return self.dialog.get_by_role("navigation", name="Разделы настроек")
 
+    @property
+    def configuration_file_button(self) -> Locator:
+        return self.dialog.get_by_role("button", name="Открыть файл конфигурации")
+
+    @property
+    def configuration_dialog(self) -> Locator:
+        return self.page.get_by_role("dialog", name="Файл конфигурации")
+
+    def show_configuration_file(self) -> SettingsPage:
+        self.configuration_file_button.click()
+        expect(self.configuration_dialog).to_be_visible()
+        return self
+
+    def close_configuration_file(self) -> SettingsPage:
+        self.configuration_dialog.get_by_role("button", name="Закрыть файл конфигурации").click()
+        expect(self.configuration_dialog).to_have_count(0)
+        expect(self.dialog).to_be_visible()
+        return self
+
     def close(self) -> SettingsPage:
         self.close_button.click()
         expect(self.dialog).to_have_count(0)
