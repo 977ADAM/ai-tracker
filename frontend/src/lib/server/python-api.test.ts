@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { proxyJson, publicSettingsProvider, settingsProviderPath } from './python-api';
+import { proxyJson, publicConfigurationFile, publicSettingsProvider, settingsProviderPath } from './python-api';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,6 +24,31 @@ describe('provider settings BFF', () => {
       id: 'group-1', name: 'Demo', endpoint: 'https://api.example.com/chat/completions',
       kind: 'openai', configured: true, models: [{ model: 'api-model', name: 'Demo model' }]
     })).toThrow();
+  });
+
+  it('returns the configuration file text and drops anything else', () => {
+    expect(publicConfigurationFile({
+      path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n', api_key: 'secret'
+    })).toEqual({ path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n' });
+    expect(publicConfigurationFile({
+      path: '/tmp/ai-tracker/providers.json', exists: false, content: null
+    })).toEqual({ path: '/tmp/ai-tracker/providers.json', exists: false, content: null });
+    expect(() => publicConfigurationFile({ path: '/tmp/providers.json', exists: true, content: null })).toThrow();
+  });
+
+  it('projects the configuration file from Python without provider fields', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n', api_key: 'secret'
+    }), { headers: { 'content-type': 'application/json' } })));
+    const response = await proxyJson(
+      new Request('http://127.0.0.1:5173/api/providers/settings/file'),
+      '/api/providers/settings/file',
+      'GET'
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n'
+    });
   });
 
   it('projects settings list responses from Python', async () => {
