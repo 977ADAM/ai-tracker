@@ -17,3 +17,5 @@ node_modules/
 
 # Browser checks
 test-results/
+
+.env
