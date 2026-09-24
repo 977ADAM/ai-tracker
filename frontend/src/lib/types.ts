@@ -1,4 +1,14 @@
-export type ApiPath = '/api/providers' | '/api/check' | '/api/form' | `/api/providers/${string}`;
+export type ApiPath = '/api/providers' | '/api/check' | '/api/form' | '/api/providers/settings' | `/api/providers/settings/${string}` | `/api/providers/${string}`;
+
+export type SettingsModel = { id: string; model: string; name: string };
+export type SettingsProvider = {
+  id: string;
+  name: string;
+  kind: string;
+  endpoint: string;
+  configured: boolean;
+  models: SettingsModel[];
+};
 
 export type FormConfig = {
   limits: { max_prompts: number; max_providers: number; max_prompt_length: number; max_brand_length: number; max_domain_length: number };

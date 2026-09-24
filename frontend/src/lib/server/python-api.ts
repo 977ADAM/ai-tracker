@@ -1,4 +1,4 @@
-import type { ApiPath, FormConfig, PublicProvider } from '$lib/types';
+import type { ApiPath, FormConfig, PublicProvider, SettingsProvider } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -10,6 +10,11 @@ function json(value: unknown, status = 200): Response {
 function record(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid API response');
   return value as Record<string, unknown>;
+}
+
+function requiredString(value: unknown): string {
+  if (typeof value !== 'string' || !value) throw new Error('Invalid API response');
+  return value;
 }
 
 function apiOrigin(): string {
@@ -26,11 +31,34 @@ export function providerPath(id: string): ApiPath {
   return `/api/providers/${encodeURIComponent(id)}`;
 }
 
+export function settingsProviderPath(id: string): ApiPath {
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new Error('Invalid provider ID');
+  return `/api/providers/settings/${encodeURIComponent(id)}`;
+}
+
 function validPath(path: ApiPath): boolean {
-  if (path === '/api/providers' || path === '/api/check' || path === '/api/form') return true;
+  if (path === '/api/providers' || path === '/api/check' || path === '/api/form' || path === '/api/providers/settings') return true;
+  if (path.startsWith('/api/providers/settings/')) {
+    try { return settingsProviderPath(decodeURIComponent(path.slice('/api/providers/settings/'.length))) === path; }
+    catch { return false; }
+  }
   if (!path.startsWith('/api/providers/')) return false;
   try { return providerPath(decodeURIComponent(path.slice('/api/providers/'.length))) === path; }
   catch { return false; }
+}
+
+export function publicSettingsProvider(value: unknown): SettingsProvider {
+  const item = record(value);
+  if (!Array.isArray(item.models)) throw new Error('Invalid settings provider');
+  if (typeof item.configured !== 'boolean') throw new Error('Invalid settings provider');
+  return {
+    id: requiredString(item.id), name: requiredString(item.name), kind: requiredString(item.kind),
+    endpoint: requiredString(item.endpoint), configured: item.configured,
+    models: item.models.map((raw) => {
+      const model = record(raw);
+      return { id: requiredString(model.id), model: requiredString(model.model), name: requiredString(model.name) };
+    })
+  };
 }
 
 export function publicProvider(value: unknown): Record<string, unknown> {
@@ -85,17 +113,19 @@ export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
 }
 
-export async function loadPageData(): Promise<{ providers: PublicProvider[]; form: FormConfig | null; loadError: string }> {
+export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; loadError: string }> {
   try {
-    const [providerResponse, formResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form')]);
-    if (!providerResponse.ok || !formResponse.ok ||
+    const [providerResponse, formResponse, settingsResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form'), pythonApi('/api/providers/settings')]);
+    if (!providerResponse.ok || !formResponse.ok || !settingsResponse.ok ||
         !/^application\/json(?:\s*;|$)/i.test(providerResponse.headers.get('content-type') || '') ||
-        !/^application\/json(?:\s*;|$)/i.test(formResponse.headers.get('content-type') || '')) throw new Error('Invalid API response');
+        !/^application\/json(?:\s*;|$)/i.test(formResponse.headers.get('content-type') || '') ||
+        !/^application\/json(?:\s*;|$)/i.test(settingsResponse.headers.get('content-type') || '')) throw new Error('Invalid API response');
     const providers: unknown = await providerResponse.json();
-    if (!Array.isArray(providers)) throw new Error('Invalid providers');
-    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), form: publicForm(await formResponse.json()) as FormConfig, loadError: '' };
+    const settingsProviders: unknown = await settingsResponse.json();
+    if (!Array.isArray(providers) || !Array.isArray(settingsProviders)) throw new Error('Invalid providers');
+    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, loadError: '' };
   } catch {
-    return { providers: [], form: null, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+    return { providers: [], settingsProviders: [], form: null, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
   }
 }
 
@@ -135,6 +165,12 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       if (!Array.isArray(value)) throw new Error('Invalid providers');
       return json(value.map(publicProvider), upstream.status);
     }
+    if (path === '/api/providers/settings' && method === 'GET') {
+      if (!Array.isArray(value)) throw new Error('Invalid settings providers');
+      return json(value.map(publicSettingsProvider), upstream.status);
+    }
+    if (path.startsWith('/api/providers/settings/') && method === 'DELETE') return json({ deleted: record(value).deleted === true }, upstream.status);
+    if (path.startsWith('/api/providers/settings') && method !== 'DELETE') return json(publicSettingsProvider(value), upstream.status);
     if (path === '/api/form' && method === 'GET') return json(publicForm(value), upstream.status);
     if (path.startsWith('/api/providers/') && method === 'DELETE') return json({ deleted: record(value).deleted === true }, upstream.status);
     if (path.startsWith('/api/providers') && method !== 'DELETE') return json(publicProvider(value), upstream.status);
