@@ -13,7 +13,6 @@ from app.domain.limits import MAX_ENDPOINT_LENGTH
 
 BLOCKED_SUFFIXES = (".local", ".internal", ".localhost", ".test", ".invalid")
 BLOCKED_HOSTS = frozenset({"localhost", "local"})
-REQUIRED_PATH_SUFFIX = "/chat/completions"
 
 
 def validate_endpoint(value: object) -> str:
@@ -34,7 +33,7 @@ def validate_endpoint(value: object) -> str:
         or url.password
         or url.query
         or url.fragment
-        or not url.path.endswith(REQUIRED_PATH_SUFFIX)
+        or not url.path
         or "//" in url.path
         or "\\" in value
         or any(character.isspace() for character in value)
