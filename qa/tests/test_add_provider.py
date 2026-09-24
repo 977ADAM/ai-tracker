@@ -1,4 +1,4 @@
-"""Adding an OpenAI-compatible connection from the settings page.
+"""Managing an OpenAI-compatible connection from the settings dialog.
 
 The checks never assume an empty connection list: the suite runs against a real
 instance where other connections may already exist, so every assertion is scoped
@@ -24,6 +24,7 @@ KEY = "qa-secret-key"
 
 
 def test_settings_page_offers_the_add_form(settings_page: SettingsPage) -> None:
+    settings_page.open_form()
     expect(settings_page.name_input).to_be_visible()
     expect(settings_page.name_input).to_be_enabled()
     expect(settings_page.endpoint_input).to_be_enabled()
@@ -52,6 +53,7 @@ def test_never_shows_the_saved_key(settings_page: SettingsPage) -> None:
     settings_page.add_connection(name=NAME, endpoint=ENDPOINT, model=MODEL, key=KEY)
     expect(settings_page.notice).to_have_text("Подключение сохранено")
 
+    settings_page.connection(NAME).get_by_role("button", name=f"Настроить {NAME}").click()
     expect(settings_page.key_input).to_have_value("")
     expect(settings_page.page.locator("body")).not_to_contain_text(KEY)
     # The whole document, not just the visible text: a key must not reach the
@@ -97,3 +99,33 @@ def test_page_has_no_console_errors(settings_page: SettingsPage, page: Page) -> 
     expect(settings_page.notice).to_have_text("Подключение сохранено")
 
     assert errors == []
+
+
+def test_dialog_closes_and_reopens_with_saved_connections(settings_page: SettingsPage) -> None:
+    settings_page.add_connection(name=NAME, endpoint=ENDPOINT, model=MODEL, key=KEY)
+    settings_page.dialog.get_by_role("button", name="Закрыть панель").click()
+    expect(settings_page.dialog).to_have_count(0)
+
+    settings_page.page.get_by_role("button", name="Настройки API").click()
+    expect(settings_page.connection(NAME)).to_be_visible()
+
+
+def test_saved_connection_is_available_for_checking(settings_page: SettingsPage) -> None:
+    settings_page.add_connection(name=NAME, endpoint=ENDPOINT, model=MODEL, key=KEY)
+    settings_page.dialog.get_by_role("button", name="Закрыть панель").click()
+
+    expect(settings_page.page.get_by_role("checkbox", name=NAME)).to_be_visible()
+
+
+def test_edit_saved_connection(settings_page: SettingsPage) -> None:
+    settings_page.add_connection(name=NAME, endpoint=ENDPOINT, model=MODEL, key=KEY)
+    settings_page.connection(NAME).get_by_role("button", name=f"Настроить {NAME}").click()
+    settings_page.model_input.fill("qa-model-updated")
+    settings_page.save()
+
+    expect(settings_page.connection(NAME)).to_contain_text("qa-model-updated")
+
+
+def test_legacy_settings_route_is_gone(settings_page: SettingsPage, application: Application) -> None:
+    response = settings_page.page.request.get(application.url("/settings"))
+    assert response.status == 404
