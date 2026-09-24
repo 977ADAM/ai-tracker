@@ -16,6 +16,7 @@ from app.integrations.factory import build_provider
 from app.service.checks import CheckService
 from app.service.connections import ConnectionService
 from app.service.form import FormService
+from app.service.provider_settings import ProviderSettingsService
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class Container:
     connections: ConnectionService
     checks: CheckService
     form: FormService
+    provider_settings: ProviderSettingsService
 
 
 def build_container(
@@ -52,6 +54,7 @@ def build_container(
         connections=connections,
         checks=CheckService(connections, factory),
         form=FormService(connections),
+        provider_settings=ProviderSettingsService(repository),
     )
 
 
@@ -74,6 +77,11 @@ def get_form_service(container: ContainerDep) -> FormService:
     return container.form
 
 
+def get_provider_settings_service(container: ContainerDep) -> ProviderSettingsService:
+    return container.provider_settings
+
+
 ConnectionServiceDep = Annotated[ConnectionService, Depends(get_connection_service)]
 CheckServiceDep = Annotated[CheckService, Depends(get_check_service)]
 FormServiceDep = Annotated[FormService, Depends(get_form_service)]
+ProviderSettingsServiceDep = Annotated[ProviderSettingsService, Depends(get_provider_settings_service)]

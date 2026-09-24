@@ -109,7 +109,10 @@ def test_a_rejected_schema_never_reaches_the_service(make_client):
 def test_openapi_documents_every_operation(client):
     spec = client.get("/openapi.json").json()
 
-    assert set(spec["paths"]) == {"/api/form", "/api/providers", "/api/providers/{connection_id}", "/api/check"}
+    assert set(spec["paths"]) == {
+        "/api/form", "/api/providers", "/api/providers/{connection_id}", "/api/check",
+        "/api/providers/settings", "/api/providers/settings/{group_id}",
+    }
     for path, operations in spec["paths"].items():
         for method, operation in operations.items():
             assert operation["responses"]["200"]["content"]["application/json"]["schema"], (method, path)
