@@ -10,6 +10,9 @@ from app.domain.connections import api_key_from_payload
 from app.domain.provider_groups import ProviderGroup, build_group
 
 
+MAX_CONFIGURATION_FILE_BYTES = 256 * 1024
+
+
 class ProviderSettingsService:
     def __init__(self, repository: ConnectionRepository) -> None:
         self.repository = repository
@@ -41,6 +44,21 @@ class ProviderSettingsService:
         except StorageError as exc:
             raise ConfigurationError(str(exc)) from exc
         return self._public(group)
+
+    def configuration_file(self) -> dict[str, Any]:
+        """The on-disk metadata file, exactly as stored. Keys are not in it."""
+        path = self.repository.path
+        if not path.is_file():
+            return {"path": str(path), "exists": False, "content": None}
+        try:
+            if path.stat().st_size > MAX_CONFIGURATION_FILE_BYTES:
+                raise ConfigurationError("Файл конфигурации слишком большой")
+            content = path.read_text(encoding="utf-8")
+        except ConfigurationError:
+            raise
+        except (OSError, UnicodeError) as exc:
+            raise ConfigurationError("Не удалось прочитать файл конфигурации") from exc
+        return {"path": str(path), "exists": True, "content": content}
 
     def delete(self, group_id: str) -> None:
         if not any(group.id == group_id for group in self._groups()):
