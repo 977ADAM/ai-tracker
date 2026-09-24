@@ -1,4 +1,4 @@
-"""The connection settings page at `/settings`."""
+"""The connection settings dialog on the main page."""
 
 from __future__ import annotations
 
@@ -13,8 +13,17 @@ class SettingsPage:
         self.base_url = base_url
 
     def open(self) -> SettingsPage:
-        self.page.goto(f"{self.base_url}/settings")
-        expect(self.page.get_by_role("heading", name="Подключения API")).to_be_visible()
+        self.page.goto(self.base_url, wait_until="networkidle")
+        self.page.get_by_role("button", name="Настройки API").click()
+        expect(self.dialog).to_be_visible()
+        return self
+
+    @property
+    def dialog(self) -> Locator:
+        return self.page.get_by_role("dialog", name="Настройки API")
+
+    def open_form(self) -> SettingsPage:
+        self.dialog.get_by_role("button", name="Добавить подключение").click()
         return self
 
     # -- form controls ----------------------------------------------------
@@ -84,7 +93,7 @@ class SettingsPage:
         return self
 
     def add_connection(self, *, name: str, endpoint: str, model: str, key: str) -> SettingsPage:
-        return self.fill_connection(name=name, endpoint=endpoint, model=model, key=key).save()
+        return self.open_form().fill_connection(name=name, endpoint=endpoint, model=model, key=key).save()
 
     def accept_next_dialog(self) -> None:
         """Removal asks for confirmation through a native dialog."""
