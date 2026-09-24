@@ -30,3 +30,6 @@ build:
 
 check:
 	cd frontend && npm run check
+
+r:
+	@cd backend && ruff check --fix .
