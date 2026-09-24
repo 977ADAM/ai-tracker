@@ -47,6 +47,19 @@ function validPath(path: ApiPath): boolean {
   catch { return false; }
 }
 
+export function publicConfigurationFile(value: unknown): { path: string; exists: boolean; content: string | null } {
+  const item = record(value);
+  const exists = item.exists;
+  if (typeof exists !== 'boolean') throw new Error('Invalid configuration file');
+  const content = item.content;
+  if (exists) {
+    if (typeof content !== 'string') throw new Error('Invalid configuration file');
+    return { path: requiredString(item.path), exists, content };
+  }
+  if (content !== null) throw new Error('Invalid configuration file');
+  return { path: requiredString(item.path), exists, content: null };
+}
+
 export function publicSettingsProvider(value: unknown): SettingsProvider {
   const item = record(value);
   if (!Array.isArray(item.models)) throw new Error('Invalid settings provider');
@@ -169,6 +182,7 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       if (!Array.isArray(value)) throw new Error('Invalid settings providers');
       return json(value.map(publicSettingsProvider), upstream.status);
     }
+    if (path === '/api/providers/settings/file' && method === 'GET') return json(publicConfigurationFile(value), upstream.status);
     if (path.startsWith('/api/providers/settings/') && method === 'DELETE') return json({ deleted: record(value).deleted === true }, upstream.status);
     if (path.startsWith('/api/providers/settings') && method !== 'DELETE') return json(publicSettingsProvider(value), upstream.status);
     if (path === '/api/form' && method === 'GET') return json(publicForm(value), upstream.status);
