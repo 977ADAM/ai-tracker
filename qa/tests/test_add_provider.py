@@ -52,6 +52,15 @@ def _create_with_second_model(settings_page: SettingsPage) -> None:
 # -- the dialog itself --------------------------------------------------------
 
 
+def test_configuration_file_button_opens_its_own_window(settings_page: SettingsPage) -> None:
+    settings_page.show_configuration_file()
+    expect(settings_page.configuration_dialog.get_by_text("providers.json")).to_be_visible()
+    expect(settings_page.configuration_dialog).not_to_contain_text(KEY)
+    expect(settings_page.dialog.get_by_role("heading", name="Модели")).to_be_visible()
+    settings_page.close_configuration_file()
+    expect(settings_page.dialog.get_by_role("heading", name="Модели")).to_be_visible()
+
+
 def test_dialog_offers_only_the_models_section(settings_page: SettingsPage) -> None:
     expect(settings_page.dialog.get_by_role("heading", name="Модели")).to_be_visible()
     expect(settings_page.rail.get_by_text("Модели")).to_be_visible()
