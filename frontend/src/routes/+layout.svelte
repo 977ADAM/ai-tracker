@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import '../app.css';
+  import ConfigsPanel from '$lib/components/ConfigsPanel.svelte';
   import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 
   let { children, data } = $props();
@@ -9,28 +11,55 @@
   let settingsOpen = $state(false);
   let opener = $state<HTMLButtonElement | null>(null);
   let panel = $state<HTMLDivElement | null>(null);
+  let configButton = $state<HTMLButtonElement | null>(null);
+  let configPanel = $state<HTMLDivElement | null>(null);
+  let configWindow = $state(false);
+
+  function resetConfig() {
+    configWindow = false;
+  }
 
   function open() {
+    resetConfig();
     settingsOpen = true;
   }
 
   function close() {
     if (!settingsOpen) return;
     settingsOpen = false;
+    resetConfig();
     // The keyboard user came from the opener, so the opener takes focus back.
     opener?.focus();
   }
 
+  async function closeConfig() {
+    if (!configWindow) return;
+    resetConfig();
+    // The settings dialog is inert while this window is open, so wait until it is not.
+    await tick();
+    configButton?.focus();
+  }
+
+  function showConfigurationFile() {
+    configWindow = true;
+  }
+
+  function topPanel(): HTMLElement | null {
+    return configWindow ? configPanel : panel;
+  }
+
   function focusable(): HTMLElement[] {
-    if (!panel) return [];
-    return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((item) => item.getClientRects().length > 0);
+    const root = topPanel();
+    if (!root) return [];
+    return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((item) => item.getClientRects().length > 0);
   }
 
   function onKeydown(event: KeyboardEvent) {
     if (!settingsOpen) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      close();
+      if (configWindow) closeConfig();
+      else close();
       return;
     }
     if (event.key !== 'Tab') return;
@@ -39,7 +68,8 @@
     const first = items[0];
     const last = items[items.length - 1];
     const current = document.activeElement as HTMLElement | null;
-    if (!current || !panel?.contains(current)) {
+    const root = topPanel();
+    if (!current || !root?.contains(current)) {
       event.preventDefault();
       (event.shiftKey ? last : first).focus();
       return;
@@ -55,7 +85,7 @@
 
   // Keyboard focus must stay inside the open dialog, so it starts there too.
   $effect(() => {
-    if (!settingsOpen) return;
+    if (!settingsOpen || configWindow) return;
     panel?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
   });
 </script>
@@ -96,22 +126,34 @@
         id="settings-panel"
         class="pointer-events-auto flex h-full max-h-200 w-full max-w-200 flex-col overflow-hidden rounded-2xl bg-shell text-shell-ink shadow-2xl"
         role="dialog"
-        aria-modal="true"
+        aria-modal={!configWindow}
         aria-labelledby="settings-title"
+        inert={configWindow}
         bind:this={panel}
       >
-        <div class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
           <h2 id="settings-title" class="text-base font-bold tracking-tight">Настройки API</h2>
-          <button
-            type="button"
-            class="grid size-10 shrink-0 place-items-center rounded-lg text-shell-muted transition hover:bg-white/5 hover:text-shell-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent"
-            onclick={close}
-            aria-label="Закрыть панель"
-          >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" class="size-5" aria-hidden="true">
-              <path d="M5.5 5.5l9 9m0-9l-9 9" stroke-linecap="round" />
-            </svg>
-          </button>
+          <div class="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex min-h-10 items-center rounded-full border border-shell-line px-3.5 text-sm font-medium text-shell-ink transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent disabled:opacity-60"
+              aria-expanded={configWindow}
+              aria-controls="configuration-file"
+              aria-haspopup="dialog"
+              bind:this={configButton}
+              onclick={showConfigurationFile}
+            >Открыть файл конфигурации</button>
+            <button
+              type="button"
+              class="grid size-10 shrink-0 place-items-center rounded-lg text-shell-muted transition hover:bg-white/5 hover:text-shell-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent"
+              onclick={close}
+              aria-label="Закрыть панель"
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" class="size-5" aria-hidden="true">
+                <path d="M5.5 5.5l9 9m0-9l-9 9" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="flex min-h-0 min-w-0 flex-1 flex-col sm:flex-row">
@@ -133,5 +175,7 @@
         </div>
       </div>
     </div>
+
+    <ConfigsPanel bind:panel={configPanel} open={configWindow} onclose={closeConfig} />
   {/if}
 </div>
