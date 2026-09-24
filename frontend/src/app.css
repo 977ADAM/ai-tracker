@@ -10,4 +10,16 @@
   --color-accent-soft: #e8f5ed;
   --color-line: #dce5de;
   --color-muted: #587168;
+  /* The settings dialog follows its references' charcoal palette. These tones
+     stay inside that dialog so the rest of the application keeps its light
+     surfaces. */
+  --color-shell: #353638;
+  --color-shell-card: #2c2c2e;
+  --color-shell-active: #43454a;
+  --color-shell-inset: #232324;
+  --color-shell-field: #303031;
+  --color-shell-line: #47484b;
+  --color-shell-ink: #f9fafb;
+  --color-shell-muted: #a5a9af;
+  --color-shell-accent: #3ddc84;
 }

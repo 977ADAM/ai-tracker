@@ -4,8 +4,63 @@
 
   let { children, data } = $props();
 
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
   let settingsOpen = $state(false);
+  let opener = $state<HTMLButtonElement | null>(null);
+  let panel = $state<HTMLDivElement | null>(null);
+
+  function open() {
+    settingsOpen = true;
+  }
+
+  function close() {
+    if (!settingsOpen) return;
+    settingsOpen = false;
+    // The keyboard user came from the opener, so the opener takes focus back.
+    opener?.focus();
+  }
+
+  function focusable(): HTMLElement[] {
+    if (!panel) return [];
+    return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((item) => item.getClientRects().length > 0);
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (!settingsOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const items = focusable();
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const current = document.activeElement as HTMLElement | null;
+    if (!current || !panel?.contains(current)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
+    if (event.shiftKey && current === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && current === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  // Keyboard focus must stay inside the open dialog, so it starts there too.
+  $effect(() => {
+    if (!settingsOpen) return;
+    panel?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+  });
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="min-h-screen bg-canvas font-sans text-ink antialiased">
   <header class="border-b border-line bg-white/90">
@@ -18,7 +73,8 @@
         <button
           type="button"
           class="rounded-full px-4 py-2 text-ink transition hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          onclick={() => (settingsOpen = true)}
+          bind:this={opener}
+          onclick={open}
           aria-expanded={settingsOpen}
           aria-controls="settings-panel"
         >
@@ -31,36 +87,49 @@
   {@render children()}
 
   {#if settingsOpen}
-    <!-- затемнение -->
-    <div
-      class="fixed inset-0 z-40 bg-ink/40"
-      onclick={() => (settingsOpen = false)}
-      aria-hidden="true"
-    ></div>
+    <!-- затемнение: клик по нему закрывает панель -->
+    <div class="fixed inset-0 z-40 bg-black/70" data-backdrop onclick={close} aria-hidden="true"></div>
 
-    <!-- центрирующая обёртка + панель -->
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <!-- центрирующая обёртка: пропускает клики к затемнению -->
+    <div class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
       <div
         id="settings-panel"
-        class="flex h-[800px] max-h-[90vh] w-[800px] max-w-[90vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        class="pointer-events-auto flex h-full max-h-[1000px] w-full max-w-[1120px] flex-col overflow-hidden rounded-2xl bg-shell text-shell-ink shadow-2xl"
         role="dialog"
         aria-modal="true"
-        aria-label="Настройки API"
+        aria-labelledby="settings-title"
+        bind:this={panel}
       >
-        <div class="flex items-center justify-between border-b border-line px-6 py-4">
-          <h2 class="text-lg font-bold tracking-tight">Настройки API</h2>
+        <div class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6">
+          <h2 id="settings-title" class="text-base font-bold tracking-tight">Настройки API</h2>
           <button
             type="button"
-            class="flex h-9 w-9 items-center justify-center rounded-full text-xl text-muted transition hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            onclick={() => (settingsOpen = false)}
+            class="grid size-10 shrink-0 place-items-center rounded-lg text-shell-muted transition hover:bg-white/5 hover:text-shell-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent"
+            onclick={close}
             aria-label="Закрыть панель"
           >
-            ×
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" class="size-5" aria-hidden="true">
+              <path d="M5.5 5.5l9 9m0-9l-9 9" stroke-linecap="round" />
+            </svg>
           </button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-6">
-          <SettingsPanel data={data} />
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col sm:flex-row">
+          <nav aria-label="Разделы настроек" class="shrink-0 px-4 pb-2 sm:w-52 sm:pb-4 lg:w-56">
+            <span
+              aria-current="page"
+              class="inline-flex items-center gap-2.5 rounded-lg bg-shell-active px-3.5 py-2.5 text-sm font-semibold text-shell-ink sm:w-full"
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4 shrink-0" aria-hidden="true">
+                <path d="M4 5.5h12M4 10h12M4 14.5h7" stroke-linecap="round" />
+              </svg>
+              Модели
+            </span>
+          </nav>
+
+          <div class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
+            <SettingsPanel data={data} />
+          </div>
         </div>
       </div>
     </div>
