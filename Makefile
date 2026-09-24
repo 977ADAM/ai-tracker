@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install backend frontend frontend-prod build check
+.PHONY: help install ruff backend frontend frontend-prod build check
 
 help:
 	@echo "install  Install Python and Node.js dependencies"
@@ -9,13 +9,14 @@ help:
 	@echo "frontend-prod Start the built web interface"
 	@echo "build         Build the web interface"
 	@echo "check         Check Svelte and TypeScript"
-	@echo "test          Run Node.js and Python tests"
-	@echo "verify        Run tests, checks, and build"
 
 install:
 	cd backend && uv sync
 	cd frontend && npm ci
 
+ruff:
+	cd backend && ruff check --fix .
+	
 backend:
 	@cd backend && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
@@ -30,6 +31,3 @@ build:
 
 check:
 	cd frontend && npm run check
-
-r:
-	@cd backend && ruff check --fix .
