@@ -7,7 +7,12 @@ import json
 
 import pytest
 
-from app.core.errors import ConfigurationError, ProviderError, ValidationError
+from app.core.errors import (
+    ConfigurationError,
+    ProviderError,
+    StorageError,
+    ValidationError,
+)
 from app.domain.search import SearchDocument
 from app.service.search import AsyncRequestRateLimiter, SearchJobNotFound, SearchService
 
@@ -370,4 +375,54 @@ async def test_expired_jobs_are_cleaned_without_another_request():
         await asyncio.sleep(0.01)
 
     assert search.store.get(job["id"]) is None
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_callbacks_keep_duplicate_prompt_ordinals_and_errors():
+    search = service(FakeGateway(), max_concurrency=1)
+    seen = []
+    job = await search.start(
+        payload(prompts_text="цветы\nцветы", regions=[FOUND_REGION, ERROR_REGION]),
+        on_row=lambda index, row: seen.append((index, row.status)),
+    )
+    await settle(search, job["id"])
+    assert seen == [(0, "found"), (1, "error"), (2, "found"), (3, "error")]
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_storage_failure_cancels_queued_paid_submissions():
+    gateway = FakeGateway(polls_before_answer=0)
+    search = service(gateway, max_concurrency=1)
+    failed = asyncio.Event()
+
+    def on_row(_index, _row):
+        failed.set()
+        raise StorageError("disk failure")
+
+    await search.start(
+        payload(prompts_text="\n".join(f"вопрос {index}" for index in range(20)),
+                regions=[1, 213, 2, 54, 65]),
+        on_row=on_row,
+    )
+    await asyncio.wait_for(failed.wait(), 1)
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert len(gateway.submitted) == 1
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_expiry_notifies_for_unfinished_job():
+    clock = FakeClock()
+    search = service(FakeGateway({FOUND_REGION: "never"}), clock=clock, job_ttl=2)
+    expired = []
+    job = await search.start(payload(), on_expire=lambda: expired.append(job["id"]))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    clock.advance(2)
+    with pytest.raises(SearchJobNotFound):
+        search.snapshot(job["id"])
+    assert expired == [job["id"]]
     await search.close()

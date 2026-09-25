@@ -9,13 +9,19 @@ never reported as an absent site.
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from app.core.errors import ConfigurationError, ProviderError, SearchJobNotFound
+from app.core.errors import (
+    ConfigurationError,
+    ProviderError,
+    SearchJobNotFound,
+    StorageError,
+)
 from app.domain.search import (
     REGIONS,
     SearchDocument,
@@ -50,6 +56,7 @@ JOB_NOT_FOUND = "Задача поиска не найдена"
 UNEXPECTED_FAILURE = "Не удалось получить выдачу Яндекса"
 
 REGION_NAMES = dict(REGIONS)
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -239,6 +246,7 @@ class SearchService:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.gateway = gateway
+        self.max_concurrency = max_concurrency
         self.poll_interval = poll_interval
         self.max_poll_interval = max_poll_interval
         self.job_ttl = job_ttl
@@ -250,9 +258,15 @@ class SearchService:
         self.submit_limiter = AsyncRequestRateLimiter(max_requests_per_second, clock=request_clock, sleep=request_sleep)
         self.result_limiter = AsyncRequestRateLimiter(max_requests_per_second, clock=request_clock, sleep=request_sleep)
         self.tasks: dict[str, asyncio.Task] = {}
+        self.pair_tasks: dict[str, set[asyncio.Task]] = {}
+        self.expiry_callbacks: dict[str, Callable[[], None]] = {}
         self.cleanup_task: asyncio.Task | None = None
 
-    async def start(self, payload: object) -> dict[str, object]:
+    async def start(
+        self, payload: object, *,
+        on_row: Callable[[int, SearchRow], None] | None = None,
+        on_expire: Callable[[], None] | None = None,
+    ) -> dict[str, object]:
         """Validate a run, create its pairs, and return before any pair finishes."""
         if self.gateway is None:
             raise ConfigurationError(MISSING_CREDENTIALS)
@@ -261,9 +275,11 @@ class SearchService:
 
         job = self._create_job(request)
         self.store.add(job)
-        task = asyncio.create_task(self._run(job))
+        if on_expire is not None:
+            self.expiry_callbacks[job.id] = on_expire
+        task = asyncio.create_task(self._run(job, on_row))
         self.tasks[job.id] = task
-        task.add_done_callback(lambda _task, job_id=job.id: self.tasks.pop(job_id, None))
+        task.add_done_callback(lambda finished, job_id=job.id: self._task_done(job_id, finished))
         if self.cleanup_task is None or self.cleanup_task.done():
             self.cleanup_task = asyncio.create_task(self._cleanup_expired_periodically())
         return {"id": job.id, "total": job.total, "status": job.status}
@@ -283,9 +299,13 @@ class SearchService:
             pending.append(self.cleanup_task)
         for task in pending:
             task.cancel()
+        for workers in self.pair_tasks.values():
+            for worker in workers:
+                worker.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self.tasks.clear()
+        self.pair_tasks.clear()
         self.cleanup_task = None
 
     def _create_job(self, request: SearchInput) -> SearchJob:
@@ -305,20 +325,55 @@ class SearchService:
 
     def _drop_expired(self) -> None:
         for job in self.store.expired(self.clock(), self.job_ttl, self.finished_job_ttl):
+            if job.status == JOB_STATUS_PENDING:
+                callback = self.expiry_callbacks.get(job.id)
+                if callback is not None:
+                    callback()
+            self.expiry_callbacks.pop(job.id, None)
             self.store.remove(job.id)
-            task = self.tasks.pop(job.id, None)
+            task = self.tasks.get(job.id)
             if task is not None:
                 task.cancel()
+            for worker in self.pair_tasks.get(job.id, ()):
+                worker.cancel()
+
+    def _task_done(self, job_id: str, task: asyncio.Task) -> None:
+        self.tasks.pop(job_id, None)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            LOGGER.error("Search job %s stopped: %s", job_id, type(error).__name__)
 
     async def _cleanup_expired_periodically(self) -> None:
         while len(self.store):
             await asyncio.sleep(self.cleanup_interval)
             self._drop_expired()
 
-    async def _run(self, job: SearchJob) -> None:
-        await asyncio.gather(*(self._run_pair(job, row) for row in job.rows))
+    async def _run(
+        self, job: SearchJob, on_row: Callable[[int, SearchRow], None] | None,
+    ) -> None:
+        next_index = 0
 
-    async def _run_pair(self, job: SearchJob, row: SearchRow) -> None:
+        async def worker() -> None:
+            nonlocal next_index
+            while next_index < len(job.rows):
+                index = next_index
+                next_index += 1
+                await self._run_pair(job, index, job.rows[index], on_row)
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                workers = self.pair_tasks[job.id] = set()
+                for _ in range(min(self.max_concurrency, len(job.rows))):
+                    workers.add(group.create_task(worker()))
+        finally:
+            self.pair_tasks.pop(job.id, None)
+
+    async def _run_pair(
+        self, job: SearchJob, index: int, row: SearchRow,
+        on_row: Callable[[int, SearchRow], None] | None,
+    ) -> None:
         gateway = self.gateway
         assert gateway is not None  # `start` refuses a run without credentials
         try:
@@ -333,16 +388,24 @@ class SearchService:
                     documents: tuple[SearchDocument, ...] | None = await gateway.result(operation_id)
                 if documents is not None:
                     row.finish(first_matching_result(job.host, documents), self.clock())
+                    if on_row is not None:
+                        on_row(index, row)
                     return
                 await asyncio.sleep(delay)
                 delay = min(max(delay * 1.5, self.poll_interval), self.max_poll_interval)
         except asyncio.CancelledError:
             raise
+        except StorageError:
+            raise
         except ProviderError as exc:
             # Adapter messages are fixed and safe by contract.
             row.fail(str(exc), self.clock())
+            if on_row is not None:
+                on_row(index, row)
         except Exception:  # noqa: BLE001 - one broken pair must not stop the others
             row.fail(UNEXPECTED_FAILURE, self.clock())
+            if on_row is not None:
+                on_row(index, row)
 
 
 __all__ = [
