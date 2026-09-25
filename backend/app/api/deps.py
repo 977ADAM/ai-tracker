@@ -11,6 +11,7 @@ from fastapi import Depends, Request
 
 from app.core.config import Settings
 from app.db.connections import ConnectionRepository
+from app.db.runs import RunRepository
 from app.db.secrets import KeyringSecrets, SecretStore
 from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
@@ -20,6 +21,7 @@ from app.service.checks import CheckService
 from app.service.connections import ConnectionService
 from app.service.form import FormService
 from app.service.provider_settings import ProviderSettingsService
+from app.service.runs import RunService
 from app.service.search import SearchService
 
 CONNECT_TIMEOUT = 20
@@ -37,6 +39,7 @@ class Container:
     form: FormService
     provider_settings: ProviderSettingsService
     search: SearchService
+    runs: RunService
     search_client: httpx.AsyncClient | None = None
 
 
@@ -74,14 +77,20 @@ def build_container(
         search_client = None
     connections = ConnectionService(repository, settings)
     factory = provider_factory or (lambda connection, key: build_provider(connection, key, settings))
+    run_repository = RunRepository(Path(settings.config_dir))
+    run_repository.initialize()
+    run_repository.recover_unfinished()
+    checks = CheckService(connections, factory)
+    search = SearchService(search_gateway)
     return Container(
         settings=settings,
         repository=repository,
         connections=connections,
-        checks=CheckService(connections, factory),
+        checks=checks,
         form=FormService(connections),
         provider_settings=ProviderSettingsService(repository),
-        search=SearchService(search_gateway),
+        search=search,
+        runs=RunService(run_repository, checks, search),
         search_client=search_client,
     )
 
@@ -113,8 +122,13 @@ def get_search_service(container: ContainerDep) -> SearchService:
     return container.search
 
 
+def get_run_service(container: ContainerDep) -> RunService:
+    return container.runs
+
+
 ConnectionServiceDep = Annotated[ConnectionService, Depends(get_connection_service)]
 CheckServiceDep = Annotated[CheckService, Depends(get_check_service)]
 FormServiceDep = Annotated[FormService, Depends(get_form_service)]
 ProviderSettingsServiceDep = Annotated[ProviderSettingsService, Depends(get_provider_settings_service)]
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
+RunServiceDep = Annotated[RunService, Depends(get_run_service)]

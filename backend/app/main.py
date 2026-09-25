@@ -44,8 +44,7 @@ async def lifespan(application: FastAPI):
     container = application.state.container
     log.info("ИИ-трекинг API запущен: настройки подключений в %s", settings.config_dir)
     yield
-    # Search results are in-memory only: cancel the work in flight and close the
-    # shared Yandex client on the way down.
+    await container.runs.close()
     await container.search.close()
     if container.search_client is not None:
         await container.search_client.aclose()
