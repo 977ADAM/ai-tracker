@@ -208,7 +208,7 @@ class ConnectionRepository:
                 self.secrets.set_password(self.service_name, connection_id, previous_key)
             else:
                 self.secrets.delete_password(self.service_name, connection_id)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - a rollback error must not hide the original failure
             pass
 
     # -- file I/O ---------------------------------------------------------
@@ -219,8 +219,8 @@ class ConnectionRepository:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
-                raise ValueError("not an object")
-        except (OSError, ValueError) as exc:
+                raise TypeError("not an object")
+        except (OSError, ValueError, TypeError) as exc:
             raise StorageError("Не удалось прочитать настройки подключений") from exc
         return self._normalize(raw)
 

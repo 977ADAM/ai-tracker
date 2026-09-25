@@ -86,7 +86,7 @@ class CheckService:
             return self.factory(connection, key), None
         except AppError as exc:
             return None, str(exc)
-        except Exception:
+        except Exception:  # noqa: BLE001 - a broken adapter affects one group only
             # An unexpected adapter or credential failure must still not leak
             # internals, and must only affect this connection's result group.
             return None, SETUP_FAILURE_MESSAGE
@@ -104,7 +104,7 @@ class CheckService:
             answer = provider.answer(prompt)
         except ProviderError as exc:
             return self._failure(prompt, str(exc))
-        except Exception:
+        except Exception:  # noqa: BLE001 - a broken adapter is a failed prompt, not a crash
             # Same rule as _prepare: a broken adapter is a failed prompt, never
             # a stack trace and never a negative mention.
             return self._failure(prompt, CALL_FAILURE_MESSAGE)
@@ -135,7 +135,7 @@ class CheckService:
             return
         try:
             provider.close()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - releasing HTTP resources is best effort
             # Releasing HTTP resources is best effort: a close failure must not
             # replace the results the run already collected.
             pass
