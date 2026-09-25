@@ -203,7 +203,7 @@
       </fieldset>
 
       <fieldset class="border-t border-line pt-6" aria-labelledby="regions-legend">
-        <legend id="regions-legend" class="mb-3 text-sm font-semibold text-ink">Поиск сайта в Яндексе</legend>
+        <legend id="regions-legend" class="mb-3 text-sm font-semibold text-ink">Регионы для поиска в Яндексе</legend>
         <p class="mb-4 max-w-3xl text-xs leading-5 text-muted">
           Добавьте от одного до пяти регионов — проверим, попадает ли сайт в первую десятку выдачи по каждому вопросу.
           Без регионов проверяются только модели. Отложенный поиск занимает от нескольких минут до нескольких часов.
