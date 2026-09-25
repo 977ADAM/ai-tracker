@@ -1,4 +1,7 @@
-import type { ApiPath, FormConfig, PublicProvider, SettingsProvider } from '$lib/types';
+import type {
+  ApiPath, FormConfig, PublicProvider, SearchCreated, SearchRegion, SearchRow, SearchRowStatus,
+  SearchSnapshot, SettingsProvider
+} from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -15,6 +18,27 @@ function record(value: unknown): Record<string, unknown> {
 function requiredString(value: unknown): string {
   if (typeof value !== 'string' || !value) throw new Error('Invalid API response');
   return value;
+}
+
+function requiredInteger(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) throw new Error('Invalid API response');
+  return value;
+}
+
+function optionalString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') throw new Error('Invalid API response');
+  return value;
+}
+
+function optionalInteger(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  return requiredInteger(value);
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
+  if (typeof value !== 'string' || !allowed.includes(value as T)) throw new Error('Invalid API response');
+  return value as T;
 }
 
 function apiOrigin(): string {
@@ -36,8 +60,19 @@ export function settingsProviderPath(id: string): ApiPath {
   return `/api/providers/settings/${encodeURIComponent(id)}`;
 }
 
+export function searchPath(id: string): ApiPath {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid search ID');
+  return `/api/search/${encodeURIComponent(id)}`;
+}
+
 function validPath(path: ApiPath): boolean {
   if (path === '/api/providers' || path === '/api/check' || path === '/api/form' || path === '/api/providers/settings') return true;
+  // The static catalog comes before the dynamic job route, exactly as in Python.
+  if (path === '/api/search' || path === '/api/search/regions') return true;
+  if (path.startsWith('/api/search/')) {
+    try { return searchPath(decodeURIComponent(path.slice('/api/search/'.length))) === path; }
+    catch { return false; }
+  }
   if (path.startsWith('/api/providers/settings/')) {
     try { return settingsProviderPath(decodeURIComponent(path.slice('/api/providers/settings/'.length))) === path; }
     catch { return false; }
@@ -108,8 +143,58 @@ export function publicCheck(value: unknown): Record<string, unknown> {
   };
 }
 
-export function publicForm(value: unknown): Record<string, unknown> {
+const JOB_STATUSES = ['pending', 'done'] as const;
+const ROW_STATUSES: readonly SearchRowStatus[] = ['submitting', 'waiting', 'found', 'absent', 'error'];
+
+export function publicSearchRegions(value: unknown): SearchRegion[] {
+  if (!Array.isArray(value)) throw new Error('Invalid search regions');
+  return value.map((raw) => {
+    const item = record(raw);
+    return { id: requiredInteger(item.id), name: requiredString(item.name) };
+  });
+}
+
+export function publicSearchCreated(value: unknown): SearchCreated {
   const item = record(value);
+  const total = requiredInteger(item.total);
+  if (total < 1) throw new Error('Invalid search job');
+  return { id: requiredString(item.id), total, status: oneOf(item.status, JOB_STATUSES) };
+}
+
+function searchRow(value: unknown): SearchRow {
+  const row = record(value);
+  return {
+    prompt: requiredString(row.prompt),
+    region_id: requiredInteger(row.region_id),
+    region_name: requiredString(row.region_name),
+    status: oneOf(row.status, ROW_STATUSES),
+    position: optionalInteger(row.position),
+    url: optionalString(row.url),
+    error: optionalString(row.error)
+  };
+}
+
+export function publicSearchSnapshot(value: unknown): SearchSnapshot {
+  const item = record(value);
+  if (!Array.isArray(item.regions) || !Array.isArray(item.results)) throw new Error('Invalid search snapshot');
+  const summary = record(item.summary);
+  return {
+    id: requiredString(item.id),
+    domain: requiredString(item.domain),
+    regions: item.regions.map(requiredInteger),
+    total: requiredInteger(item.total),
+    completed: requiredInteger(item.completed),
+    status: oneOf(item.status, JOB_STATUSES),
+    summary: {
+      successful: requiredInteger(summary.successful),
+      found: requiredInteger(summary.found),
+      failed: requiredInteger(summary.failed)
+    },
+    results: item.results.map(searchRow)
+  };
+}
+
+export function publicForm(value: unknown): Record<string, unknown> {  const item = record(value);
   const limits = record(item.limits);
   if (!Array.isArray(item.scope_options) || !Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids)) throw new Error('Invalid form');
   return { limits: { max_prompts: limits.max_prompts, max_providers: limits.max_providers, max_prompt_length: limits.max_prompt_length,
@@ -126,7 +211,10 @@ export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
 }
 
-export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; loadError: string }> {
+export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; loadError: string }> {
+  // The region catalog is an independent request: a failure there must not stop
+  // the model list, and vice versa.
+  const { regions: searchRegions, error: searchRegionError } = await loadSearchRegions();
   try {
     const [providerResponse, formResponse, settingsResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form'), pythonApi('/api/providers/settings')]);
     if (!providerResponse.ok || !formResponse.ok || !settingsResponse.ok ||
@@ -136,9 +224,19 @@ export async function loadPageData(): Promise<{ providers: PublicProvider[]; set
     const providers: unknown = await providerResponse.json();
     const settingsProviders: unknown = await settingsResponse.json();
     if (!Array.isArray(providers) || !Array.isArray(settingsProviders)) throw new Error('Invalid providers');
-    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, loadError: '' };
+    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, loadError: '' };
   } catch {
-    return { providers: [], settingsProviders: [], form: null, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+  }
+}
+
+async function loadSearchRegions(): Promise<{ regions: SearchRegion[]; error: string }> {
+  try {
+    const response = await pythonApi('/api/search/regions');
+    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) throw new Error('Invalid search regions');
+    return { regions: publicSearchRegions(await response.json()), error: '' };
+  } catch {
+    return { regions: [], error: 'Справочник регионов недоступен' };
   }
 }
 
@@ -174,6 +272,9 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       const detail = record(value).detail;
       return json({ detail: typeof detail === 'string' ? detail : 'Ошибка Python API' }, upstream.status);
     }
+    if (path === '/api/search' && method === 'POST') return json(publicSearchCreated(value), upstream.status);
+    if (path === '/api/search/regions' && method === 'GET') return json(publicSearchRegions(value), upstream.status);
+    if (path.startsWith('/api/search/') && method === 'GET') return json(publicSearchSnapshot(value), upstream.status);
     if (path === '/api/providers' && method === 'GET') {
       if (!Array.isArray(value)) throw new Error('Invalid providers');
       return json(value.map(publicProvider), upstream.status);

@@ -1,4 +1,7 @@
-export type ApiPath = '/api/providers' | '/api/check' | '/api/form' | '/api/providers/settings' | `/api/providers/settings/${string}` | `/api/providers/${string}`;
+export type ApiPath =
+  | '/api/providers' | '/api/check' | '/api/form' | '/api/providers/settings'
+  | '/api/search' | '/api/search/regions'
+  | `/api/providers/settings/${string}` | `/api/providers/${string}` | `/api/search/${string}`;
 
 export type SettingsModel = { id: string; model: string; name: string };
 export type SettingsProvider = {
@@ -59,3 +62,33 @@ export type ProviderCheck = {
 export type CheckSummary = { successful: number; failed: number; mentioned: number; mention_percent: number | null; visibility_label: string; mentions_label: string; errors_label: string };
 export type CheckRow = CheckResult & { provider_name: string };
 export type CheckResponse = { brand: string; domain: string; checks: ProviderCheck[]; summary: CheckSummary; rows: CheckRow[] };
+
+export type SearchRegion = { id: number; name: string };
+
+export type SearchJobStatus = 'pending' | 'done';
+export type SearchRowStatus = 'submitting' | 'waiting' | 'found' | 'absent' | 'error';
+
+export type SearchCreated = { id: string; total: number; status: SearchJobStatus };
+
+export type SearchRow = {
+  prompt: string;
+  region_id: number;
+  region_name: string;
+  status: SearchRowStatus;
+  position: number | null;
+  url: string | null;
+  error: string | null;
+};
+
+export type SearchSummary = { successful: number; found: number; failed: number };
+
+export type SearchSnapshot = {
+  id: string;
+  domain: string;
+  regions: number[];
+  total: number;
+  completed: number;
+  status: SearchJobStatus;
+  summary: SearchSummary;
+  results: SearchRow[];
+};
