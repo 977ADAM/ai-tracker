@@ -1,10 +1,12 @@
 import type {
   ApiPath, FormConfig, PublicProvider, SearchCreated, SearchRegion, SearchRow, SearchRowStatus,
-  SearchSnapshot, SettingsProvider
+  SearchSnapshot, SettingsProvider, RunCreated, RunHistoryPage, RunSnapshot, RunSummaryRow,
+  RunModelRow, RunSearchRow
 } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_CSV_BYTES = 5 * 1024 * 1024;
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -18,6 +20,21 @@ function record(value: unknown): Record<string, unknown> {
 function requiredString(value: unknown): string {
   if (typeof value !== 'string' || !value) throw new Error('Invalid API response');
   return value;
+}
+
+function stringValue(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('Invalid API response');
+  return value;
+}
+
+function strings(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error('Invalid API response');
+  return value.map(stringValue);
+}
+
+function integers(value: unknown): number[] {
+  if (!Array.isArray(value)) throw new Error('Invalid API response');
+  return value.map(requiredInteger);
 }
 
 function requiredInteger(value: unknown): number {
@@ -65,7 +82,36 @@ export function searchPath(id: string): ApiPath {
   return `/api/search/${encodeURIComponent(id)}`;
 }
 
+export function runPath(id: string): ApiPath {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid run ID');
+  return `/api/runs/${encodeURIComponent(id)}`;
+}
+
+export function runExportPath(id: string): ApiPath {
+  return `${runPath(id)}/export.csv` as ApiPath;
+}
+
+export function runListPath(cursor: string | null): ApiPath {
+  if (cursor === null) return '/api/runs';
+  if (!/^[A-Za-z0-9_-]{1,256}$/.test(cursor)) throw new Error('Invalid cursor');
+  return `/api/runs?cursor=${cursor}`;
+}
+
 function validPath(path: ApiPath): boolean {
+  if (path === '/api/runs') return true;
+  if (path.startsWith('/api/runs?cursor=')) {
+    try { return runListPath(path.slice('/api/runs?cursor='.length)) === path; }
+    catch { return false; }
+  }
+  if (path.startsWith('/api/runs/')) {
+    const suffix = path.slice('/api/runs/'.length);
+    if (suffix.endsWith('/export.csv')) {
+      try { return runExportPath(suffix.slice(0, -'/export.csv'.length)) === path; }
+      catch { return false; }
+    }
+    try { return runPath(suffix) === path; }
+    catch { return false; }
+  }
   if (path === '/api/providers' || path === '/api/check' || path === '/api/form' || path === '/api/providers/settings') return true;
   // The static catalog comes before the dynamic job route, exactly as in Python.
   if (path === '/api/search' || path === '/api/search/regions') return true;
@@ -80,6 +126,80 @@ function validPath(path: ApiPath): boolean {
   if (!path.startsWith('/api/providers/')) return false;
   try { return providerPath(decodeURIComponent(path.slice('/api/providers/'.length))) === path; }
   catch { return false; }
+}
+
+const RUN_STATUSES = ['pending', 'done', 'interrupted'] as const;
+const MODEL_RUN_STATUSES = ['pending', 'mentioned', 'absent', 'error', 'interrupted'] as const;
+const SEARCH_RUN_STATUSES = ['submitting', 'waiting', 'found', 'absent', 'error', 'interrupted'] as const;
+
+export function publicRunCreated(value: unknown): RunCreated {
+  const item = record(value);
+  const id = requiredString(item.id);
+  runPath(id);
+  return { id, status: oneOf(item.status, RUN_STATUSES) };
+}
+
+function runModelRow(value: unknown): RunModelRow {
+  const row = record(value);
+  const mentioned = row.mentioned;
+  if (mentioned !== null && typeof mentioned !== 'boolean') throw new Error('Invalid model row');
+  return {
+    provider_id: requiredString(row.provider_id), prompt_index: requiredInteger(row.prompt_index),
+    provider_name: requiredString(row.provider_name), prompt: requiredString(row.prompt),
+    status: oneOf(row.status, MODEL_RUN_STATUSES), answer: optionalString(row.answer),
+    mentioned: mentioned as boolean | null, error: optionalString(row.error)
+  };
+}
+
+function runSearchRow(value: unknown): RunSearchRow {
+  const row = record(value);
+  return {
+    search_index: requiredInteger(row.search_index), prompt_index: requiredInteger(row.prompt_index),
+    region_index: requiredInteger(row.region_index), prompt: requiredString(row.prompt),
+    region_id: requiredInteger(row.region_id), region_name: requiredString(row.region_name),
+    status: oneOf(row.status, SEARCH_RUN_STATUSES), position: optionalInteger(row.position),
+    url: optionalString(row.url), error: optionalString(row.error)
+  };
+}
+
+function runSummaryRow(value: unknown): RunSummaryRow {
+  const row = record(value);
+  return {
+    prompt: stringValue(row.prompt), source: stringValue(row.source),
+    language: stringValue(row.language), region: stringValue(row.region),
+    ai_answer: stringValue(row.ai_answer), site_found: stringValue(row.site_found),
+    position: stringValue(row.position), brand_found: stringValue(row.brand_found),
+    status: stringValue(row.status)
+  };
+}
+
+export function publicRunSnapshot(value: unknown): RunSnapshot {
+  const item = record(value);
+  const id = requiredString(item.id);
+  runPath(id);
+  if (!Array.isArray(item.models) || !Array.isArray(item.search) || !Array.isArray(item.summary_rows))
+    throw new Error('Invalid run snapshot');
+  return {
+    id, created_at: requiredString(item.created_at), finished_at: optionalString(item.finished_at),
+    status: oneOf(item.status, RUN_STATUSES), brand: stringValue(item.brand), domain: stringValue(item.domain),
+    prompts: strings(item.prompts), provider_ids: strings(item.provider_ids), regions: integers(item.regions),
+    models: item.models.map(runModelRow), search: item.search.map(runSearchRow),
+    summary_rows: item.summary_rows.map(runSummaryRow)
+  };
+}
+
+export function publicRunList(value: unknown): RunHistoryPage {
+  const page = record(value);
+  if (!Array.isArray(page.items)) throw new Error('Invalid run history');
+  const next_cursor = optionalString(page.next_cursor);
+  if (next_cursor !== null) runListPath(next_cursor);
+  return { items: page.items.map((raw) => {
+    const item = record(raw);
+    const id = requiredString(item.id);
+    runPath(id);
+    return { id, created_at: requiredString(item.created_at), status: oneOf(item.status, RUN_STATUSES),
+      prompts: strings(item.prompts) };
+  }), next_cursor };
 }
 
 export function publicConfigurationFile(value: unknown): { path: string; exists: boolean; content: string | null } {
@@ -265,6 +385,7 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
   } catch {
     return json({ detail: 'Python API недоступен' }, 502);
   }
+  if (method === 'DELETE' && upstream.status === 204) return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
   if (!/^application\/json(?:\s*;|$)/i.test(upstream.headers.get('content-type') || '')) return json({ detail: 'Некорректный ответ Python API' }, 502);
   try {
     const value: unknown = await upstream.json();
@@ -272,6 +393,9 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       const detail = record(value).detail;
       return json({ detail: typeof detail === 'string' ? detail : 'Ошибка Python API' }, upstream.status);
     }
+    if (path === '/api/runs' && method === 'POST') return json(publicRunCreated(value), upstream.status);
+    if ((path === '/api/runs' || path.startsWith('/api/runs?cursor=')) && method === 'GET') return json(publicRunList(value), upstream.status);
+    if (path.startsWith('/api/runs/') && method === 'GET') return json(publicRunSnapshot(value), upstream.status);
     if (path === '/api/search' && method === 'POST') return json(publicSearchCreated(value), upstream.status);
     if (path === '/api/search/regions' && method === 'GET') return json(publicSearchRegions(value), upstream.status);
     if (path.startsWith('/api/search/') && method === 'GET') return json(publicSearchSnapshot(value), upstream.status);
@@ -294,4 +418,33 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
   } catch {
     return json({ detail: 'Некорректный ответ Python API' }, 502);
   }
+}
+
+export async function proxyCsv(request: Request, path: ApiPath): Promise<Response> {
+  if (!validPath(path) || !path.endsWith('/export.csv')) return json({ detail: 'Некорректный прогон' }, 400);
+  if (request.method !== 'GET') return json({ detail: 'Недопустимый метод' }, 405);
+  let upstream: Response;
+  try { upstream = await pythonApi(path); }
+  catch { return json({ detail: 'Python API недоступен' }, 502); }
+  if (!upstream.ok) {
+    if (!/^application\/json(?:\s*;|$)/i.test(upstream.headers.get('content-type') || ''))
+      return json({ detail: 'Некорректный ответ Python API' }, 502);
+    try {
+      const detail = record(await upstream.json()).detail;
+      return json({ detail: typeof detail === 'string' ? detail : 'Ошибка Python API' }, upstream.status);
+    } catch { return json({ detail: 'Некорректный ответ Python API' }, 502); }
+  }
+  if (!/^text\/csv(?:\s*;|$)/i.test(upstream.headers.get('content-type') || ''))
+    return json({ detail: 'Некорректный ответ Python API' }, 502);
+  const declared = upstream.headers.get('content-length');
+  if (declared && Number(declared) > MAX_CSV_BYTES) return json({ detail: 'Результат слишком большой' }, 502);
+  const body = new Uint8Array(await upstream.arrayBuffer());
+  if (body.byteLength > MAX_CSV_BYTES) return json({ detail: 'Результат слишком большой' }, 502);
+  const rawFilename = upstream.headers.get('content-disposition') || '';
+  const date = /^attachment; filename="ai-serp-results-(\d{4}-\d{2}-\d{2})\.csv"$/.exec(rawFilename)?.[1]
+    || new Date().toISOString().slice(0, 10);
+  return new Response(body, { status: 200, headers: {
+    'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store',
+    'content-disposition': `attachment; filename="ai-serp-results-${date}.csv"`
+  } });
 }

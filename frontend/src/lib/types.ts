@@ -1,6 +1,7 @@
 export type ApiPath =
   | '/api/providers' | '/api/check' | '/api/form' | '/api/providers/settings'
   | '/api/search' | '/api/search/regions'
+  | '/api/runs' | `/api/runs?cursor=${string}` | `/api/runs/${string}`
   | `/api/providers/settings/${string}` | `/api/providers/${string}` | `/api/search/${string}`;
 
 export type SettingsModel = { id: string; model: string; name: string };
@@ -91,4 +92,27 @@ export type SearchSnapshot = {
   status: SearchJobStatus;
   summary: SearchSummary;
   results: SearchRow[];
+};
+
+export type RunStatus = 'pending' | 'done' | 'interrupted';
+export type RunCreated = { id: string; status: RunStatus };
+export type RunHistoryItem = { id: string; created_at: string; status: RunStatus; prompts: string[] };
+export type RunHistoryPage = { items: RunHistoryItem[]; next_cursor: string | null };
+export type RunSummaryRow = {
+  prompt: string; source: string; language: string; region: string; ai_answer: string;
+  site_found: string; position: string; brand_found: string; status: string;
+};
+export type RunModelRow = {
+  provider_id: string; prompt_index: number; provider_name: string; prompt: string;
+  status: string; answer: string | null; mentioned: boolean | null; error: string | null;
+};
+export type RunSearchRow = {
+  search_index: number; prompt_index: number; region_index: number; prompt: string;
+  region_id: number; region_name: string; status: string; position: number | null;
+  url: string | null; error: string | null;
+};
+export type RunSnapshot = {
+  id: string; created_at: string; finished_at: string | null; status: RunStatus;
+  brand: string; domain: string; prompts: string[]; provider_ids: string[]; regions: number[];
+  models: RunModelRow[]; search: RunSearchRow[]; summary_rows: RunSummaryRow[];
 };

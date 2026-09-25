@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   loadPageData, proxyJson, publicConfigurationFile, publicSearchRegions, publicSearchSnapshot,
   publicSettingsProvider, searchPath, settingsProviderPath
+  , publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv
 } from './python-api';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -86,6 +87,69 @@ describe('provider settings BFF', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>broken</html>', { headers: { 'content-type': 'text/html' } })));
     const response = await proxyJson(new Request('http://127.0.0.1:5173/api/providers/settings'), '/api/providers/settings', 'GET');
     expect(response.status).toBe(502);
+  });
+});
+
+describe('run BFF', () => {
+  const snapshot = {
+    id: 'abc-123_X', created_at: '2026-09-25T14:00:00Z', finished_at: null, status: 'pending',
+    brand: 'Ромашка', domain: 'example.ru', prompts: ['цветы'], provider_ids: ['p'], regions: [1],
+    models: [{ provider_id: 'p', prompt_index: 0, provider_name: 'Demo', prompt: 'цветы',
+      status: 'pending', answer: null, mentioned: null, error: null, api_key: 'secret' }],
+    search: [{ search_index: 0, prompt_index: 0, region_index: 0, prompt: 'цветы', region_id: 1,
+      region_name: 'Москва', status: 'submitting', position: null, url: null, error: null, operation_id: 'secret' }],
+    summary_rows: [{ prompt: 'цветы', source: 'Яндекс', language: 'ru', region: 'Москва', ai_answer: '—',
+      site_found: '—', position: '—', brand_found: '—', status: 'Выполняется', api_key: 'secret' }],
+    api_key: 'secret'
+  };
+
+  it('accepts only opaque IDs and validated cursors', () => {
+    expect(runPath('abc-123_X')).toBe('/api/runs/abc-123_X');
+    expect(runExportPath('abc-123_X')).toBe('/api/runs/abc-123_X/export.csv');
+    expect(runListPath('abc_X')).toBe('/api/runs?cursor=abc_X');
+    for (const id of ['../providers', 'a/b', 'a'.repeat(129), '']) expect(() => runPath(id)).toThrow();
+    for (const cursor of ['a/b', 'x&limit=1000', 'a'.repeat(257)]) expect(() => runListPath(cursor)).toThrow();
+  });
+
+  it('projects snapshots and history without secret fields', () => {
+    const projected = publicRunSnapshot(snapshot);
+    expect(projected).not.toHaveProperty('api_key');
+    expect(projected.models[0]).not.toHaveProperty('api_key');
+    expect(projected.search[0]).not.toHaveProperty('operation_id');
+    expect(projected.summary_rows[0]).not.toHaveProperty('api_key');
+    expect(publicRunList({ items: [{ id: 'abc-123_X', created_at: snapshot.created_at,
+      status: 'pending', prompts: ['цветы'], api_key: 'secret' }], next_cursor: null, api_key: 'secret' }))
+      .toEqual({ items: [{ id: 'abc-123_X', created_at: snapshot.created_at,
+        status: 'pending', prompts: ['цветы'] }], next_cursor: null });
+  });
+
+  it('blocks cross-origin deletes and handles empty 204 responses', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const forged = new Request('http://127.0.0.1:5173/api/runs/abc-123_X',
+      { method: 'DELETE', headers: { origin: 'https://other.example' } });
+    expect((await proxyJson(forged, runPath('abc-123_X'), 'DELETE')).status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockResolvedValue(new Response(null, { status: 204 }));
+    const local = new Request('http://127.0.0.1:5173/api/runs/abc-123_X', { method: 'DELETE' });
+    expect((await proxyJson(local, runPath('abc-123_X'), 'DELETE')).status).toBe(204);
+  });
+
+  it('rejects malformed JSON and preserves CSV bytes and safe headers', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{bad',
+      { headers: { 'content-type': 'application/json' } })));
+    expect((await proxyJson(new Request('http://127.0.0.1:5173/api/runs/abc-123_X'),
+      runPath('abc-123_X'), 'GET')).status).toBe(502);
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x3b, 0x62]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(bytes, { headers: {
+      'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="evil.html"',
+      'x-api-key': 'secret'
+    } })));
+    const response = await proxyCsv(new Request('http://127.0.0.1:5173/api/runs/abc-123_X/export.csv'), runExportPath('abc-123_X'));
+    expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual(Array.from(bytes));
+    expect(response.headers.get('content-type')).toContain('text/csv');
+    expect(response.headers.get('content-disposition')).not.toContain('evil.html');
+    expect(response.headers.get('x-api-key')).toBeNull();
   });
 });
 
