@@ -16,6 +16,7 @@ from app.core.errors import ValidationError
 from app.domain.limits import LIMITS, MAX_PROMPTS_TEXT_LENGTH
 
 MAX_SEARCH_PROMPT_LENGTH = 400
+MAX_SEARCH_PROMPT_WORDS = 40
 MAX_REGIONS = 5
 TOP_RESULTS = 10
 
@@ -48,6 +49,7 @@ INVALID_REQUEST = "Некорректный запрос"
 INVALID_SITE = "Укажите сайт: домен или ссылку http(s)"
 INVALID_QUESTIONS = "Укажите от 1 до 20 вопросов"
 INVALID_QUESTION_LENGTH = f"Каждый вопрос для поиска Яндекса должен содержать от 1 до {MAX_SEARCH_PROMPT_LENGTH} символов"
+INVALID_QUESTION_WORDS = f"Каждый вопрос для поиска Яндекса должен содержать не более {MAX_SEARCH_PROMPT_WORDS} слов"
 INVALID_REGIONS = f"Выберите от 1 до {MAX_REGIONS} разных регионов"
 
 
@@ -180,6 +182,8 @@ def _normalize_prompts(payload: dict) -> tuple[str, ...]:
     for prompt in prompts:
         if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= MAX_SEARCH_PROMPT_LENGTH:
             raise ValidationError(INVALID_QUESTION_LENGTH)
+        if len(prompt.split()) > MAX_SEARCH_PROMPT_WORDS:
+            raise ValidationError(INVALID_QUESTION_WORDS)
         normalized.append(prompt.strip())
     return tuple(normalized)
 

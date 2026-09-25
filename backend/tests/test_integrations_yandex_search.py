@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from app.core.errors import ProviderError
-from app.integrations.yandex_search import YandexSearchGateway
+from app.integrations.yandex_search import YandexSearchGateway, parse_documents
 
 SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/web/searchAsync"
 OPERATIONS_URL = "https://operation.api.cloud.yandex.net/operations"
@@ -84,6 +84,12 @@ async def test_keeps_only_the_first_ten_documents_in_order():
     assert len(documents) == 10
     assert documents[0].url == "https://site1.ru/page"
     assert documents[-1].url == "https://site10.ru/page"
+
+
+def test_a_document_without_a_url_is_a_malformed_result():
+    raw = b"<yandexsearch><doc><title>First</title></doc><doc><url>https://example.ru</url></doc></yandexsearch>"
+    with pytest.raises(ProviderError, match="Не удалось получить выдачу Яндекса"):
+        parse_documents(raw)
 
 
 @pytest.mark.anyio

@@ -3,6 +3,7 @@
 export const MAX_PROMPTS = 20;
 export const MAX_PROMPT_LENGTH = 500;
 export const MAX_SEARCH_PROMPT_LENGTH = 400;
+export const MAX_SEARCH_PROMPT_WORDS = 40;
 export const MAX_REGIONS = 5;
 
 export type RunInput = {
@@ -66,6 +67,9 @@ export function validateRun(input: RunInput): string | null {
     if (new Set(input.regions).size !== input.regions.length) return 'Один регион можно выбрать только один раз';
     if (prompts.some((prompt) => prompt.length > MAX_SEARCH_PROMPT_LENGTH)) {
       return `Для поиска в Яндексе вопрос должен быть не длиннее ${MAX_SEARCH_PROMPT_LENGTH} символов`;
+    }
+    if (prompts.some((prompt) => prompt.split(/\s+/u).length > MAX_SEARCH_PROMPT_WORDS)) {
+      return `Для поиска в Яндексе вопрос должен содержать не более ${MAX_SEARCH_PROMPT_WORDS} слов`;
     }
   }
 

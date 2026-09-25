@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import secrets
 import time
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from app.core.errors import ConfigurationError, ProviderError, SearchJobNotFound
@@ -41,6 +42,8 @@ FINISHED_JOB_TTL_SECONDS = 60 * 60
 DEFAULT_POLL_INTERVAL = 30.0
 MAX_POLL_INTERVAL = 300.0
 DEFAULT_MAX_CONCURRENCY = 5
+MAX_REQUESTS_PER_SECOND = 10
+DEFAULT_CLEANUP_INTERVAL = 60.0
 
 MISSING_CREDENTIALS = "Не заданы ключ и каталог для поиска Яндекса"
 JOB_NOT_FOUND = "Задача поиска не найдена"
@@ -175,8 +178,41 @@ class InMemorySearchJobStore:
     def remove(self, job_id: str) -> None:
         self._jobs.pop(job_id, None)
 
+    def __len__(self) -> int:
+        return len(self._jobs)
+
     def expired(self, now: float, job_ttl: float, finished_job_ttl: float) -> list[SearchJob]:
         return [job for job in self._jobs.values() if job.deadline(job_ttl, finished_job_ttl) <= now]
+
+
+class AsyncRequestRateLimiter:
+    """Bound one API operation type to a rolling one-second quota."""
+
+    def __init__(
+        self,
+        limit: int,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self.limit = limit
+        self.clock = clock
+        self.sleep = sleep
+        self.events: deque[float] = deque()
+        self.lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        if self.limit <= 0:
+            return
+        async with self.lock:
+            while True:
+                now = self.clock()
+                while self.events and now - self.events[0] >= 1.0:
+                    self.events.popleft()
+                if len(self.events) < self.limit:
+                    self.events.append(now)
+                    return
+                await self.sleep(max(0.0, self.events[0] + 1.0 - now))
 
 
 class SearchService:
@@ -196,6 +232,10 @@ class SearchService:
         max_poll_interval: float = MAX_POLL_INTERVAL,
         job_ttl: float = JOB_TTL_SECONDS,
         finished_job_ttl: float = FINISHED_JOB_TTL_SECONDS,
+        cleanup_interval: float = DEFAULT_CLEANUP_INTERVAL,
+        max_requests_per_second: int = MAX_REQUESTS_PER_SECOND,
+        request_clock: Callable[[], float] = time.monotonic,
+        request_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.gateway = gateway
@@ -203,10 +243,14 @@ class SearchService:
         self.max_poll_interval = max_poll_interval
         self.job_ttl = job_ttl
         self.finished_job_ttl = finished_job_ttl
+        self.cleanup_interval = cleanup_interval
         self.clock = clock
         self.store = InMemorySearchJobStore()
         self.semaphore = asyncio.Semaphore(max_concurrency)
+        self.submit_limiter = AsyncRequestRateLimiter(max_requests_per_second, clock=request_clock, sleep=request_sleep)
+        self.result_limiter = AsyncRequestRateLimiter(max_requests_per_second, clock=request_clock, sleep=request_sleep)
         self.tasks: dict[str, asyncio.Task] = {}
+        self.cleanup_task: asyncio.Task | None = None
 
     async def start(self, payload: object) -> dict[str, object]:
         """Validate a run, create its pairs, and return before any pair finishes."""
@@ -220,6 +264,8 @@ class SearchService:
         task = asyncio.create_task(self._run(job))
         self.tasks[job.id] = task
         task.add_done_callback(lambda _task, job_id=job.id: self.tasks.pop(job_id, None))
+        if self.cleanup_task is None or self.cleanup_task.done():
+            self.cleanup_task = asyncio.create_task(self._cleanup_expired_periodically())
         return {"id": job.id, "total": job.total, "status": job.status}
 
     def snapshot(self, job_id: str) -> dict[str, object]:
@@ -233,11 +279,14 @@ class SearchService:
     async def close(self) -> None:
         """Cancel the work still in flight; safe to call more than once."""
         pending = list(self.tasks.values())
+        if self.cleanup_task is not None:
+            pending.append(self.cleanup_task)
         for task in pending:
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self.tasks.clear()
+        self.cleanup_task = None
 
     def _create_job(self, request: SearchInput) -> SearchJob:
         rows = [
@@ -261,6 +310,11 @@ class SearchService:
             if task is not None:
                 task.cancel()
 
+    async def _cleanup_expired_periodically(self) -> None:
+        while len(self.store):
+            await asyncio.sleep(self.cleanup_interval)
+            self._drop_expired()
+
     async def _run(self, job: SearchJob) -> None:
         await asyncio.gather(*(self._run_pair(job, row) for row in job.rows))
 
@@ -269,11 +323,13 @@ class SearchService:
         assert gateway is not None  # `start` refuses a run without credentials
         try:
             async with self.semaphore:
+                await self.submit_limiter.acquire()
                 operation_id = await gateway.submit(row.prompt, row.region)
             row.status = STATUS_WAITING
             delay = self.poll_interval
             while True:
                 async with self.semaphore:
+                    await self.result_limiter.acquire()
                     documents: tuple[SearchDocument, ...] | None = await gateway.result(operation_id)
                 if documents is not None:
                     row.finish(first_matching_result(job.host, documents), self.clock())

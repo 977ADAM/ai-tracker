@@ -9,7 +9,7 @@ import pytest
 
 from app.core.errors import ConfigurationError, ProviderError, ValidationError
 from app.domain.search import SearchDocument
-from app.service.search import SearchJobNotFound, SearchService
+from app.service.search import AsyncRequestRateLimiter, SearchJobNotFound, SearchService
 
 FOUND_REGION = 1
 ABSENT_REGION = 213
@@ -66,7 +66,7 @@ def payload(**overrides: object) -> dict[str, object]:
 
 
 def service(gateway, **overrides) -> SearchService:
-    options: dict[str, object] = {"poll_interval": 0}
+    options: dict[str, object] = {"poll_interval": 0, "max_requests_per_second": 0}
     options.update(overrides)
     return SearchService(gateway, **options)
 
@@ -295,4 +295,79 @@ async def test_invalid_input_is_rejected_before_any_paid_request():
         await search.start(payload(prompts_text="x" * 401))
 
     assert gateway.submitted == []
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_rate_limiter_allows_at_most_ten_calls_per_rolling_second():
+    clock = FakeClock()
+
+    async def advance(seconds: float) -> None:
+        clock.advance(seconds)
+        await asyncio.sleep(0)
+
+    limiter = AsyncRequestRateLimiter(10, clock=clock, sleep=advance)
+    times = []
+    for _ in range(21):
+        await limiter.acquire()
+        times.append(clock())
+
+    assert times[:10] == [0] * 10
+    assert times[10:20] == [1] * 10
+    assert times[20] == 2
+
+
+@pytest.mark.anyio
+async def test_service_applies_separate_submit_and_result_quotas():
+    clock = FakeClock()
+
+    async def advance(seconds: float) -> None:
+        clock.advance(seconds)
+        await asyncio.sleep(0)
+
+    class TimedGateway(FakeGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.submit_times: list[float] = []
+            self.result_times: list[float] = []
+
+        async def submit(self, prompt: str, region: int) -> str:
+            self.submit_times.append(clock())
+            return await super().submit(prompt, region)
+
+        async def result(self, operation_id: str) -> tuple[SearchDocument, ...] | None:
+            self.result_times.append(clock())
+            return await super().result(operation_id)
+
+    gateway = TimedGateway()
+    search = service(
+        gateway,
+        max_requests_per_second=10,
+        request_clock=clock,
+        request_sleep=advance,
+    )
+    job = await search.start(payload(prompts_text="\n".join(f"вопрос {index}" for index in range(11))))
+    await settle(search, job["id"])
+
+    assert len(gateway.submit_times) == 11
+    assert len(gateway.result_times) == 22
+    for times in (gateway.submit_times, gateway.result_times):
+        assert all(sum(start <= value < start + 1 for value in times) <= 10 for start in times)
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_expired_jobs_are_cleaned_without_another_request():
+    clock = FakeClock()
+    search = service(FakeGateway(), clock=clock, finished_job_ttl=1, cleanup_interval=0.01)
+    job = await search.start(payload())
+    await settle(search, job["id"])
+
+    clock.advance(1)
+    for _ in range(20):
+        if search.store.get(job["id"]) is None:
+            break
+        await asyncio.sleep(0.01)
+
+    assert search.store.get(job["id"]) is None
     await search.close()

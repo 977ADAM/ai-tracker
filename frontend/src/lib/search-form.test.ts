@@ -29,6 +29,11 @@ describe('validateRun', () => {
     expect(validateRun({ ...base, promptsText: 'x'.repeat(400), regions: [1] })).toBeNull();
   });
 
+  it('holds Yandex questions to 40 words', () => {
+    expect(validateRun({ ...base, promptsText: Array(40).fill('слово').join(' '), regions: [1] })).toBeNull();
+    expect(validateRun({ ...base, promptsText: Array(41).fill('слово').join(' '), regions: [1] })).toMatch(/40/);
+  });
+
   it('rejects repeated, extra, or missing regions', () => {
     expect(validateRun({ ...base, regions: [1, 1] })).toMatch(/один раз/);
     expect(validateRun({ ...base, regions: [1, 213, 2, 54, 65, 43] })).toMatch(/5/);

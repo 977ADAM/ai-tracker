@@ -126,6 +126,7 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
+    if (loading || searchRunning) return;
     error = '';
     const problem = validateRun({ brand, domain, promptsText, providerIds: selected, regions: chosenRegions });
     if (problem) {
@@ -241,7 +242,7 @@
       {#if error}<p role="alert" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>{/if}
       <div class="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
         <p class="max-w-xl text-xs leading-5 text-muted">Вопросы отправляются выбранным моделям по очереди, а Яндекс ищет сайт по каждому вопросу и региону. Результат отражает ответы API и выдачу на момент проверки.</p>
-        <button type="submit" disabled={loading || !data.form} class="inline-flex min-h-12 items-center justify-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-wait disabled:opacity-60">{loading ? 'Проверяем…' : 'Проверить бренд'}<span aria-hidden="true">↗</span></button>
+        <button type="submit" disabled={loading || searchRunning || !data.form} class="inline-flex min-h-12 items-center justify-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-wait disabled:opacity-60">{loading ? 'Проверяем…' : 'Проверить бренд'}<span aria-hidden="true">↗</span></button>
       </div>
     </form>
   </section>

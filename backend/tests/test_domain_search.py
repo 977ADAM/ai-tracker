@@ -136,6 +136,14 @@ def test_search_accepts_a_400_character_question():
     assert result.prompts == ("x" * 400,)
 
 
+def test_search_rejects_more_than_forty_words():
+    with pytest.raises(ValidationError, match="40"):
+        normalize_search_request(payload(prompts_text=" ".join(["слово"] * 41)))
+
+    result = normalize_search_request(payload(prompts_text=" ".join(["слово"] * 40)))
+    assert len(result.prompts[0].split()) == 40
+
+
 def test_subdomains_match_but_lookalikes_do_not():
     docs = (
         SearchDocument("https://example.ru.attacker.test/x"),

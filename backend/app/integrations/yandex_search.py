@@ -63,8 +63,9 @@ def parse_documents(raw: bytes) -> tuple[SearchDocument, ...]:
     documents = []
     for element in root.iter("doc"):
         url = element.findtext("url")
-        if isinstance(url, str) and url.strip():
-            documents.append(SearchDocument(url=url.strip()))
+        if not isinstance(url, str) or not url.strip():
+            raise ProviderError(RESULT_FAILED)
+        documents.append(SearchDocument(url=url.strip()))
     return tuple(documents[:TOP_RESULTS])
 
 

@@ -171,6 +171,29 @@ def test_a_search_only_run_polls_until_every_pair_is_finished(page: Page, applic
     expect(page.locator("[data-search-row]")).to_have_count(2)
 
 
+def test_a_pending_search_cannot_be_submitted_twice(page: Page, application: Application) -> None:
+    starts = []
+
+    def start_search(route) -> None:
+        starts.append(1)
+        route.fulfill(status=202, json={"id": "job-1", "total": 2, "status": "pending"})
+
+    route_regions(page)
+    page.route("**/api/search", start_search)
+    page.route("**/api/search/job-1", lambda route: route.fulfill(json=PENDING_JOB))
+    page.goto(application.base_url, wait_until="networkidle")
+    select_no_models(page)
+    add_two_regions(page)
+    fill_questions(page, brand=False)
+
+    submit = page.get_by_role("button", name="Проверить бренд")
+    submit.click()
+    expect(page.get_by_text("Готово 1 из 2")).to_be_visible()
+    expect(submit).to_be_disabled()
+    page.locator("form").evaluate("form => form.requestSubmit()")
+    assert starts == [1]
+
+
 def test_a_model_report_survives_a_failed_search(
     page: Page, settings_page: SettingsPage, application: Application
 ) -> None:
