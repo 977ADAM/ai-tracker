@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.errors import ValidationError
+from app.core.errors import StorageError, ValidationError
 from app.service.checks import MISSING_KEY_MESSAGE, CheckService
 from app.service.connections import ConnectionService
 from tests.fakes import ABSENT_ANSWER, MENTION_ANSWER, ProviderFactorySpy
@@ -185,3 +185,39 @@ def test_rows_carry_the_provider_name(connections):
         "status": "mentioned",
         "provider_name": "GigaChat",
     }]
+
+
+def test_callback_publishes_each_answer_before_the_next_call(connections):
+    configure(connections, "gigachat")
+    service, spy = check_service(connections)
+    seen = []
+
+    def publish(provider_id, index, result):
+        seen.append((provider_id, index, result.status, list(spy.prompts)))
+
+    report = service.run(
+        {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["gigachat"]},
+        on_result=publish,
+    )
+
+    assert seen == [
+        ("gigachat", 0, "mentioned", [("gigachat", "успех")]),
+        ("gigachat", 1, "mentioned", [("gigachat", "успех"), ("gigachat", "другой")]),
+    ]
+    assert report["summary"]["successful"] == 2
+
+
+def test_storage_failure_stops_model_calls(connections):
+    configure(connections, "gigachat")
+    service, spy = check_service(connections)
+
+    def fail(_provider_id, _index, _result):
+        raise StorageError("disk failure")
+
+    with pytest.raises(StorageError, match="disk failure"):
+        service.run(
+            {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["gigachat"]},
+            on_result=fail,
+        )
+    assert spy.prompts == [("gigachat", "успех")]
+    assert spy.providers["gigachat"].closed is True

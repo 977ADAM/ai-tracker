@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from app.core.errors import (
@@ -40,7 +41,9 @@ class CheckService:
         self.connections = connections
         self.factory = factory
 
-    def run(self, payload: object) -> dict[str, Any]:
+    def run(
+        self, payload: object, *, on_result: Callable[[str, int, PromptResult], None] | None = None,
+    ) -> dict[str, Any]:
         check_input = normalize_check_request(payload)
         selected_ids = normalize_provider_ids(payload)
         known = self._known_connections()
@@ -48,7 +51,8 @@ class CheckService:
             raise ValidationError(UNKNOWN_CONNECTION_MESSAGE)
 
         checks = tuple(
-            self._run_connection(known[connection_id], check_input) for connection_id in selected_ids
+            self._run_connection(known[connection_id], check_input, on_result)
+            for connection_id in selected_ids
         )
         return CheckReport(
             brand=check_input.brand,
@@ -63,12 +67,18 @@ class CheckService:
         except StorageError as exc:
             raise ConfigurationError(str(exc)) from exc
 
-    def _run_connection(self, connection: Connection, check_input: CheckInput) -> ProviderCheck:
+    def _run_connection(
+        self, connection: Connection, check_input: CheckInput,
+        on_result: Callable[[str, int, PromptResult], None] | None,
+    ) -> ProviderCheck:
         provider, setup_error = self._prepare(connection)
         results: list[PromptResult] = []
         try:
-            for prompt in check_input.prompts:
-                results.append(self._ask(provider, setup_error, prompt, check_input.brand))
+            for index, prompt in enumerate(check_input.prompts):
+                result = self._ask(provider, setup_error, prompt, check_input.brand)
+                results.append(result)
+                if on_result is not None:
+                    on_result(connection.id, index, result)
         finally:
             self._close(provider)
         return ProviderCheck(
