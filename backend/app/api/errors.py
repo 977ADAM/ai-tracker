@@ -8,7 +8,13 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.core.errors import AppError, ConfigurationError, StorageError, ValidationError
+from app.core.errors import (
+    AppError,
+    ConfigurationError,
+    SearchJobNotFound,
+    StorageError,
+    ValidationError,
+)
 
 log = logging.getLogger("ai_tracker")
 
@@ -17,6 +23,7 @@ STATUS_BY_ERROR: tuple[tuple[type[AppError], int], ...] = (
     (ValidationError, 400),
     (ConfigurationError, 400),
     (StorageError, 503),
+    (SearchJobNotFound, 404),
 )
 
 INVALID_REQUEST_MESSAGE = "Некорректный запрос"

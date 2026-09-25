@@ -21,12 +21,25 @@ from tests.fakes import TEST_PRESETS, MemorySecrets
 # The trusted-host guard allows loopback only, so the test client speaks as 127.0.0.1.
 TEST_BASE_URL = "http://127.0.0.1"
 
-ENV_KEY_VARIABLES = ("GIGACHAT_AUTH_KEY", "DEEPSEEK_API_KEY")
+ENV_KEY_VARIABLES = (
+    "GIGACHAT_AUTH_KEY",
+    "DEEPSEEK_API_KEY",
+    "YANDEX_SEARCH_API_KEY",
+    "YANDEX_SEARCH_FOLDER_ID",
+    # Legacy names for the same Yandex credentials.
+    "API_KEY",
+    "FOLDER_ID",
+)
 
 
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the API-key fallbacks out of every test unless it sets one itself."""
+    """Keep every credential fallback out of tests unless one sets it itself.
+
+    The application reads the repository `.env` at import, so a developer's own
+    keys would otherwise reach the tests and turn a "missing credentials" case
+    into a real paid call.
+    """
     for variable in ENV_KEY_VARIABLES:
         monkeypatch.delenv(variable, raising=False)
 
@@ -68,11 +81,11 @@ def make_client(
         client_options: dict[str, object] | None = None,
         **overrides: object,
     ) -> TestClient:
-        application.dependency_overrides[get_container] = lambda: build_container(
-            settings,
-            secrets=secrets,
-            **overrides,
-        )
+        # The container is built once, exactly like `app.main` builds it at
+        # import: the search service keeps job state in memory, so every request
+        # of one client must reach the same service.
+        container = build_container(settings, secrets=secrets, **overrides)
+        application.dependency_overrides[get_container] = lambda: container
         return TestClient(application, base_url=TEST_BASE_URL, **(client_options or {}))
 
     yield build

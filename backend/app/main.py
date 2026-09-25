@@ -21,7 +21,7 @@ from app.api.errors import (
 )
 from app.api.openapi import install_openapi
 from app.api.router import api_router
-from app.core.config import Settings
+from app.core.config import Settings, load_env_file
 from app.core.errors import AppError
 
 TITLE = "ИИ-трекинг API"
@@ -33,12 +33,22 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 
 log = logging.getLogger("ai_tracker")
 
+# Credentials come from the environment; the repository `.env` only fills the
+# gaps, so an explicitly exported variable always wins.
+load_env_file()
+
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings: Settings = application.state.settings
+    container = application.state.container
     log.info("ИИ-трекинг API запущен: настройки подключений в %s", settings.config_dir)
     yield
+    # Search results are in-memory only: cancel the work in flight and close the
+    # shared Yandex client on the way down.
+    await container.search.close()
+    if container.search_client is not None:
+        await container.search_client.aclose()
     log.info("ИИ-трекинг API остановлен")
 
 

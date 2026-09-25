@@ -6,6 +6,7 @@ from typing import Any
 
 from app.core.config import ConnectionPreset
 from app.core.errors import ProviderError
+from app.domain.search import SearchDocument
 
 MENTION_ANSWER = "Ромашка рекомендует этот вариант"
 ABSENT_ANSWER = "Ничего не найдено"
@@ -126,3 +127,43 @@ class ProviderFactorySpy:
 
         provider.answer = answer_and_record  # type: ignore[method-assign]
         return provider
+
+
+class FakeSearchGateway:
+    """A Yandex search gateway that records pairs and answers without any network.
+
+    `outcome` maps a region ID to `found`, `absent`, or `error`; every other
+    region is treated as found. `pending_polls` keeps an operation unfinished for
+    its first N polls, so a test can observe a job that is still running.
+    """
+
+    def __init__(
+        self,
+        outcome: dict[int, str] | None = None,
+        *,
+        pending_polls: int = 0,
+        message: str = "Поиск Яндекса завершился ошибкой",
+    ) -> None:
+        self.outcome = outcome or {}
+        self.pending_polls = pending_polls
+        self.message = message
+        self.submitted: list[tuple[str, int]] = []
+        self.polls: dict[str, int] = {}
+        self.regions: dict[str, int] = {}
+
+    async def submit(self, prompt: str, region: int) -> str:
+        operation_id = f"yandex-operation-{len(self.submitted) + 1}"
+        self.submitted.append((prompt, region))
+        self.regions[operation_id] = region
+        return operation_id
+
+    async def result(self, operation_id: str) -> tuple[SearchDocument, ...] | None:
+        self.polls[operation_id] = self.polls.get(operation_id, 0) + 1
+        if self.polls[operation_id] <= self.pending_polls:
+            return None
+        outcome = self.outcome.get(self.regions[operation_id], "found")
+        if outcome == "error":
+            raise ProviderError(self.message)
+        if outcome == "absent":
+            return (SearchDocument("https://other.ru/"),)
+        return (SearchDocument("https://other.ru/"), SearchDocument("https://example.ru/page"))

@@ -112,10 +112,15 @@ def test_openapi_documents_every_operation(client):
     assert set(spec["paths"]) == {
         "/api/form", "/api/providers", "/api/providers/{connection_id}", "/api/check",
         "/api/providers/settings", "/api/providers/settings/file", "/api/providers/settings/{group_id}",
+        "/api/search", "/api/search/regions", "/api/search/{job_id}",
     }
     for path, operations in spec["paths"].items():
         for method, operation in operations.items():
-            assert operation["responses"]["200"]["content"]["application/json"]["schema"], (method, path)
+            # One documented success status per operation: 200 for a result,
+            # 202 for a job that keeps running in the background.
+            success = [status for status in ("200", "201", "202") if status in operation["responses"]]
+            assert len(success) == 1, (method, path)
+            assert operation["responses"][success[0]]["content"]["application/json"]["schema"], (method, path)
             # Schema violations answer 400, so an advertised 422 would be a lie.
             assert "422" not in operation["responses"], (method, path)
 
