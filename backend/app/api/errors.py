@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from app.core.errors import (
     AppError,
     ConfigurationError,
+    RunConflict,
+    RunNotFound,
     SearchJobNotFound,
     StorageError,
     ValidationError,
@@ -24,6 +26,8 @@ STATUS_BY_ERROR: tuple[tuple[type[AppError], int], ...] = (
     (ConfigurationError, 400),
     (StorageError, 503),
     (SearchJobNotFound, 404),
+    (RunNotFound, 404),
+    (RunConflict, 409),
 )
 
 INVALID_REQUEST_MESSAGE = "Некорректный запрос"

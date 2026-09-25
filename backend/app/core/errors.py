@@ -30,3 +30,11 @@ class ProviderError(AppError):
 
 class SearchJobNotFound(AppError):
     """A search job ID is unknown or its result is no longer retained."""
+
+
+class RunNotFound(AppError):
+    """A saved run ID is unknown or was deleted."""
+
+
+class RunConflict(AppError):
+    """An operation needs a terminal run but the run is still active."""
