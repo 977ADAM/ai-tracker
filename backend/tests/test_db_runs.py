@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -10,6 +12,7 @@ from app.core.errors import RunConflict, RunNotFound, StorageError, ValidationEr
 from app.db.runs import RunRepository
 from app.domain.models import PromptResult
 from app.domain.runs import RunInput
+from app.service.run_export import render_run_csv
 from app.service.search import SearchRow
 
 
@@ -121,3 +124,112 @@ def test_unusable_database_fails_safely(tmp_path):
     with pytest.raises(StorageError) as raised:
         repo(tmp_path)
     assert str(path) not in str(raised.value)
+
+
+def test_snapshot_remains_complete_while_terminal_run_is_deleted(tmp_path, run_input):
+    reader = repo(tmp_path)
+    reader.create("run-1", run_input, {"p": "ChatGPT"}, "2026-09-25T14:00:00Z")
+    reader.fail_pending_branch("run-1", "model", "Ошибка")
+    reader.fail_pending_branch("run-1", "search", "Ошибка")
+    deleter = repo(tmp_path)
+    header_read, release_read, delete_started, delete_done = Event(), Event(), Event(), Event()
+    original = reader._require_run
+
+    def pause_after_header(connection, run_id):
+        row = original(connection, run_id)
+        header_read.set()
+        assert release_read.wait(2)
+        return row
+
+    reader._require_run = pause_after_header
+
+    def delete() -> None:
+        delete_started.set()
+        deleter.delete("run-1")
+        delete_done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        snapshot_future = pool.submit(reader.get, "run-1")
+        assert header_read.wait(2)
+        deletion_future = pool.submit(delete)
+        assert delete_started.wait(2)
+        assert not delete_done.wait(0.05)
+        release_read.set()
+        snapshot = snapshot_future.result(timeout=2)
+        deletion_future.result(timeout=2)
+    assert snapshot["status"] == "done"
+    assert len(snapshot["summary_rows"]) == 4
+    assert delete_done.is_set()
+
+
+def test_history_page_survives_concurrent_terminal_deletion(tmp_path, run_input):
+    reader = repo(tmp_path)
+    reader.create("run-1", run_input, {"p": "ChatGPT"}, "2026-09-25T14:00:00Z")
+    reader.fail_pending_branch("run-1", "model", "Ошибка")
+    reader.fail_pending_branch("run-1", "search", "Ошибка")
+    deleter = repo(tmp_path)
+    selected, release_read, delete_started, delete_done = Event(), Event(), Event(), Event()
+    original = reader._require_run
+
+    def pause_snapshot(connection, run_id):
+        selected.set()
+        assert release_read.wait(2)
+        return original(connection, run_id)
+
+    reader._require_run = pause_snapshot
+
+    def delete() -> None:
+        delete_started.set()
+        deleter.delete("run-1")
+        delete_done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        page_future = pool.submit(reader.list_page)
+        assert selected.wait(2)
+        deletion_future = pool.submit(delete)
+        assert delete_started.wait(2)
+        assert not delete_done.wait(0.05)
+        release_read.set()
+        page = page_future.result(timeout=2)
+        deletion_future.result(timeout=2)
+    assert page["items"][0]["id"] == "run-1"
+    assert delete_done.is_set()
+
+
+def test_export_and_delete_wait_for_last_row_commit(tmp_path):
+    repository = repo(tmp_path)
+    request = RunInput("Ромашка", "", ("цветы",), ("p",), (), None)
+    repository.create("run-1", request, {"p": "ChatGPT"}, "2026-09-25T14:00:00Z")
+    row_written, release_finish, delete_started, delete_done = Event(), Event(), Event(), Event()
+    original = repository._finish_if_terminal
+
+    def pause_before_finish(connection, run_id):
+        row_written.set()
+        assert release_finish.wait(2)
+        return original(connection, run_id)
+
+    repository._finish_if_terminal = pause_before_finish
+    deleter = repo(tmp_path)
+
+    def delete() -> None:
+        delete_started.set()
+        deleter.delete("run-1")
+        delete_done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        save_future = pool.submit(
+            repository.save_model, "run-1", "p", 0,
+            PromptResult("цветы", "Ромашка", True, None, "mentioned"),
+        )
+        assert row_written.wait(2)
+        pending_snapshot = deleter.get("run-1")
+        assert pending_snapshot["status"] == "pending"
+        with pytest.raises(RunConflict):
+            render_run_csv(pending_snapshot)
+        delete_future = pool.submit(delete)
+        assert delete_started.wait(2)
+        assert not delete_done.wait(0.05)
+        release_finish.set()
+        save_future.result(timeout=2)
+        delete_future.result(timeout=2)
+    assert delete_done.is_set()

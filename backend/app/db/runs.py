@@ -98,17 +98,15 @@ class RunRepository:
             connection = sqlite3.connect(self.path, timeout=5)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys=ON")
-            if write:
-                connection.execute("BEGIN IMMEDIATE")
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield connection
-            if write:
-                connection.commit()
+            connection.commit()
         except sqlite3.Error as exc:
-            if connection is not None and write:
+            if connection is not None:
                 connection.rollback()
             raise StorageError(STORAGE_FAILED) from exc
         except Exception:
-            if connection is not None and write:
+            if connection is not None:
                 connection.rollback()
             raise
         finally:
@@ -197,18 +195,22 @@ class RunRepository:
 
     def get(self, run_id: str) -> dict:
         with self._connection() as connection:
-            run = self._require_run(connection, run_id)
-            models = [dict(row) for row in connection.execute(
+            return self._snapshot(connection, run_id)
+
+    def _snapshot(self, connection: sqlite3.Connection, run_id: str) -> dict:
+        """Build one complete result from the caller's consistent transaction."""
+        run = self._require_run(connection, run_id)
+        models = [dict(row) for row in connection.execute(
                 "SELECT provider_id, prompt_index, provider_name, prompt, status, answer, mentioned, error "
                 "FROM model_rows WHERE run_id=? ORDER BY rowid", (run_id,),
-            )]
-            for row in models:
-                row["mentioned"] = bool(row["mentioned"]) if row["mentioned"] is not None else None
-            search = [dict(row) for row in connection.execute(
+        )]
+        for row in models:
+            row["mentioned"] = bool(row["mentioned"]) if row["mentioned"] is not None else None
+        search = [dict(row) for row in connection.execute(
                 "SELECT search_index, prompt_index, region_index, prompt, region_id, region_name, "
                 "status, position, url, error FROM search_rows WHERE run_id=? ORDER BY search_index",
                 (run_id,),
-            )]
+        )]
         try:
             prompts = json.loads(run["prompts_json"])
             provider_ids = tuple(json.loads(run["provider_ids_json"]))
@@ -236,14 +238,14 @@ class RunRepository:
                 f"SELECT id, created_at, finished_at, prompts_json FROM runs {where} "
                 "ORDER BY created_at DESC, id DESC LIMIT ?", params,
             ).fetchall()
-        page = rows[:limit]
-        items = []
-        for row in page:
-            snapshot = self.get(row["id"])
-            items.append({
-                "id": row["id"], "created_at": row["created_at"],
-                "status": snapshot["status"], "prompts": snapshot["prompts"],
-            })
+            page = rows[:limit]
+            items = []
+            for row in page:
+                snapshot = self._snapshot(connection, row["id"])
+                items.append({
+                    "id": row["id"], "created_at": row["created_at"],
+                    "status": snapshot["status"], "prompts": snapshot["prompts"],
+                })
         next_cursor = self._encode_cursor(page[-1]["created_at"], page[-1]["id"]) if len(rows) > limit else None
         return {"items": items, "next_cursor": next_cursor}
 

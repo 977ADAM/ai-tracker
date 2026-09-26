@@ -96,3 +96,91 @@ async def test_storage_failure_prevents_external_calls(tmp_path, repository, set
     assert search.gateway.submitted == []
     await runs.close()
     await search.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failed_branch", ["model", "search"])
+async def test_storage_failure_stops_paid_work_and_reports_unavailable(
+    tmp_path, repository, settings, failed_branch,
+):
+    class SlowGateway(FakeGateway):
+        async def submit(self, prompt, region):
+            await asyncio.sleep(0.002)
+            return await super().submit(prompt, region)
+
+    gateway = SlowGateway(polls_before_answer=0)
+    runs, factory, search = make_runs(tmp_path, repository, settings, gateway)
+
+    def fail(*_args):
+        raise StorageError("storage unavailable")
+
+    if failed_branch == "model":
+        runs.repository.save_model = fail
+    else:
+        runs.repository.save_search = fail
+    payload = {"brand": "Ромашка", "domain": "example.ru",
+               "prompts_text": "\n".join(f"вопрос {index}" for index in range(20)),
+               "provider_ids": ["gigachat"], "regions": [1, 213, 2, 54, 65]}
+    created = await runs.start(payload)
+    for _ in range(200):
+        if runs.stopping.is_set():
+            break
+        await asyncio.sleep(0.001)
+    assert runs.stopping.is_set()
+    submitted = len(gateway.submitted)
+    await asyncio.sleep(0.05)
+    assert len(gateway.submitted) == submitted
+    with pytest.raises(StorageError):
+        runs.snapshot(created["id"])
+    provider_calls = len(factory.prompts)
+    with pytest.raises(StorageError):
+        await runs.start(payload)
+    assert len(factory.prompts) == provider_calls
+    await runs.close()
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_branch_error_write_failure_degrades_the_run_service(tmp_path, repository, settings):
+    runs, _factory, search = make_runs(tmp_path, repository, settings)
+
+    def fail(*_args):
+        raise StorageError("storage unavailable")
+
+    runs.repository.fail_pending_branch = fail
+    payload = {"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
+               "provider_ids": ["gigachat"], "regions": [1]}
+    with pytest.raises(StorageError):
+        await runs.start(payload)
+    assert runs.stopping.is_set()
+    with pytest.raises(StorageError):
+        await runs.start(payload)
+    await runs.close()
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_read_failure_cancels_pending_paid_search(tmp_path, repository, settings):
+    class SlowGateway(FakeGateway):
+        async def submit(self, prompt, region):
+            await asyncio.sleep(0.002)
+            return await super().submit(prompt, region)
+
+    gateway = SlowGateway(polls_before_answer=0)
+    runs, _factory, search = make_runs(tmp_path, repository, settings, gateway)
+    payload = {"domain": "example.ru", "prompts_text": "\n".join(f"вопрос {i}" for i in range(20)),
+               "provider_ids": [], "regions": [1, 213, 2, 54, 65]}
+    created = await runs.start(payload)
+
+    def fail(*_args):
+        raise StorageError("storage unavailable")
+
+    runs.repository.get = fail
+    with pytest.raises(StorageError):
+        runs.snapshot(created["id"])
+    assert runs.stopping.is_set()
+    submitted = len(gateway.submitted)
+    await asyncio.sleep(0.05)
+    assert len(gateway.submitted) == submitted
+    await runs.close()
+    await search.close()

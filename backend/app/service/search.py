@@ -266,6 +266,7 @@ class SearchService:
         self, payload: object, *,
         on_row: Callable[[int, SearchRow], None] | None = None,
         on_expire: Callable[[], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, object]:
         """Validate a run, create its pairs, and return before any pair finishes."""
         if self.gateway is None:
@@ -277,7 +278,7 @@ class SearchService:
         self.store.add(job)
         if on_expire is not None:
             self.expiry_callbacks[job.id] = on_expire
-        task = asyncio.create_task(self._run(job, on_row))
+        task = asyncio.create_task(self._run(job, on_row, should_stop))
         self.tasks[job.id] = task
         task.add_done_callback(lambda finished, job_id=job.id: self._task_done(job_id, finished))
         if self.cleanup_task is None or self.cleanup_task.done():
@@ -291,6 +292,14 @@ class SearchService:
         if job is None:
             raise SearchJobNotFound(JOB_NOT_FOUND)
         return job.as_dict()
+
+    def abort(self, job_id: str) -> None:
+        """Cancel one live durable job after its persistence has failed."""
+        task = self.tasks.get(job_id)
+        if task is not None:
+            task.cancel()
+        for worker in self.pair_tasks.get(job_id, ()):
+            worker.cancel()
 
     async def close(self) -> None:
         """Cancel the work still in flight; safe to call more than once."""
@@ -352,6 +361,7 @@ class SearchService:
 
     async def _run(
         self, job: SearchJob, on_row: Callable[[int, SearchRow], None] | None,
+        should_stop: Callable[[], bool] | None,
     ) -> None:
         next_index = 0
 
@@ -360,7 +370,7 @@ class SearchService:
             while next_index < len(job.rows):
                 index = next_index
                 next_index += 1
-                await self._run_pair(job, index, job.rows[index], on_row)
+                await self._run_pair(job, index, job.rows[index], on_row, should_stop)
 
         try:
             async with asyncio.TaskGroup() as group:
@@ -373,18 +383,27 @@ class SearchService:
     async def _run_pair(
         self, job: SearchJob, index: int, row: SearchRow,
         on_row: Callable[[int, SearchRow], None] | None,
+        should_stop: Callable[[], bool] | None,
     ) -> None:
         gateway = self.gateway
         assert gateway is not None  # `start` refuses a run without credentials
         try:
             async with self.semaphore:
+                if should_stop is not None and should_stop():
+                    return
                 await self.submit_limiter.acquire()
+                if should_stop is not None and should_stop():
+                    return
                 operation_id = await gateway.submit(row.prompt, row.region)
             row.status = STATUS_WAITING
             delay = self.poll_interval
             while True:
                 async with self.semaphore:
+                    if should_stop is not None and should_stop():
+                        return
                     await self.result_limiter.acquire()
+                    if should_stop is not None and should_stop():
+                        return
                     documents: tuple[SearchDocument, ...] | None = await gateway.result(operation_id)
                 if documents is not None:
                     row.finish(first_matching_result(job.host, documents), self.clock())

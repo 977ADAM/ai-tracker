@@ -221,3 +221,20 @@ def test_storage_failure_stops_model_calls(connections):
         )
     assert spy.prompts == [("gigachat", "успех")]
     assert spy.providers["gigachat"].closed is True
+
+
+def test_external_stop_is_checked_before_each_model_call(connections):
+    configure(connections, "gigachat")
+    service, spy = check_service(connections)
+    stopped = False
+
+    def publish(_provider_id, _index, _result):
+        nonlocal stopped
+        stopped = True
+
+    with pytest.raises(StorageError):
+        service.run(
+            {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["gigachat"]},
+            on_result=publish, should_stop=lambda: stopped,
+        )
+    assert spy.prompts == [("gigachat", "успех")]

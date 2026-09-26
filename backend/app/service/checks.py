@@ -43,6 +43,7 @@ class CheckService:
 
     def run(
         self, payload: object, *, on_result: Callable[[str, int, PromptResult], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         check_input = normalize_check_request(payload)
         selected_ids = normalize_provider_ids(payload)
@@ -51,7 +52,7 @@ class CheckService:
             raise ValidationError(UNKNOWN_CONNECTION_MESSAGE)
 
         checks = tuple(
-            self._run_connection(known[connection_id], check_input, on_result)
+            self._run_connection(known[connection_id], check_input, on_result, should_stop)
             for connection_id in selected_ids
         )
         return CheckReport(
@@ -70,11 +71,14 @@ class CheckService:
     def _run_connection(
         self, connection: Connection, check_input: CheckInput,
         on_result: Callable[[str, int, PromptResult], None] | None,
+        should_stop: Callable[[], bool] | None,
     ) -> ProviderCheck:
         provider, setup_error = self._prepare(connection)
         results: list[PromptResult] = []
         try:
             for index, prompt in enumerate(check_input.prompts):
+                if should_stop is not None and should_stop():
+                    raise StorageError("Сохранение результатов остановлено")
                 result = self._ask(provider, setup_error, prompt, check_input.brand)
                 results.append(result)
                 if on_result is not None:
