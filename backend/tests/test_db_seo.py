@@ -35,6 +35,7 @@ SEO_TABLES = {
     "seo_candidates",
     "seo_queries",
     "seo_search_rows",
+    "seo_search_documents",
     "seo_candidate_hits",
     "seo_model_rows",
     "seo_seed_rows",
@@ -43,6 +44,11 @@ SEO_TABLES = {
     "seo_conclusions",
 }
 AGENT_TABLES = {"seo_agents", "seo_agent_steps", "seo_conclusions"}
+# The tool-layer tables of Task 2: they are new beside the revision-1 tables and
+# a migrated version-3 file gains them empty.
+DOCUMENT_TABLES = {"seo_search_documents"}
+NEW_TABLES = AGENT_TABLES | DOCUMENT_TABLES
+LEGACY_SEO_TABLES = SEO_TABLES - NEW_TABLES
 # The SEO tables exactly as revision 1 (`user_version = 3`) wrote them: a real
 # migrated file must keep them and gain the agent tables without a rewrite.
 VERSION_THREE_SCHEMA = """
@@ -393,17 +399,17 @@ def test_initialize_adds_a_missing_seo_table_to_an_existing_version_three_file(t
 def test_migration_from_a_populated_version_three_database_keeps_every_row(tmp_path):
     path = tmp_path / DB_FILE
     analysis_id = create_version_three_database(path)
-    before = table_counts(path, SEO_TABLES - AGENT_TABLES)
+    before = table_counts(path, LEGACY_SEO_TABLES)
 
     repository = seo_repo(tmp_path)
 
     assert user_version(path) == 4
     # Every revision-1 row is still there, including the ones outside the new tables.
-    assert table_counts(path, SEO_TABLES - AGENT_TABLES) == before
+    assert table_counts(path, LEGACY_SEO_TABLES) == before
     assert all(count > 0 for count in before.values())
-    assert AGENT_TABLES <= table_names(path)
+    assert NEW_TABLES <= table_names(path)
     # The new tables start empty: a migrated analysis reports its agents as pending.
-    assert table_counts(path, AGENT_TABLES) == {table: 0 for table in sorted(AGENT_TABLES)}
+    assert table_counts(path, NEW_TABLES) == {table: 0 for table in sorted(NEW_TABLES)}
     snapshot = repository.snapshot(analysis_id)
     assert snapshot["status"] == "running"
     assert [agent["agent"] for agent in snapshot["agents"]] == list(AGENTS)
@@ -1379,3 +1385,111 @@ def test_snapshot_exposes_agents_budget_and_conclusions_without_answers(tmp_path
     assert "секретный ответ модели" not in payload
     assert "op-private-1" not in payload
 
+
+
+# -- tool-layer persistence --------------------------------------------------
+
+
+def test_pages_round_trip_in_crawl_order_and_are_replaced(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    assert repository.pages(analysis_id) == ()
+    repository.save_pages(
+        analysis_id,
+        (("https://example.ru/", "Главная"), ("https://example.ru/dostavka", "Доставка")),
+    )
+    assert repository.pages(analysis_id) == (
+        {"url": "https://example.ru/", "title": "Главная"},
+        {"url": "https://example.ru/dostavka", "title": "Доставка"},
+    )
+    assert repository.snapshot(analysis_id)["pages"] == [
+        {"url": "https://example.ru/", "title": "Главная"},
+        {"url": "https://example.ru/dostavka", "title": "Доставка"},
+    ]
+
+    repository.save_pages(analysis_id, (("https://example.ru/about", "О нас"),))
+    assert [page["url"] for page in repository.pages(analysis_id)] == ["https://example.ru/about"]
+    assert repository.pages(analysis_id)[0]["title"] == "О нас"
+    # The same rows survive a second repository instance.
+    assert len(seo_repo(tmp_path).pages(analysis_id)) == 1
+
+    with pytest.raises(ValidationError):
+        repository.save_pages(analysis_id, ("https://example.ru/",))  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        repository.save_pages(analysis_id, ((1, "Главная"),))  # type: ignore[arg-type]
+    with pytest.raises(RunNotFound):
+        repository.save_pages("нет такого анализа", ())
+    with pytest.raises(RunNotFound):
+        repository.pages("нет такого анализа")
+
+
+def test_search_documents_store_positions_and_replace_one_query(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    assert repository.search_documents(analysis_id, 0) is None
+    repository.save_search_documents(
+        analysis_id, 0,
+        ((1, "https://rival.ru/", "Соперник"), (3, "https://example.ru/", "Ромашка")),
+    )
+    stored = repository.search_documents(analysis_id, 0)
+    assert stored == {
+        "status": "found",
+        "documents": ((1, "https://rival.ru/", "Соперник"), (3, "https://example.ru/", "Ромашка")),
+    }
+
+    repository.save_search_documents(analysis_id, 0, ((2, "https://other.ru/", "Другой"),))
+    assert repository.search_documents(analysis_id, 0)["documents"] == (
+        (2, "https://other.ru/", "Другой"),
+    )
+    # Another query of the same analysis keeps its own documents.
+    repository.save_search_documents(analysis_id, 1, ((1, "https://new.ru/", ""),))
+    assert repository.search_documents(analysis_id, 0)["documents"] == (
+        (2, "https://other.ru/", "Другой"),
+    )
+
+    with pytest.raises(ValidationError):
+        repository.save_search_documents(analysis_id, 0, ((0, "https://rival.ru/", ""),))
+    with pytest.raises(ValidationError):
+        repository.save_search_documents(analysis_id, 0, ((11, "https://rival.ru/", ""),))
+    with pytest.raises(ValidationError):
+        repository.save_search_documents(analysis_id, 0, ((1, "", "Соперник"),))
+    with pytest.raises(ValidationError):
+        repository.save_search_documents(analysis_id, 0, ((1, "https://a.ru/", ""), (1, "https://b.ru/", "")))
+    with pytest.raises(ValidationError):
+        repository.save_search_documents(analysis_id, 0, (), status="неизвестно")
+    with pytest.raises(ValidationError):
+        repository.save_search_documents(analysis_id, 0, (), seed="да")  # type: ignore[arg-type]
+    with pytest.raises(RunNotFound):
+        repository.search_documents("нет такого анализа", 0)
+    with pytest.raises(RunNotFound):
+        repository.save_search_documents("нет такого анализа", 0, ())
+
+
+def test_a_checked_empty_serp_is_stored_with_its_status(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    repository.save_search_documents(analysis_id, 0, (), status="absent")
+    repository.save_search_documents(analysis_id, 0, (), status="error", seed=True)
+
+    assert repository.search_documents(analysis_id, 0) == {"status": "absent", "documents": ()}
+    # The key-query index space is separate from the generated one.
+    assert repository.search_documents(analysis_id, 0, seed=True) == {"status": "error", "documents": ()}
+    assert repository.search_documents(analysis_id, 0, seed=False) == {"status": "absent", "documents": ()}
+    # A later successful check replaces the empty outcome.
+    repository.save_search_documents(analysis_id, 0, ((1, "https://rival.ru/", "Rival"),))
+    assert repository.search_documents(analysis_id, 0)["status"] == "found"
+
+
+def test_deleting_an_analysis_removes_its_pages_and_documents(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+    repository.save_pages(analysis_id, (("https://example.ru/", "Главная"),))
+    repository.save_search_documents(analysis_id, 0, ((1, "https://rival.ru/", "Rival"),))
+    repository.finish_analysis(analysis_id)
+
+    repository.delete(analysis_id)
+
+    assert table_counts(tmp_path / DB_FILE, DOCUMENT_TABLES) == {"seo_search_documents": 0}

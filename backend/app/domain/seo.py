@@ -21,8 +21,10 @@ from app.domain.seo_llm import parse_json_object
 from app.domain.site_fetch import canonical_host, same_site_host
 
 # Fixed SEO constants: the form has no limit field and the old 20-query
-# validators stay untouched.
-GENERATED_QUERY_LIMIT = 20
+# validators of `/api/check`, `/api/search`, and `/api/runs` stay untouched.
+# Revision 2 raises the generated-query cap to 40 and the run estimate becomes
+# `3 + 40` searches and `40 × M` model answers.
+GENERATED_QUERY_LIMIT = 40
 MIN_GENERATED_QUERIES = 5
 QUERY_CATEGORIES = ("commercial", "informational", "comparative")
 CATEGORY_LABELS = {
@@ -285,7 +287,7 @@ class GeneratedQuery:
 
 
 def accept_generated_queries(payload: object, services: Sequence[str]) -> tuple[GeneratedQuery, ...]:
-    """Validate one generation answer and return at most 20 unique queries.
+    """Validate one generation answer and return at most the fixed query limit.
 
     ``payload`` may be the raw answer text, a JSON object with a ``queries``
     list, or that list itself. A broken schema, an unknown category, or a query

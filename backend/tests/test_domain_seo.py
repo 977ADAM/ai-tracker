@@ -80,7 +80,7 @@ def test_key_queries_keep_the_entered_spelling():
 
 
 def test_the_seo_limits_and_labels_are_the_agreed_ones():
-    assert GENERATED_QUERY_LIMIT == 20
+    assert GENERATED_QUERY_LIMIT == 40
     assert MIN_GENERATED_QUERIES == 5
     assert QUERY_CATEGORIES == ("commercial", "informational", "comparative")
     assert CATEGORY_LABELS == {
@@ -296,12 +296,12 @@ def test_accepts_fenced_json_text_and_maps_service_case():
     assert accepted[0].service == "Имплантация"
 
 
-def test_generated_queries_are_deduplicated_in_model_order_and_truncated_to_twenty():
-    items = [item(f"запрос {index}") for index in range(25)] + [item("ЗАПРОС 0")]
+def test_generated_queries_are_deduplicated_in_model_order_and_truncated_to_the_limit():
+    items = [item(f"запрос {index}") for index in range(45)] + [item("ЗАПРОС 0")]
     accepted = accept_generated_queries({"queries": items}, ())
     assert len(accepted) == GENERATED_QUERY_LIMIT
     assert accepted[0].text == "запрос 0"
-    assert accepted[-1].text == "запрос 19"
+    assert accepted[-1].text == f"запрос {GENERATED_QUERY_LIMIT - 1}"
 
 
 def test_rejects_fewer_than_five_unique_generated_queries():

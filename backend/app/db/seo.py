@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Literal, get_args
 
 from app.core.errors import RunConflict, RunNotFound, StorageError, ValidationError
+from app.domain.search import TOP_RESULTS
 from app.domain.seo import (
     Candidate,
     CandidateHit,
@@ -109,6 +110,7 @@ CHILD_TABLES = (
     "seo_candidates",
     "seo_queries",
     "seo_search_rows",
+    "seo_search_documents",
     "seo_candidate_hits",
     "seo_model_rows",
     "seo_seed_rows",
@@ -189,6 +191,16 @@ CREATE TABLE IF NOT EXISTS seo_candidate_hits (
     position INTEGER NOT NULL,
     url TEXT,
     PRIMARY KEY (analysis_id, query_index, host)
+);
+CREATE TABLE IF NOT EXISTS seo_search_documents (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    is_seed INTEGER NOT NULL,
+    query_index INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, is_seed, query_index, position)
 );
 CREATE TABLE IF NOT EXISTS seo_model_rows (
     analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
@@ -580,6 +592,104 @@ class SeoRepository:
                 "VALUES (?, ?, ?, ?, ?)",
                 [(analysis_id, query_index, *row) for row in rows],
             )
+
+    def save_pages(self, analysis_id: str, pages: Sequence[tuple[str, str]]) -> None:
+        """Replace the crawled pages of one analysis with this call's result.
+
+        The site agent saves every batch it reads as soon as it arrives, so the
+        page list of an interrupted run is already readable.
+        """
+        page_rows = _pages(pages)
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_analysis(connection, analysis_id)
+            connection.execute("DELETE FROM seo_pages WHERE analysis_id=?", (analysis_id,))
+            connection.executemany(
+                "INSERT INTO seo_pages (analysis_id, page_index, url, title) VALUES (?, ?, ?, ?)",
+                [(analysis_id, index, url, title) for index, (url, title) in enumerate(page_rows)],
+            )
+            connection.execute("UPDATE seo_analyses SET updated_at=? WHERE id=?", (now, analysis_id))
+
+    def pages(self, analysis_id: str) -> tuple[dict, ...]:
+        """Return the saved pages in crawl order, without their text."""
+        with self._connection() as connection:
+            self._require_analysis(connection, analysis_id)
+            return tuple(
+                {"url": row["url"], "title": row["title"]}
+                for row in connection.execute(
+                    "SELECT url, title FROM seo_pages WHERE analysis_id=? ORDER BY page_index",
+                    (analysis_id,),
+                )
+            )
+
+    def save_search_documents(
+        self,
+        analysis_id: str,
+        query_index: int,
+        documents: Sequence[tuple[int, str, str]],
+        *,
+        status: SeoRowOutcome = "found",
+        seed: bool = False,
+    ) -> None:
+        """Replace the stored top-ten documents of one checked query.
+
+        ``documents`` holds ``(position, url, title)`` triples in SERP order. A
+        query that finished without documents is stored with a marker row
+        (`position = 0`), so a tool can tell a checked empty SERP from a query
+        that was never sent: the outcome itself is stored on every row.
+        ``seed`` keeps the three key queries in their own index space, apart from
+        the generated queries that share the numeric index.
+        """
+        _require_index(query_index)
+        _require_row_status(status)
+        if not isinstance(seed, bool):
+            raise ValidationError(INVALID_INPUT)
+        rows = _search_documents(documents)
+        now = _now()
+        flag = int(seed)
+        with self._connection(write=True) as connection:
+            self._require_analysis(connection, analysis_id)
+            connection.execute(
+                "DELETE FROM seo_search_documents WHERE analysis_id=? AND is_seed=? AND query_index=?",
+                (analysis_id, flag, query_index),
+            )
+            stored = rows or [(0, "", "")]
+            connection.executemany(
+                "INSERT INTO seo_search_documents "
+                "(analysis_id, is_seed, query_index, position, url, title, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(analysis_id, flag, query_index, position, url, title, status)
+                 for position, url, title in stored],
+            )
+            connection.execute("UPDATE seo_analyses SET updated_at=? WHERE id=?", (now, analysis_id))
+
+    def search_documents(
+        self, analysis_id: str, query_index: int, *, seed: bool = False,
+    ) -> dict | None:
+        """Return one saved SERP, or `None` when that query was never checked.
+
+        The result is ``{"status": ..., "documents": ((position, url, title), ...)}``;
+        an empty document tuple with a stored status means the query was checked
+        and found nothing.
+        """
+        _require_index(query_index)
+        if not isinstance(seed, bool):
+            raise ValidationError(INVALID_INPUT)
+        with self._connection() as connection:
+            self._require_analysis(connection, analysis_id)
+            rows = connection.execute(
+                "SELECT position, url, title, status FROM seo_search_documents "
+                "WHERE analysis_id=? AND is_seed=? AND query_index=? ORDER BY position",
+                (analysis_id, int(seed), query_index),
+            ).fetchall()
+        if not rows:
+            return None
+        return {
+            "status": rows[0]["status"],
+            "documents": tuple(
+                (row["position"], row["url"], row["title"]) for row in rows if row["position"] > 0
+            ),
+        }
 
     def save_model_row(
         self,
@@ -1525,6 +1635,30 @@ def _pages(value: object) -> list[tuple[str, str]]:
         if not isinstance(url, str) or not isinstance(title, str):
             raise ValidationError(INVALID_INPUT)
         result.append((url, title))
+    return result
+
+
+def _search_documents(value: object) -> list[tuple[int, str, str]]:
+    """Validate ``(position, url, title)`` triples of one stored top-ten SERP."""
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValidationError(INVALID_INPUT)
+    result: list[tuple[int, str, str]] = []
+    seen: set[int] = set()
+    for item in value:
+        if isinstance(item, (str, bytes)) or not isinstance(item, Sequence) or len(item) != 3:
+            raise ValidationError(INVALID_INPUT)
+        position, url, title = item
+        if (
+            not _is_index(position)
+            or not 1 <= position <= TOP_RESULTS
+            or position in seen
+            or not isinstance(url, str)
+            or not url
+            or not isinstance(title, str)
+        ):
+            raise ValidationError(INVALID_INPUT)
+        seen.add(position)
+        result.append((position, url, title))
     return result
 
 

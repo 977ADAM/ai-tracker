@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.errors import ValidationError
-from app.domain.seo import Candidate, SeoInput
+from app.domain.seo import GENERATED_QUERY_LIMIT, Candidate, SeoInput
 from app.domain.seo_prompts import (
     SiteFacts,
     queries_from_payload,
@@ -86,7 +86,7 @@ def test_queries_prompt_carries_the_sphere_company_services_seeds_and_candidates
         "comparative",
     ):
         assert text in combined
-    assert str(20) in system
+    assert str(GENERATED_QUERY_LIMIT) in system
     assert "company_name" not in system
 
 

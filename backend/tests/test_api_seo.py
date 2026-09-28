@@ -53,7 +53,7 @@ QUERIES = json.dumps(
 )
 SUMMARY = "Итог: сайт виден в Яндексе и упоминается моделями."
 MODEL_ANSWER = "Модель советует «Ромашка» и https://example.ru/"
-ESTIMATE = {"search_upper": 23, "model_upper": 20, "generated_limit": 20, "connections": 1}
+ESTIMATE = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
 SNAPSHOT_FIELDS = {
     "id", "status", "created_at", "updated_at", "finished_at", "input", "estimate",
     "company_name", "services", "pages", "stages", "candidates", "queries", "summary",
@@ -178,7 +178,7 @@ def test_create_answers_202_with_the_upper_estimate_and_finishes_in_the_backgrou
         assert set(body) == {"id", "status", "estimate"}
         assert body["status"] == "running"
         assert body["estimate"] == {
-            "search_upper": 23, "model_upper": 40, "generated_limit": 20, "connections": 2,
+            "search_upper": 43, "model_upper": 80, "generated_limit": 40, "connections": 2,
         }
 
         snapshot = wait_terminal(client, body["id"])

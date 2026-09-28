@@ -115,7 +115,7 @@ def stored_input(**overrides: object) -> SeoInput:
     return normalize_seo_request(payload(**overrides))
 
 
-ESTIMATE = {"search_upper": 23, "model_upper": 20, "generated_limit": 20, "connections": 1}
+ESTIMATE = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
 
 
 def make_search_settings(tmp_path: Path, gateway: Any, *, enabled: bool = True) -> SearchSettingsService:
@@ -266,9 +266,9 @@ async def test_happy_path_runs_six_stages_in_order(tmp_path, repository, setting
 
     assert created["status"] == "running"
     assert created["estimate"] == {
-        "search_upper": 23,
-        "model_upper": 20,
-        "generated_limit": 20,
+        "search_upper": 43,
+        "model_upper": 40,
+        "generated_limit": 40,
         "connections": 1,
     }
 
@@ -336,7 +336,7 @@ async def test_estimate_counts_every_selected_connection(tmp_path, repository, s
     created = await harness.service.start(payload(connection_ids=["gigachat", "deepseek"]))
 
     assert created["estimate"] == {
-        "search_upper": 23, "model_upper": 40, "generated_limit": 20, "connections": 2,
+        "search_upper": 43, "model_upper": 80, "generated_limit": 40, "connections": 2,
     }
     snapshot = await wait_for(harness.service, created["id"])
     assert snapshot["status"] == "completed"
