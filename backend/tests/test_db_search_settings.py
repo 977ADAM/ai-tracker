@@ -170,3 +170,62 @@ def test_cleanup_only_failure_is_reported_as_storage_error(tmp_path, monkeypatch
 
     with pytest.raises(StorageError, match="очистить временные настройки"):
         repository._write({"enabled": False})
+
+
+def test_update_does_not_read_keyring_after_persistence(tmp_path):
+    store = MemorySecrets()
+    repository = repo(tmp_path, store)
+    repository.update({"api_key": "old-key", "folder_id": "old-folder"})
+    original_get = store.get_password
+    reads = 0
+
+    def fail_second_read(service, username):
+        nonlocal reads
+        reads += 1
+        if reads == 2:
+            raise RuntimeError("post-commit keyring unavailable")
+        return original_get(service, username)
+
+    store.get_password = fail_second_read
+    saved = repository.update({"enabled": False, "api_key": "new-key", "folder_id": "new-folder"})
+    assert reads == 1
+    assert (saved.enabled, saved.api_key, saved.folder_id) == (False, "new-key", "new-folder")
+    assert metadata(tmp_path) == {"enabled": False, "folder_id": "new-folder"}
+    assert store.values[("test-service", "yandex-search")] == "new-key"
+
+
+def test_reset_does_not_read_keyring_after_persistence(tmp_path):
+    store = MemorySecrets()
+    repository = repo(tmp_path, store)
+    repository.update({"enabled": False, "api_key": "old-key", "folder_id": "old-folder"})
+    original_get = store.get_password
+    reads = 0
+
+    def fail_second_read(service, username):
+        nonlocal reads
+        reads += 1
+        if reads == 2:
+            raise RuntimeError("post-commit keyring unavailable")
+        return original_get(service, username)
+
+    store.get_password = fail_second_read
+    saved = repository.reset_credentials()
+    assert reads == 1
+    assert (saved.enabled, saved.api_key, saved.folder_id) == (False, None, None)
+    assert metadata(tmp_path) == {"enabled": False}
+    assert store.values == {}
+
+
+def test_unreadable_metadata_path_is_reported_safely(tmp_path, monkeypatch):
+    repository = repo(tmp_path, MemorySecrets())
+    original_exists = Path.exists
+
+    def inaccessible(path):
+        if path == repository.path:
+            raise PermissionError("private metadata path")
+        return original_exists(path)
+
+    monkeypatch.setattr(Path, "exists", inaccessible)
+    with pytest.raises(StorageError, match="прочитать настройки поиска") as error:
+        repository.load()
+    assert "private metadata path" not in str(error.value)

@@ -82,7 +82,7 @@ def build_container(
     checks = CheckService(connections, factory)
     search = SearchService(None)
     search_settings = SearchSettingsService(search_settings_repository, search, search_client)
-    if search_gateway is not None:
+    if search_gateway is not None and search_settings.available:
         search.configure(search_gateway, search.enabled)
     return Container(
         settings=settings,

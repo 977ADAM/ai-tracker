@@ -145,15 +145,46 @@ def test_version_one_database_migrates_existing_search_rows_to_yandex(tmp_path):
             position INTEGER, url TEXT, error TEXT, PRIMARY KEY (run_id, search_index));
         PRAGMA user_version=1;
     """)
+    connection.execute(
+        "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("legacy-run", "2026-09-25T14:00:00Z", "2026-09-25T14:01:00Z",
+         "Ромашка", "example.ru", '["цветы"]', '["p"]', '[1]'),
+    )
+    connection.execute(
+        "INSERT INTO model_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("legacy-run", "p", 0, "ChatGPT", "цветы", "mentioned", "Ромашка", 1, None),
+    )
+    connection.execute(
+        "INSERT INTO search_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("legacy-run", 0, 0, 0, "цветы", 1, "Москва и Московская область",
+         "found", 2, "https://example.ru/flowers", None),
+    )
+    connection.commit()
     connection.close()
 
-    repo(tmp_path)
+    migrated = repo(tmp_path)
     connection = sqlite3.connect(path)
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     columns = {row[1] for row in connection.execute("PRAGMA table_info(search_rows)")}
     connection.close()
     assert version == 2
     assert "engine" in columns
+    saved = migrated.get("legacy-run")
+    assert saved["status"] == "done"
+    assert saved["brand"] == "Ромашка"
+    assert saved["prompts"] == ["цветы"]
+    assert saved["models"][0]["answer"] == "Ромашка"
+    assert saved["search"] == [{
+        "search_index": 0, "prompt_index": 0, "region_index": 0,
+        "prompt": "цветы", "region_id": 1, "region_name": "Москва и Московская область",
+        "engine": "yandex", "status": "found", "position": 2,
+        "url": "https://example.ru/flowers", "error": None,
+    }]
+    assert saved["summary_rows"][0] == {
+        "prompt": "цветы", "source": "Яндекс", "language": "ru",
+        "region": "Москва и Московская область", "ai_answer": "—",
+        "site_found": "Да", "position": "2", "brand_found": "—", "status": "Готово",
+    }
 
 
 def test_snapshot_remains_complete_while_terminal_run_is_deleted(tmp_path, run_input):

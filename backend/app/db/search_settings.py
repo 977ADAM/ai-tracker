@@ -38,12 +38,13 @@ class SearchSettingsRepository:
 
     def load(self) -> SearchSettings:
         data = self._read()
-        return self._resolve(data)
+        return self._resolve(data, self._saved_key())
 
     def update(self, payload: Mapping[str, object]) -> SearchSettings:
         """Apply supplied fields; empty credential strings leave overrides intact."""
         self._validate(payload)
         previous = self._read()
+        old_key = self._saved_key()
         updated = dict(previous)
         if "enabled" in payload:
             updated["enabled"] = payload["enabled"]
@@ -52,11 +53,11 @@ class SearchSettingsRepository:
         new_key = payload.get("api_key")
         write_key = isinstance(new_key, str) and bool(new_key.strip())
         if updated == previous and not write_key:
-            return self._resolve(previous)
+            return self._resolve(previous, old_key)
 
-        old_key = self._saved_key() if write_key else None
+        saved_key = new_key.strip() if write_key else old_key
         if write_key:
-            self._set_key(new_key.strip())
+            self._set_key(saved_key)
         try:
             if updated != previous:
                 self._write(updated)
@@ -67,7 +68,7 @@ class SearchSettingsRepository:
                 except ConfigurationError as rollback_error:
                     raise rollback_error from storage_error
             raise
-        return self._resolve(updated)
+        return self._resolve(updated, saved_key)
 
     def reset_credentials(self) -> SearchSettings:
         """Delete both UI overrides, retaining enabled and environment fallbacks."""
@@ -75,7 +76,7 @@ class SearchSettingsRepository:
         old_key = self._saved_key()
         updated = {name: value for name, value in previous.items() if name != "folder_id"}
         if old_key is None and updated == previous:
-            return self._resolve(previous)
+            return self._resolve(previous, old_key)
         if old_key is not None:
             self._delete_key()
         try:
@@ -88,12 +89,12 @@ class SearchSettingsRepository:
                 except ConfigurationError as rollback_error:
                     raise rollback_error from storage_error
             raise
-        return self._resolve(updated)
+        return self._resolve(updated, None)
 
-    def _resolve(self, data: dict[str, object]) -> SearchSettings:
+    def _resolve(self, data: dict[str, object], saved_key: str | None) -> SearchSettings:
         return SearchSettings.resolve(
             enabled=data.get("enabled"),  # type: ignore[arg-type]
-            ui_api_key=self._saved_key(),
+            ui_api_key=saved_key,
             ui_folder_id=data.get("folder_id"),  # type: ignore[arg-type]
             env_api_key=self.env_api_key,
             env_folder_id=self.env_folder_id,
@@ -110,9 +111,9 @@ class SearchSettingsRepository:
                 raise ValidationError("Некорректные учётные данные поиска")
 
     def _read(self) -> dict[str, object]:
-        if not self.path.exists():
-            return {}
         try:
+            if not self.path.exists():
+                return {}
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise StorageError("Не удалось прочитать настройки поиска") from exc
