@@ -206,29 +206,29 @@
                 <div>
                     <label for="prompts" class="mb-2 block text-sm font-semibold text-ink">
                         Вопросы клиентов
-    
+
                         <span class="text-rose-600">
                             *
                         </span>
-    
+
                     </label>
                     <textarea id="prompts" class="block min-h-56 w-full resize-y rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm leading-6 text-ink outline-none focus:border-accent" bind:value={promptsText}></textarea>
-    
+
                     <p class="mt-2 text-xs text-muted">
                         Каждый вопрос — с новой строки. До {data.form?.limits.max_prompts ?? 20} вопросов.
                     </p>
                 </div>
-    
+
                 <div class="space-y-5">
                     <div>
                         <label for="brand" class="mb-2 block text-sm font-semibold text-ink">
-    
+
                             Название бренда
-    
+
                             <span class="font-normal text-muted">для проверки моделей</span>
-    
+
                         </label>
-    
+
                         <input
                             id="brand"
                             class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent"
@@ -237,16 +237,16 @@
                             bind:value={brand}
                         />
                         <p class="mt-2 text-xs text-muted">Ищем название в ответах моделей.</p>
-    
+
                     </div>
-    
+
                     <div>
                         <label for="domain" class="mb-2 block text-sm font-semibold text-ink">
                             Сайт
                             <span class="font-normal text-muted">для поиска в Яндексе</span>
-    
+
                         </label>
-    
+
                         <input
                             id="domain"
                             class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent"
@@ -255,29 +255,42 @@
                             bind:value={domain}
                         />
                         <p class="mt-2 text-xs text-muted">Совпадение ищется по хосту и его поддоменам.</p>
-    
+
                     </div>
                 </div>
             </div>
-            
+
             <fieldset class="border-t border-line pt-6">
                 <legend class="mb-3 text-sm font-semibold text-ink">Модели для проверки</legend>
-                
+
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {#each data.providers as provider (provider.id)}
-                        
+
                     <label class:opacity-60={!provider.configured} class="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-white px-4 py-3 hover:border-accent/50">
-                        <input type="checkbox" class="mt-1 size-4 accent-accent" checked={selected.includes(provider.id)} disabled={!provider.configured} onchange={() => toggleProvider(provider.id)} /><span class="min-w-0"><span class="block font-semibold text-ink">{provider.name}</span>
-                    <span class="mt-0.5 block truncate text-xs text-muted">{provider.configured ? provider.model : provider.status_label}
-                    </span>
-                    
-                </span>
-                
-                    </label>{/each}
+                        <input
+                            type="checkbox"
+                            class="mt-1 size-4 accent-accent"
+                            checked={selected.includes(provider.id)}
+                            disabled={!provider.configured}
+                            onchange={() => toggleProvider(provider.id)}
+                        />
+
+                        <span class="min-w-0">
+                            <span class="block font-semibold text-ink">
+                                {provider.name}
+                            </span>
+                            <span class="mt-0.5 block truncate text-xs text-muted">
+                                {provider.configured ? provider.model : provider.status_label}
+                            </span>
+
+                        </span>
+
+                    </label>
+                    {/each}
                 </div>
-                
+
             </fieldset>
-            
+
             <fieldset class="border-t border-line pt-6" aria-labelledby="regions-legend"><legend id="regions-legend" class="mb-3 text-sm font-semibold text-ink">Регионы для поиска в Яндексе</legend><p class="mb-4 max-w-3xl text-xs leading-5 text-muted">Добавьте до пяти регионов. Поиск проверит первую десятку по каждому вопросу и может занять несколько часов.</p>
                 {#if data.searchRegionError}<p role="alert" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{data.searchRegionError}. Проверка моделей работает без него.</p>{/if}
                 <div class="space-y-3">{#each regionRows as value, index (index)}<div class="flex items-center gap-3" data-region-row><label class="sr-only" for={`region-${index}`}>Регион {index + 1}</label><select id={`region-${index}`} class="min-h-12 w-full max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent" bind:value={regionRows[index]}><option value="">Выберите регион</option>{#each catalog as region (region.id)}<option value={region.id} disabled={regionTaken(region.id, index)}>{region.name}</option>{/each}</select><button type="button" onclick={() => removeRegion(index)} aria-label={`Удалить регион ${index + 1}`} class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700">×</button></div>{/each}</div>
