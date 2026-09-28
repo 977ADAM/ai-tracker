@@ -2,10 +2,48 @@
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_check_service
-from app.main import API_PREFIX, TITLE, app, container, settings
+from app.main import API_PREFIX, TITLE, app, container, lifespan, settings
+
+
+def test_the_lifespan_resumes_deferred_seo_analyses_and_closes_them():
+    class SeoSpy:
+        def __init__(self) -> None:
+            self.resumed = 0
+            self.closed = 0
+
+        def resume_pending(self) -> None:
+            self.resumed += 1
+
+        async def close(self) -> None:
+            self.closed += 1
+
+    class Closer:
+        async def close(self) -> None:
+            return None
+
+    seo = SeoSpy()
+    application = SimpleNamespace(
+        state=SimpleNamespace(
+            settings=SimpleNamespace(config_dir="/tmp/ai-tracker-test"),
+            container=SimpleNamespace(
+                runs=Closer(), search=Closer(), search_client=None, seo_service=seo,
+            ),
+        ),
+    )
+
+    async def run() -> None:
+        async with lifespan(application):
+            assert seo.resumed == 1
+
+    asyncio.run(run())
+    assert seo.resumed == 1
+    assert seo.closed == 1
 
 
 def test_the_module_level_app_is_ready_for_uvicorn():

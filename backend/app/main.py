@@ -43,9 +43,13 @@ async def lifespan(application: FastAPI):
     settings: Settings = application.state.settings
     container = application.state.container
     log.info("ИИ-трекинг API запущен: настройки подключений в %s", settings.config_dir)
+    # A container built at import time had no running loop, so restart recovery
+    # kept the resumable SEO analyses aside; start them now.
+    container.seo_service.resume_pending()
     yield
     await container.runs.close()
     await container.search.close()
+    await container.seo_service.close()
     if container.search_client is not None:
         await container.search_client.aclose()
     log.info("ИИ-трекинг API остановлен")
