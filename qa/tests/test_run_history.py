@@ -1,132 +1,198 @@
-"""Saved mixed runs in a real browser, with controlled API responses."""
+"""The SEO history and the saved report, driven by controlled browser responses.
+
+The old mixed-run history screen is gone: the home page keeps a separate SEO
+history instead. Every `/api/seo/analyses` response is answered through
+`page.route`, so the check observes the cursor pages, the saved report with its
+detail rows, the delete confirmation and the empty state without starting a run,
+reading the real database or reaching a paid API.
+"""
 
 from __future__ import annotations
 
-import re
-from uuid import uuid4
-
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 
 from app import Application
-from pages.settings import SettingsPage
+from pages.seo import SeoPage
 
-RUN_ID = "qa-run-1"
-PROMPT = "где купить цветы"
-REGIONS = [1, 213]
-PROVIDER_NAME = f"QA история {uuid4().hex[:6]}"
-MODEL_NAME = "Основная модель"
-MODEL_ID = "qa-history-model"
-FOUND_URL = "https://shop.example.ru/catalog"
-
-
-def model(status: str) -> dict:
-    return {"provider_id": MODEL_ID, "prompt_index": 0, "provider_name": f"{PROVIDER_NAME} · {MODEL_NAME}",
-            "prompt": PROMPT, "status": status, "answer": "Ромашка рекомендует цветы" if status == "mentioned" else None,
-            "mentioned": True if status == "mentioned" else None, "error": None}
+FIRST_ID = "qa-seo-first"
+SECOND_ID = "qa-seo-second"
+THIRD_ID = "qa-seo-third"
+CURSOR = "cursor-page-2"
+ROWS_CURSOR = "cursor-rows-2"
+CANDIDATE_HOST = "flower-shop.example"
 
 
-def search(index: int, status: str) -> dict:
-    return {"search_index": index, "prompt_index": 0, "region_index": index,
-            "prompt": PROMPT, "region_id": REGIONS[index],
-            "region_name": "Москва и Московская область" if index == 0 else "Москва",
-            "status": status, "position": 2 if status == "found" else None,
-            "url": FOUND_URL if status == "found" else None, "error": None}
+def metric(denominator: int, successes: int, average: float | None = None) -> dict:
+    return {
+        "denominator": denominator,
+        "successes": successes,
+        "share": round(successes / denominator, 4) if denominator else None,
+        "average_position": average,
+    }
 
 
-def summary(source: str, status: str, *, region: str = "—", site: str = "—", brand: str = "—", position: str = "—") -> dict:
-    return {"prompt": PROMPT, "source": source, "language": "ru" if source == "Яндекс" else "",
-            "region": region, "ai_answer": "Да" if source != "Яндекс" and status == "Готово" else "—",
-            "site_found": site, "position": position, "brand_found": brand, "status": status}
+def history_item(analysis_id: str, *, status: str, sphere: str, created_at: str) -> dict:
+    return {
+        "id": analysis_id, "created_at": created_at,
+        "finished_at": None if status == "running" else "2026-09-28T01:00:00Z",
+        "status": status, "sphere": sphere, "host": "example.ru", "company_name": "Ромашка",
+        "counters": {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0},
+    }
 
 
-def snapshot(status: str) -> dict:
-    pending = status == "pending"
-    return {"id": RUN_ID, "created_at": "2026-09-25T14:00:00Z",
-            "finished_at": None if pending else "2026-09-25T14:01:00Z", "status": status,
-            "brand": "Ромашка", "domain": "example.ru", "prompts": [PROMPT],
-            "provider_ids": [MODEL_ID], "regions": REGIONS,
-            "models": [model("mentioned")],
-            "search": [search(0, "found"), search(1, "waiting" if pending else "interrupted")],
-            "summary_rows": [
-                summary("Яндекс", "Готово", region="Москва и Московская область", site="Да", position="2"),
-                summary("Яндекс", "Выполняется" if pending else "Прервано", region="Москва"),
-                summary(f"{PROVIDER_NAME} · {MODEL_NAME}", "Готово", brand="Да"),
-            ]}
+def snapshot(status: str = "completed") -> dict:
+    return {
+        "id": FIRST_ID,
+        "status": status,
+        "created_at": "2026-09-28T00:00:00Z",
+        "updated_at": "2026-09-28T01:00:00Z",
+        "finished_at": "2026-09-28T01:00:00Z",
+        "input": {
+            "url": "https://example.ru/", "host": "example.ru", "sphere": "Цветы",
+            "seeds": ["купить цветы", "доставка букетов", "цветочный магазин"],
+            "services": ["Доставка цветов"], "connection_ids": ["model-1"],
+        },
+        "estimate": {"search_upper": 23, "model_upper": 20, "generated_limit": 20, "connections": 1},
+        "company_name": "Ромашка",
+        "services": ["Доставка цветов"],
+        "pages": [],
+        "stages": [
+            {"stage": stage, "status": "done", "error": None, "counters": {}, "updated_at": "2026-09-28T01:00:00Z"}
+            for stage in range(1, 7)
+        ],
+        "candidates": [
+            {"host": CANDIDATE_HOST, "title": "Цветочный магазин — доставка", "occurrences": 2,
+             "average_position": 2.5, "seed_indexes": [0, 1], "recurring": True},
+        ],
+        "queries": [
+            {"index": index, "text": f"запрос {index + 1}", "category": "commercial",
+             "service": "Доставка цветов",
+             "flags": {"mentions_company_name": False, "mentions_company_host": False,
+                       "mentions_candidate_host": False, "branded": False}}
+            for index in range(3)
+        ],
+        "summary": "Ромашка упоминается в половине ответов.",
+        "counters": {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0},
+        "readiness": {
+            "report_ready": True, "summary_ready": True, "queries_ready": True,
+            "has_submitted_search_rows": False, "has_unsubmitted_search_rows": False,
+            "has_unfinished_model_rows": False, "search_rows": 2, "model_rows": 2,
+        },
+        "aggregates": {
+            "site": {
+                "search": {"overall": metric(2, 1, 3), "branded": metric(1, 1, 3), "unbranded": metric(1, 0)},
+                "ai": {"model-1": {
+                    "name": metric(2, 1), "host": metric(2, 1), "combined": metric(2, 1),
+                    "branded": {"name": metric(1, 1), "host": metric(1, 1), "combined": metric(1, 1)},
+                    "unbranded": {"name": metric(1, 0), "host": metric(1, 1), "combined": metric(1, 1)},
+                }},
+            },
+            "competitors": [
+                {"host": CANDIDATE_HOST, "title": "Цветочный магазин — доставка", "occurrences": 2,
+                 "average_position": 2.5, "seed_indexes": [0, 1],
+                 "search": {"overall": metric(2, 1, 2), "branded": metric(0, 0), "unbranded": metric(2, 1, 2)},
+                 "ai": {"model-1": {"host": metric(2, 1)}}},
+            ],
+            "categories": {
+                "commercial": {"search": metric(2, 1, 3), "ai": {"model-1": metric(2, 1)}},
+                "informational": {"search": metric(0, 0), "ai": {"model-1": metric(0, 0)}},
+                "comparative": {"search": metric(0, 0), "ai": {"model-1": metric(0, 0)}},
+            },
+            "services": {"Доставка цветов": {"search": metric(2, 1, 3), "ai": {"model-1": metric(2, 1)}}},
+            "counts": {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0},
+        },
+    }
 
 
-def test_mixed_run_history_export_and_delete(page: Page, settings_page: SettingsPage, application: Application) -> None:
-    settings_page.add_provider(PROVIDER_NAME, "https://api.example.com/v1/chat/completions",
-                               "qa-secret-key", model_id=MODEL_ID, model_name=MODEL_NAME)
-    settings_page.close()
-    page.clock.install()
-    state = {"created": False, "deleted": False, "finished": False, "posts": 0, "legacy": []}
+def model_row(index: int, answer: str) -> dict:
+    return {
+        "query_index": index, "connection_id": "model-1", "provider_name": "Модель",
+        "status": "found", "answer": answer, "name_mentioned": True, "host_mentioned": False,
+        "error": None, "query": f"запрос {index + 1}", "category": "commercial",
+        "service": "Доставка цветов",
+    }
 
-    def route_runs(route) -> None:
-        path = route.request.url.split("?", 1)[0]
-        method = route.request.method
-        if path.endswith("/api/runs") and method == "POST":
-            state["posts"] += 1
-            state["created"] = True
-            route.fulfill(status=202, json={"id": RUN_ID, "status": "pending"})
-        elif path.endswith("/api/runs") and method == "GET":
-            items = [] if not state["created"] or state["deleted"] else [{
-                "id": RUN_ID, "created_at": "2026-09-25T14:00:00Z",
-                "status": "interrupted" if state["finished"] else "pending", "prompts": [PROMPT]}]
-            route.fulfill(json={"items": items, "next_cursor": None})
-        elif path.endswith(f"/api/runs/{RUN_ID}/export.csv"):
-            route.fulfill(status=200, body=b"\xef\xbb\xbf\xd0\x97\xd0\xb0\xd0\xbf\xd1\x80\xd0\xbe\xd1\x81\n",
-                          headers={"content-type": "text/csv; charset=utf-8",
-                                   "content-disposition": 'attachment; filename="ai-serp-results-2026-09-25.csv"'})
-        elif path.endswith(f"/api/runs/{RUN_ID}") and method == "DELETE":
+
+def search_row(index: int) -> dict:
+    return {
+        "query_index": index, "query": f"запрос {index + 1}", "category": "commercial",
+        "service": "Доставка цветов", "status": "found", "site_position": 3,
+        "site_url": "https://example.ru/catalog", "error": None,
+    }
+
+
+def seeded_browser(page: Page) -> dict:
+    """Answer history, report, detail pages and deletion locally."""
+    state = {"deleted": False, "model_cursors": []}
+
+    def answer(route: Route) -> None:
+        request = route.request
+        url = request.url
+        path = url.split("?", 1)[0]
+        query = url.split("?", 1)[1] if "?" in url else ""
+        if path.endswith("/api/seo/analyses") and request.method == "GET":
+            if "cursor=" in query:
+                route.fulfill(json={"items": [history_item(THIRD_ID, status="cancelled", sphere="Третий прогон",
+                                                         created_at="2026-09-26T10:00:00Z")], "next_cursor": None})
+            elif state["deleted"]:
+                route.fulfill(json={"items": [], "next_cursor": None})
+            else:
+                route.fulfill(json={"items": [
+                    history_item(FIRST_ID, status="completed", sphere="Первый прогон",
+                                 created_at="2026-09-28T10:00:00Z"),
+                    history_item(SECOND_ID, status="interrupted", sphere="Второй прогон",
+                                 created_at="2026-09-27T10:00:00Z"),
+                ], "next_cursor": CURSOR})
+        elif path.endswith(f"/api/seo/analyses/{FIRST_ID}/rows"):
+            if "kind=model" in query:
+                if "cursor=" in query:
+                    state["model_cursors"].append(query)
+                    route.fulfill(json={"items": [model_row(1, "Второй сохранённый ответ")], "next_cursor": None})
+                else:
+                    route.fulfill(json={"items": [model_row(0, "Первый сохранённый ответ")], "next_cursor": ROWS_CURSOR})
+            else:
+                route.fulfill(json={"items": [search_row(0)], "next_cursor": None})
+        elif path.endswith(f"/api/seo/analyses/{FIRST_ID}") and request.method == "DELETE":
             state["deleted"] = True
             route.fulfill(status=204, body="")
-        elif path.endswith(f"/api/runs/{RUN_ID}") and method == "GET":
-            route.fulfill(json=snapshot("interrupted" if state["finished"] else "pending"))
+        elif path.endswith(f"/api/seo/analyses/{FIRST_ID}"):
+            route.fulfill(json=snapshot())
         else:
-            route.fulfill(status=404, json={"detail": "Нет прогона"})
+            route.fulfill(status=404, json={"detail": "Не найдено"})
 
-    def legacy(route) -> None:
-        state["legacy"].append(route.request.url)
-        route.fulfill(status=500, json={"detail": "Не используйте старые маршруты"})
+    page.route("**/api/seo/analyses**", answer)
+    return state
 
-    page.route("**/api/runs**", route_runs)
-    page.route("**/api/check", legacy)
-    page.route("**/api/search", legacy)
-    page.goto(application.base_url, wait_until="networkidle")
-    page.get_by_role("checkbox", name=re.compile(PROVIDER_NAME)).check()
-    page.get_by_label("Название бренда").fill("Ромашка")
-    page.get_by_label("Сайт").fill("example.ru")
-    page.get_by_label("Вопросы клиентов").fill(PROMPT)
-    for _ in range(2):
-        page.get_by_role("button", name="Добавить регион").click()
-    page.get_by_label("Регион 1", exact=True).select_option("1")
-    page.get_by_label("Регион 2", exact=True).select_option("213")
-    page.get_by_role("button", name="Проверить бренд").click()
 
-    expect(page.get_by_role("heading", name="Таблица результатов")).to_be_visible()
-    expect(page.get_by_text("Выполняется", exact=True).first).to_be_visible()
-    expect(page.get_by_role("link", name="Экспорт")).to_have_count(0)
-    expect(page.get_by_role("button", name="Проверка выполняется")).to_be_disabled()
-    page.locator("form").evaluate("form => form.requestSubmit()")
-    assert state["posts"] == 1
-    assert state["legacy"] == []
+def test_seo_history_pages_opens_the_report_and_deletes(page: Page, application: Application) -> None:
+    state = seeded_browser(page)
+    seo = SeoPage(page, application.base_url).open()
 
-    state["finished"] = True
-    page.clock.fast_forward(30_000)
-    expect(page.get_by_text("Прервано", exact=True).first).to_be_visible()
-    expect(page.get_by_role("link", name="Экспорт")).to_be_visible()
-    page.set_viewport_size({"width": 375, "height": 800})
-    table = page.get_by_role("table", name="Таблица результатов")
-    assert table.evaluate("table => table.scrollWidth > table.parentElement.clientWidth")
-    expect(page.get_by_role("link", name="Экспорт")).to_be_visible()
-    page.set_viewport_size({"width": 1440, "height": 900})
-    with page.expect_download() as download_info:
-        page.get_by_role("link", name="Экспорт").click()
-    assert download_info.value.suggested_filename == "ai-serp-results-2026-09-25.csv"
+    rows = seo.history_rows
+    expect(rows).to_have_count(2)
+    expect(rows.nth(0)).to_contain_text("Первый прогон")
+    expect(rows.nth(0)).to_contain_text("Завершён")
+    expect(rows.nth(1)).to_contain_text("Прерван")
+    # An active analysis cannot be deleted; the first page holds only terminal states.
+    expect(seo.history_row(FIRST_ID).get_by_role("button", name="Удалить")).to_be_enabled()
 
-    page.reload(wait_until="networkidle")
-    page.get_by_role("button", name="Посмотреть задачу").first.click()
-    expect(page.get_by_role("heading", name="Таблица результатов")).to_be_visible()
-    page.once("dialog", lambda dialog: dialog.accept())
-    page.get_by_role("button", name=f"Удалить прогон {RUN_ID}").click()
-    expect(page.get_by_text("Сохранённых прогонов пока нет.")).to_be_visible()
+    seo.show_more_history()
+    expect(rows).to_have_count(3)
+    expect(rows.nth(2)).to_contain_text("Третий прогон")
+    expect(rows.nth(2)).to_contain_text("Отменён")
+
+    seo.open_report(FIRST_ID)
+    assert seo.metric_text("site-overall") == "50 %"
+    assert seo.metric_text("category-comparative") == "—"
+    expect(seo.candidate(CANDIDATE_HOST)).to_contain_text("Цветочный магазин — доставка")
+    expect(seo.model_detail_rows).to_have_count(1)
+    expect(seo.model_detail_rows.first).to_contain_text("Первый сохранённый ответ")
+
+    seo.show_more("Ответы моделей")
+    expect(seo.model_detail_rows).to_have_count(2)
+    expect(seo.model_detail_rows.nth(1)).to_contain_text("Второй сохранённый ответ")
+    assert state["model_cursors"], "Вторая страница ответов должна запрашиваться по курсору"
+
+    seo.delete_analysis(FIRST_ID)
+    expect(seo.history_row(FIRST_ID)).to_have_count(0)
+    expect(rows).to_have_count(2)

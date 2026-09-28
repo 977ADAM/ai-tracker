@@ -97,7 +97,7 @@
   {#if terminal}
     <p class="mt-6 border-t border-line pt-6 text-sm leading-6 text-muted">
       {#if snapshot.status === 'completed'}
-        Анализ завершён, результат сохранён. Подробный отчёт и SEO-история появятся в следующей версии.
+        Анализ завершён, результат сохранён. Отчёт открыт ниже, а все прогоны лежат в SEO-истории.
       {:else if snapshot.status === 'cancelled'}
         Анализ отменён. Полученные строки сохранены, продолжить прогон нельзя.
       {:else if snapshot.status === 'interrupted'}

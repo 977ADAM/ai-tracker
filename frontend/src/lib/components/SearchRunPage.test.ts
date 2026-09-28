@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Page from '../../routes/+page.svelte';
-import type { FormConfig, PublicProvider, SeoAnalysisSnapshot, SeoHistoryPage } from '$lib/types';
+import type { FormConfig, PublicProvider, SeoAnalysisSnapshot, SeoHistoryPage, SeoMetric } from '$lib/types';
 
 const form: FormConfig = {
   limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 200, max_domain_length: 253 },
@@ -42,6 +42,62 @@ function snapshot(status: SeoAnalysisSnapshot['status'], overrides: Partial<SeoA
 function response(value: unknown, ok = true) {
   return { ok, json: async () => value };
 }
+
+function metricOf(denominator: number, successes: number, average: number | null = null): SeoMetric {
+  return {
+    denominator, successes,
+    share: denominator > 0 ? Math.round((successes / denominator) * 10_000) / 10_000 : null,
+    average_position: average
+  };
+}
+
+/** A terminal analysis with real aggregates, detail rows and a saved answer. */
+function completedSnapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
+  return snapshot('completed', {
+    finished_at: '2026-09-28T01:00:00Z',
+    summary: 'Ромашка упоминается в половине ответов.',
+    counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 0, model_errors: 0 },
+    aggregates: {
+      site: {
+        search: { overall: metricOf(4, 2, 3.5), branded: metricOf(1, 1, 2), unbranded: metricOf(3, 1, 5) },
+        ai: {
+          'model-1': {
+            name: metricOf(4, 2), host: metricOf(4, 1), combined: metricOf(4, 3),
+            branded: { name: metricOf(1, 1), host: metricOf(1, 1), combined: metricOf(1, 1) },
+            unbranded: { name: metricOf(3, 1), host: metricOf(3, 0), combined: metricOf(3, 2) }
+          }
+        }
+      },
+      competitors: [],
+      categories: {
+        commercial: { search: metricOf(2, 2, 2), ai: { 'model-1': metricOf(2, 2) } },
+        informational: { search: metricOf(1, 0), ai: { 'model-1': metricOf(1, 0) } },
+        comparative: { search: metricOf(0, 0), ai: { 'model-1': metricOf(0, 0) } }
+      },
+      services: { 'Доставка цветов': { search: metricOf(2, 1, 4), ai: { 'model-1': metricOf(2, 1) } } },
+      counts: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 0, model_errors: 0 }
+    },
+    ...overrides
+  });
+}
+
+const historyItem = {
+  id: 'seo-9', created_at: '2026-09-28T00:00:00Z', finished_at: '2026-09-28T01:00:00Z',
+  status: 'completed' as const, sphere: 'Цветы', host: 'example.ru', company_name: 'Ромашка',
+  counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 0, model_errors: 0 }
+};
+
+const savedRows = {
+  model: [{
+    query_index: 0, connection_id: 'model-1', provider_name: 'Модель', status: 'found',
+    answer: 'Ромашка рекомендует доставку', name_mentioned: true, host_mentioned: false,
+    error: null, query: 'купить цветы', category: 'commercial', service: 'Доставка цветов'
+  }],
+  search: [{
+    query_index: 0, query: 'купить цветы', category: 'commercial', service: 'Доставка цветов',
+    status: 'found', site_position: 3, site_url: 'https://example.ru/catalog', error: null
+  }]
+};
 
 function stubFetch(handler: (input: string, init?: RequestInit) => unknown) {
   const fetch = vi.fn(async (input: string, init?: RequestInit) => {
@@ -231,5 +287,82 @@ describe('SEO run page', () => {
     await fillForm();
     await fireEvent.click(screen.getByRole('button', { name: /Запустить анализ/ }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Python API недоступен'));
+  });
+
+  it('opens a saved report from the SEO history without any new paid call', async () => {
+    const fetch = stubFetch((input, init) => {
+      if (input === '/api/seo/analyses' && !init) return response({ items: [historyItem], next_cursor: null });
+      if (input === '/api/seo/analyses/seo-9') return response(completedSnapshot({
+        id: 'seo-9', input: { ...completedSnapshot().input, connection_ids: ['model-1'] }
+      }));
+      if (input === '/api/seo/analyses/seo-9/rows?kind=model') return response({ items: savedRows.model, next_cursor: null });
+      if (input === '/api/seo/analyses/seo-9/rows?kind=search') return response({ items: savedRows.search, next_cursor: null });
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    render(Page, { props: { data } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Открыть отчёт' })).toBeTruthy());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Открыть отчёт' }));
+    await waitFor(() => expect(screen.getByText('Отчёт SEO-анализа')).toBeTruthy());
+
+    expect(document.querySelector('[data-metric="site-overall"]')?.textContent?.trim()).toBe('50 %');
+    expect(document.querySelector('[data-metric="category-comparative"]')?.textContent?.trim()).toBe('—');
+    await waitFor(() => expect(screen.getByText('Ромашка рекомендует доставку')).toBeTruthy());
+    expect(screen.getByRole('link', { name: 'https://example.ru/catalog' })).toBeTruthy();
+    // Opening a saved analysis must not start another run or reach an external API.
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    expect(screen.getByText('Прогон SEO-анализа')).toBeTruthy();
+  });
+
+  it('loads the next SEO history page through the cursor', async () => {
+    stubFetch((input) => {
+      if (input === '/api/seo/analyses') return response({ items: [historyItem], next_cursor: 'cursor-1' });
+      if (input === '/api/seo/analyses?cursor=cursor-1')
+        return response({ items: [{ ...historyItem, id: 'seo-8', sphere: 'Старый прогон' }], next_cursor: null });
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    render(Page, { props: { data } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Показать ещё' })).toBeTruthy());
+    await fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));
+    await waitFor(() => expect(screen.getByText('Старый прогон')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Показать ещё' })).toBeNull();
+  });
+
+  it('deletes a terminal analysis from the history after a confirmation', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fetch = stubFetch((input, init) => {
+      if (input === '/api/seo/analyses' && !init) return response({ items: [historyItem], next_cursor: null });
+      if (input === '/api/seo/analyses/seo-9' && init?.method === 'DELETE') return response(null);
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    render(Page, { props: { data } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Удалить анализ seo-9' })).toBeTruthy());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Удалить анализ seo-9' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Удалить анализ seo-9' })).toBeNull());
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.some(([path, init]) => path === '/api/seo/analyses/seo-9' && init?.method === 'DELETE')).toBe(true);
+    expect(screen.getByText('Сохранённых SEO-анализов пока нет.')).toBeTruthy();
+    confirm.mockRestore();
+  });
+
+  it('shows history and detail errors without breaking the form', async () => {
+    stubFetch((input) => {
+      if (input === '/api/seo/analyses') return response({ items: [historyItem], next_cursor: null });
+      if (input === '/api/seo/analyses/seo-9') return response(completedSnapshot({ id: 'seo-9' }));
+      if (input.startsWith('/api/seo/analyses/seo-9/rows'))
+        return response({ detail: 'Некорректный ответ Python API' }, false);
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    render(Page, { props: { data } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Открыть отчёт' })).toBeTruthy());
+    await fireEvent.click(screen.getByRole('button', { name: 'Открыть отчёт' }));
+
+    await waitFor(() => expect(screen.getByText('Отчёт SEO-анализа')).toBeTruthy());
+    // The metrics from the snapshot stay readable even when the detail page fails.
+    expect(document.querySelector('[data-metric="site-overall"]')?.textContent?.trim()).toBe('50 %');
+    await waitFor(() => expect(screen.getAllByRole('alert').some((item) => item.textContent?.includes('Некорректный ответ Python API'))).toBe(true));
+    expect((screen.getByRole('button', { name: /Запустить анализ/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

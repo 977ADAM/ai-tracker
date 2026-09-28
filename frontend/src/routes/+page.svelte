@@ -1,10 +1,15 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
   import SeoForm from '$lib/components/SeoForm.svelte';
+  import SeoHistory from '$lib/components/SeoHistory.svelte';
+  import SeoReport from '$lib/components/SeoReport.svelte';
   import SeoRunProgress from '$lib/components/SeoRunProgress.svelte';
   import { validateSeoForm } from '$lib/seo-form';
   import type { SeoFormInput } from '$lib/seo-form';
-  import type { FormConfig, PublicProvider, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoHistoryPage } from '$lib/types';
+  import type {
+    FormConfig, PublicProvider, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoHistoryItem, SeoHistoryPage,
+    SeoModelRow, SeoRowsKind, SeoRowsPage, SeoSearchRow
+  } from '$lib/types';
 
   type Data = {
     providers: PublicProvider[];
@@ -23,7 +28,19 @@
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let destroyed = false;
 
+  // The SEO history and the report detail are independent resources: a failure
+  // in either one must never take the form or the run screen down with it.
+  let history = $state<SeoHistoryItem[]>([]);
+  let historyCursor = $state<string | null>(null);
+  let historyLoading = $state(false);
+  let historyError = $state('');
+  let reportRows = $state<{ model: SeoModelRow[]; search: SeoSearchRow[] }>({ model: [], search: [] });
+  let reportCursors = $state<{ model: string | null; search: string | null }>({ model: null, search: null });
+  let rowsLoading = $state<SeoRowsKind | null>(null);
+  let rowsError = $state('');
+
   const terminal = $derived(!!snapshot && snapshot.status !== 'running');
+  const connectionNames = $derived(Object.fromEntries(data.providers.map((provider) => [provider.id, provider.name])));
 
   function detail(value: unknown, fallback: string): string {
     return value !== null && typeof value === 'object' && 'detail' in value && typeof value.detail === 'string'
@@ -41,6 +58,71 @@
     stopPolling();
     pollTimer = setTimeout(() => void pollAnalysis(id), POLL_INTERVAL_MS);
   }
+
+  const EMPTY_ROWS = { model: [], search: [] };
+  const EMPTY_CURSORS = { model: null, search: null };
+
+  async function loadRows(id: string, kind: SeoRowsKind, cursor: string | null, append: boolean) {
+    rowsLoading = kind;
+    try {
+      const query = cursor === null ? `kind=${kind}` : `kind=${kind}&cursor=${encodeURIComponent(cursor)}`;
+      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}/rows?${query}`);
+      const value = await payload(response);
+      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить строки отчёта'));
+      if (destroyed || activeId !== id) return;
+      const page = value as SeoRowsPage;
+      if (kind === 'model') {
+        const items = page.items as SeoModelRow[];
+        reportRows = { ...reportRows, model: append ? [...reportRows.model, ...items] : items };
+        reportCursors = { ...reportCursors, model: page.next_cursor };
+      } else {
+        const items = page.items as SeoSearchRow[];
+        reportRows = { ...reportRows, search: append ? [...reportRows.search, ...items] : items };
+        reportCursors = { ...reportCursors, search: page.next_cursor };
+      }
+      rowsError = '';
+    } catch (cause) {
+      if (destroyed || activeId !== id) return;
+      rowsError = cause instanceof Error ? cause.message : 'Не удалось загрузить строки отчёта';
+    } finally {
+      if (rowsLoading === kind) rowsLoading = null;
+    }
+  }
+
+  /** The detail rows come from saved data only: opening a report never pays for a new call. */
+  async function loadReport(id: string, status: SeoAnalysisSnapshot['status']) {
+    reportRows = EMPTY_ROWS;
+    reportCursors = EMPTY_CURSORS;
+    rowsError = '';
+    if (status === 'running') return;
+    await Promise.all([
+      loadRows(id, 'model', null, false),
+      loadRows(id, 'search', null, false)
+    ]);
+  }
+
+  async function loadAnalysis(id: string) {
+    activeId = id;
+    runError = '';
+    reportRows = EMPTY_ROWS;
+    reportCursors = EMPTY_CURSORS;
+    rowsError = '';
+    try {
+      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}`);
+      const value = await payload(response);
+      if (!response.ok) throw new Error(detail(value, 'Не удалось открыть анализ'));
+      if (destroyed || activeId !== id) return;
+      const current = value as SeoAnalysisSnapshot;
+      snapshot = current;
+      if (current.status === 'running') { pendingId = id; schedulePoll(id); }
+      else { pendingId = null; stopPolling(); }
+      await loadReport(id, current.status);
+    } catch (cause) {
+      if (destroyed) return;
+      runError = cause instanceof Error ? cause.message : 'Не удалось открыть анализ';
+    }
+  }
+
   async function pollAnalysis(id: string) {
     if (destroyed || pendingId !== id) return;
     try {
@@ -52,44 +134,46 @@
       snapshot = current;
       runError = '';
       if (current.status === 'running') schedulePoll(id);
-      else { pendingId = null; stopPolling(); }
+      else {
+        pendingId = null;
+        stopPolling();
+        // The report is read from the saved rows, which are complete by now.
+        await loadReport(id, current.status);
+        await loadHistory();
+      }
     } catch (cause) {
       if (destroyed) return;
       runError = cause instanceof Error ? cause.message : 'Не удалось обновить анализ';
       schedulePoll(id);
     }
   }
-  async function loadAnalysis(id: string) {
-    activeId = id;
-    runError = '';
+
+  async function loadHistory(cursor: string | null = null) {
+    historyLoading = true;
+    historyError = '';
     try {
-      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}`);
+      const path = cursor === null
+        ? '/api/seo/analyses'
+        : `/api/seo/analyses?cursor=${encodeURIComponent(cursor)}`;
+      const response = await fetch(path);
       const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось открыть анализ'));
-      if (destroyed || activeId !== id) return;
-      const current = value as SeoAnalysisSnapshot;
-      snapshot = current;
-      if (current.status === 'running') { pendingId = id; schedulePoll(id); }
-      else { pendingId = null; stopPolling(); }
-    } catch (cause) {
-      if (destroyed) return;
-      runError = cause instanceof Error ? cause.message : 'Не удалось открыть анализ';
-    }
-  }
-  async function loadActiveFromHistory() {
-    try {
-      const response = await fetch('/api/seo/analyses');
-      const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить историю анализов'));
+      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить SEO-историю'));
       if (destroyed) return;
       const page = value as SeoHistoryPage;
-      const active = page.items.find((item) => item.status === 'running');
-      if (active && !pendingId) await loadAnalysis(active.id);
+      history = cursor === null ? page.items : [...history, ...page.items];
+      historyCursor = page.next_cursor;
+      if (cursor === null) {
+        const active = page.items.find((item) => item.status === 'running');
+        if (active && !pendingId) await loadAnalysis(active.id);
+      }
     } catch (cause) {
       if (destroyed) return;
-      runError = cause instanceof Error ? cause.message : 'Не удалось загрузить историю анализов';
+      historyError = cause instanceof Error ? cause.message : 'Не удалось загрузить SEO-историю';
+    } finally {
+      historyLoading = false;
     }
   }
+
   async function startAnalysis(input: SeoFormInput) {
     error = '';
     runError = '';
@@ -109,7 +193,7 @@
       const created = value as SeoAnalysisCreated;
       snapshot = null;
       await loadAnalysis(created.id);
-      void loadActiveFromHistory();
+      void loadHistory();
     } catch (cause) {
       throw cause instanceof Error ? cause : new Error('Не удалось запустить анализ');
     }
@@ -120,6 +204,7 @@
     if (problem) { error = problem; return; }
     return startAnalysis(input);
   }
+
   async function cancel() {
     if (!activeId || cancelling) return;
     cancelling = true;
@@ -129,9 +214,12 @@
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось отменить анализ'));
       if (destroyed) return;
-      snapshot = value as SeoAnalysisSnapshot;
+      const current = value as SeoAnalysisSnapshot;
+      snapshot = current;
       pendingId = null;
       stopPolling();
+      await loadReport(current.id, current.status);
+      await loadHistory();
     } catch (cause) {
       if (destroyed) return;
       runError = cause instanceof Error ? cause.message : 'Не удалось отменить анализ';
@@ -140,7 +228,39 @@
     }
   }
 
-  onMount(() => { void loadActiveFromHistory(); });
+  /** Opening a saved analysis reads the database only; nothing is paid for again. */
+  async function openAnalysis(id: string) {
+    await loadAnalysis(id);
+  }
+
+  function loadMoreRows(kind: SeoRowsKind) {
+    if (!snapshot) return;
+    void loadRows(snapshot.id, kind, reportCursors[kind], true);
+  }
+
+  async function removeAnalysis(id: string) {
+    historyError = '';
+    try {
+      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(detail(await payload(response), 'Не удалось удалить SEO-анализ'));
+      if (destroyed) return;
+      history = history.filter((item) => item.id !== id);
+      if (activeId === id) {
+        activeId = null;
+        pendingId = null;
+        snapshot = null;
+        stopPolling();
+        reportRows = EMPTY_ROWS;
+        reportCursors = EMPTY_CURSORS;
+        rowsError = '';
+      }
+    } catch (cause) {
+      if (destroyed) return;
+      historyError = cause instanceof Error ? cause.message : 'Не удалось удалить SEO-анализ';
+    }
+  }
+
+  onMount(() => { void loadHistory(); });
   onDestroy(() => { destroyed = true; stopPolling(); });
 </script>
 
@@ -188,19 +308,32 @@
         </section>
     {/if}
 
-    {#if terminal && snapshot?.status === 'completed'}
-        <aside class="mt-8 rounded-2xl border border-line bg-accent-soft px-6 py-5 text-sm leading-6 text-ink">
-            <strong>Отчёт готов</strong>
-            <p class="mt-2 text-muted">
-                Подробные метрики, разрезы по категориям и услугам, а также SEO-история появятся в следующей версии.
-            </p>
-        </aside>
+    {#if terminal && snapshot}
+        <SeoReport
+            {snapshot}
+            rows={reportRows}
+            cursors={reportCursors}
+            {connectionNames}
+            loadingRows={rowsLoading}
+            error={rowsError}
+            onMore={loadMoreRows}
+        />
     {/if}
 
     <aside class="mt-8 rounded-2xl border border-line bg-accent-soft px-6 py-5 text-sm leading-6 text-ink">
         <strong>Как читать результат</strong>
         <p class="mt-2 text-muted">
-            Поиск проверяет только первую десятку органических результатов Яндекса по всей России. Ошибка отдельного источника не означает, что сайта нет в выдаче: такие строки исключаются из метрик.
+            Поиск проверяет только первую десятку органических результатов Яндекса по всей России. Ошибка отдельного источника не означает, что сайта нет в выдаче: такие строки исключаются из метрик. Если в знаменателе нет ни одной успешной строки, отчёт показывает «—», а не ноль процентов.
         </p>
     </aside>
+
+    <SeoHistory
+        items={history}
+        nextCursor={historyCursor}
+        onView={(id) => void openAnalysis(id)}
+        onDelete={(id) => void removeAnalysis(id)}
+        onMore={() => void loadHistory(historyCursor)}
+        loading={historyLoading}
+        error={historyError}
+    />
 </main>
