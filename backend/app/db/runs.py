@@ -28,9 +28,10 @@ PENDING_MODEL = frozenset({"pending"})
 PENDING_SEARCH = frozenset({"submitting", "waiting"})
 CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 REGION_NAMES = dict(REGIONS)
-# Versions this repository can open: 3 is added by the SEO repository, which
-# owns every SEO table and never touches the run tables below.
-SUPPORTED_VERSIONS = (0, 1, 2, 3)
+# Versions this repository can open: 3 is added by the SEO repository, and 4
+# adds the SEO agent state, trace, and conclusions. The SEO repository owns
+# those tables and never touches the run tables below.
+SUPPORTED_VERSIONS = (0, 1, 2, 3, 4)
 
 
 class RunRepository:

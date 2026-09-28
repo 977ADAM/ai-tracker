@@ -26,6 +26,7 @@ from app.domain.seo import (
 )
 
 DB_FILE = "runs.sqlite3"
+AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
 LEGACY_TABLES = {"runs", "model_rows", "search_rows"}
 SEO_TABLES = {
     "seo_analyses",
@@ -37,7 +38,111 @@ SEO_TABLES = {
     "seo_candidate_hits",
     "seo_model_rows",
     "seo_seed_rows",
+    "seo_agents",
+    "seo_agent_steps",
+    "seo_conclusions",
 }
+AGENT_TABLES = {"seo_agents", "seo_agent_steps", "seo_conclusions"}
+# The SEO tables exactly as revision 1 (`user_version = 3`) wrote them: a real
+# migrated file must keep them and gain the agent tables without a rewrite.
+VERSION_THREE_SCHEMA = """
+CREATE TABLE seo_analyses (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    url TEXT NOT NULL,
+    host TEXT NOT NULL,
+    sphere TEXT NOT NULL,
+    seeds_json TEXT NOT NULL,
+    input_services_json TEXT NOT NULL,
+    connection_ids_json TEXT NOT NULL,
+    estimate_json TEXT NOT NULL,
+    company_name TEXT NOT NULL DEFAULT '',
+    services_json TEXT NOT NULL,
+    summary_text TEXT
+);
+CREATE TABLE seo_stages (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    stage INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    counters_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, stage)
+);
+CREATE TABLE seo_pages (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    page_index INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, page_index)
+);
+CREATE TABLE seo_candidates (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    candidate_index INTEGER NOT NULL,
+    host TEXT NOT NULL,
+    title TEXT NOT NULL,
+    occurrences INTEGER NOT NULL,
+    average_position REAL NOT NULL,
+    seed_indexes_json TEXT NOT NULL,
+    recurring INTEGER NOT NULL,
+    PRIMARY KEY (analysis_id, candidate_index)
+);
+CREATE TABLE seo_queries (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    query_index INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    category TEXT NOT NULL,
+    service TEXT,
+    mentions_company_name INTEGER NOT NULL,
+    mentions_company_host INTEGER NOT NULL,
+    mentions_candidate_host INTEGER NOT NULL,
+    branded INTEGER NOT NULL,
+    PRIMARY KEY (analysis_id, query_index)
+);
+CREATE TABLE seo_search_rows (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    query_index INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    operation_id TEXT,
+    site_position INTEGER,
+    site_url TEXT,
+    error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, query_index)
+);
+CREATE TABLE seo_candidate_hits (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    query_index INTEGER NOT NULL,
+    host TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    url TEXT,
+    PRIMARY KEY (analysis_id, query_index, host)
+);
+CREATE TABLE seo_model_rows (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    connection_id TEXT NOT NULL,
+    provider_name TEXT NOT NULL,
+    query_index INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    answer TEXT,
+    name_mentioned INTEGER,
+    host_mentioned INTEGER,
+    error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, connection_id, query_index)
+);
+CREATE TABLE seo_seed_rows (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    seed_index INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    operation_id TEXT,
+    error TEXT,
+    PRIMARY KEY (analysis_id, seed_index)
+);
+"""
 LEGACY_SCHEMA = """
 CREATE TABLE runs (
     id TEXT PRIMARY KEY, created_at TEXT NOT NULL, finished_at TEXT,
@@ -124,6 +229,100 @@ def table_names(path: Path) -> set[str]:
         connection.close()
 
 
+def table_counts(path: Path, tables: set[str]) -> dict[str, int]:
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            table: int(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+            for table in sorted(tables)
+        }
+    finally:
+        connection.close()
+
+
+def create_version_three_database(path: Path) -> str:
+    """Write a populated version-3 database exactly as revision 1 left it."""
+    analysis_id = "revision-one"
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(LEGACY_SCHEMA)
+        connection.executescript(VERSION_THREE_SCHEMA)
+        connection.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("legacy-run", "2026-09-25T14:00:00Z", "2026-09-25T14:01:00Z", "Ромашка",
+             "example.ru", '["цветы"]', '["p"]', '[1]'),
+        )
+        connection.execute(
+            "INSERT INTO model_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("legacy-run", "p", 0, "ChatGPT", "цветы", "mentioned", "Ромашка", 1, None),
+        )
+        connection.execute(
+            "INSERT INTO search_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("legacy-run", 0, 0, 0, "цветы", 1, "Москва и Московская область",
+             "yandex", "found", 2, "https://example.ru/flowers", None),
+        )
+        connection.execute(
+            "INSERT INTO seo_analyses (id, status, created_at, updated_at, finished_at, url, host, "
+            "sphere, seeds_json, input_services_json, connection_ids_json, estimate_json, company_name, "
+            "services_json, summary_text) "
+            "VALUES (?, 'running', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            (
+                analysis_id, "2026-09-25T15:00:00Z", "2026-09-25T15:00:00Z",
+                "https://example.ru/", "example.ru", "Цветочный магазин",
+                '["букет цветов", "доставка цветов", "розы"]', '["Букеты"]', '["chatgpt"]',
+                '{"search": 23, "model": 40}', "Ромашка", '["Букеты", "Доставка"]',
+            ),
+        )
+        connection.execute(
+            "INSERT INTO seo_stages (analysis_id, stage, status, error, counters_json, updated_at) "
+            "VALUES (?, 1, 'done', NULL, '{\"pages\": 2}', ?), (?, 2, 'done', NULL, '{}', ?)",
+            (analysis_id, "2026-09-25T15:00:00Z", analysis_id, "2026-09-25T15:00:00Z"),
+        )
+        connection.execute(
+            "INSERT INTO seo_pages (analysis_id, page_index, url, title) VALUES (?, 0, ?, ?), (?, 1, ?, ?)",
+            (analysis_id, "https://example.ru/", "Главная",
+             analysis_id, "https://example.ru/dostavka", "Доставка"),
+        )
+        connection.execute(
+            "INSERT INTO seo_candidates (analysis_id, candidate_index, host, title, occurrences, "
+            "average_position, seed_indexes_json, recurring) VALUES (?, 0, ?, ?, 3, 2.33, '[0, 1, 2]', 1)",
+            (analysis_id, "rival.ru", "Соперник"),
+        )
+        connection.execute(
+            "INSERT INTO seo_queries (analysis_id, query_index, text, category, service, "
+            "mentions_company_name, mentions_company_host, mentions_candidate_host, branded) "
+            "VALUES (?, 0, ?, 'commercial', 'Букеты', 0, 0, 0, 0), "
+            "(?, 1, ?, 'informational', NULL, 0, 0, 1, 0)",
+            (analysis_id, "букет цветов купить", analysis_id, "как выбрать букет"),
+        )
+        connection.execute(
+            "INSERT INTO seo_search_rows (analysis_id, query_index, status, operation_id, site_position, "
+            "site_url, error, updated_at) VALUES (?, 0, 'found', 'op-revision-one', 3, ?, NULL, ?)",
+            (analysis_id, "https://example.ru/", "2026-09-25T15:00:00Z"),
+        )
+        connection.execute(
+            "INSERT INTO seo_candidate_hits (analysis_id, query_index, host, position, url) "
+            "VALUES (?, 0, 'rival.ru', 2, 'https://rival.ru/')",
+            (analysis_id,),
+        )
+        connection.execute(
+            "INSERT INTO seo_model_rows (analysis_id, connection_id, provider_name, query_index, status, "
+            "answer, name_mentioned, host_mentioned, error, updated_at) "
+            "VALUES (?, 'chatgpt', 'ChatGPT', 0, 'found', ?, 1, 0, NULL, ?)",
+            (analysis_id, "Ромашка — да", "2026-09-25T15:00:00Z"),
+        )
+        connection.execute(
+            "INSERT INTO seo_seed_rows (analysis_id, seed_index, status, operation_id, error) "
+            "VALUES (?, 0, 'found', 'seed-op-revision-one', NULL)",
+            (analysis_id,),
+        )
+        connection.execute("PRAGMA user_version=3")
+        connection.commit()
+    finally:
+        connection.close()
+    return analysis_id
+
+
 def create_legacy_database(path: Path) -> None:
     """Write a populated version-2 database exactly as `RunRepository` leaves it."""
     connection = sqlite3.connect(path)
@@ -152,10 +351,10 @@ def create_legacy_database(path: Path) -> None:
 # -- step 1: migration -------------------------------------------------------
 
 
-def test_initialize_creates_seo_tables_and_reaches_version_three(tmp_path):
+def test_initialize_creates_seo_tables_and_reaches_version_four(tmp_path):
     repository = seo_repo(tmp_path)
 
-    assert user_version(tmp_path / DB_FILE) == 3
+    assert user_version(tmp_path / DB_FILE) == 4
     assert table_names(tmp_path / DB_FILE) == SEO_TABLES
     assert (tmp_path / DB_FILE).stat().st_mode & 0o777 == 0o600
     assert tmp_path.stat().st_mode & 0o077 == 0
@@ -168,10 +367,10 @@ def test_initialize_creates_seo_tables_and_reaches_version_three(tmp_path):
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     repository.initialize()
-    assert user_version(tmp_path / DB_FILE) == 3
+    assert user_version(tmp_path / DB_FILE) == 4
 
 
-def test_initialize_adds_the_seed_table_to_an_existing_version_three_file(tmp_path):
+def test_initialize_adds_a_missing_seo_table_to_an_existing_version_three_file(tmp_path):
     path = tmp_path / DB_FILE
     seo_repo(tmp_path)
     raw = sqlite3.connect(path)
@@ -185,10 +384,41 @@ def test_initialize_adds_the_seed_table_to_an_existing_version_three_file(tmp_pa
     repository = seo_repo(tmp_path)
 
     assert "seo_seed_rows" in table_names(path)
-    assert user_version(path) == 3
+    assert user_version(path) == 4
     analysis_id = create(repository)
     repository.save_seed_row(analysis_id, 0, status="waiting", operation_id="op-0")
     assert repository.resume_plan(analysis_id).submitted_seeds == ((0, "op-0"),)
+
+
+def test_migration_from_a_populated_version_three_database_keeps_every_row(tmp_path):
+    path = tmp_path / DB_FILE
+    analysis_id = create_version_three_database(path)
+    before = table_counts(path, SEO_TABLES - AGENT_TABLES)
+
+    repository = seo_repo(tmp_path)
+
+    assert user_version(path) == 4
+    # Every revision-1 row is still there, including the ones outside the new tables.
+    assert table_counts(path, SEO_TABLES - AGENT_TABLES) == before
+    assert all(count > 0 for count in before.values())
+    assert AGENT_TABLES <= table_names(path)
+    # The new tables start empty: a migrated analysis reports its agents as pending.
+    assert table_counts(path, AGENT_TABLES) == {table: 0 for table in sorted(AGENT_TABLES)}
+    snapshot = repository.snapshot(analysis_id)
+    assert snapshot["status"] == "running"
+    assert [agent["agent"] for agent in snapshot["agents"]] == list(AGENTS)
+    assert {agent["status"] for agent in snapshot["agents"]} == {"pending"}
+    assert snapshot["budget"]["pages"] == 2
+    assert snapshot["budget"]["searches"] == 1
+    assert snapshot["conclusions"] is None
+    # The same file still opens as plain run history.
+    runs = RunRepository(tmp_path)
+    runs.initialize()
+    runs.recover_unfinished()
+    saved = runs.get("legacy-run")
+    assert saved["status"] == "done"
+    assert saved["brand"] == "Ромашка"
+    assert saved["search"][0]["position"] == 2
 
 
 def test_migration_from_populated_version_two_keeps_runs_and_adds_seo(tmp_path):
@@ -197,7 +427,7 @@ def test_migration_from_populated_version_two_keeps_runs_and_adds_seo(tmp_path):
 
     seo = seo_repo(tmp_path)
 
-    assert user_version(path) == 3
+    assert user_version(path) == 4
     assert LEGACY_TABLES <= table_names(path)
     assert SEO_TABLES <= table_names(path)
     # The migrated file carries both stacks: an SEO run can start right away.
@@ -216,14 +446,14 @@ def test_migration_from_populated_version_two_keeps_runs_and_adds_seo(tmp_path):
 def test_newer_schema_version_is_refused_without_leaking_the_path(tmp_path):
     path = tmp_path / DB_FILE
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA user_version=4")
+    connection.execute("PRAGMA user_version=5")
     connection.commit()
     connection.close()
 
     with pytest.raises(StorageError) as raised:
         SeoRepository(tmp_path).initialize()
     assert str(path) not in str(raised.value)
-    assert user_version(path) == 4
+    assert user_version(path) == 5
 
 
 def test_unusable_database_file_fails_safely(tmp_path):
@@ -758,6 +988,11 @@ def test_delete_removes_only_terminal_analyses(tmp_path):
     repository.replace_candidates(finished, CANDIDATES)
     repository.save_candidate_hits(finished, 0, (CandidateHit("rival.ru", 2, None),))
     repository.save_model_row(finished, "chatgpt", "ChatGPT", 0, status="found", answer="да")
+    repository.upsert_agent(finished, "report", "done")
+    repository.append_step(finished, "report", "model", "turn")
+    repository.save_conclusions(
+        finished, summary="Итог", recommendations="Рекомендации", model="gpt-test",
+    )
     repository.finish_analysis(finished)
 
     repository.delete(finished)
@@ -871,3 +1106,276 @@ def test_two_instances_write_hundreds_of_rows_without_locking(tmp_path):
     assert page["counters"] == {
         "queries": 0, "search_rows": 100, "model_rows": 300, "search_errors": 0, "model_errors": 0,
     }
+
+
+# -- step 3: agents, trace, conclusions, and budget --------------------------
+
+
+TRACE_FIELDS = {
+    "step_index", "agent", "kind", "name", "arguments", "result_summary", "status", "error",
+    "created_at",
+}
+
+
+def test_create_analysis_seeds_six_pending_agents(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    agents = repository.agents(analysis_id)
+
+    assert [agent["agent"] for agent in agents] == list(AGENTS)
+    assert {agent["status"] for agent in agents} == {"pending"}
+    assert [agent["error"] for agent in agents] == [None] * len(AGENTS)
+    assert set(agents[0]) == {"agent", "status", "error", "updated_at"}
+    with pytest.raises(RunNotFound):
+        repository.agents("нет такого анализа")
+
+
+def test_agent_upsert_validates_the_name_and_the_status(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    repository.upsert_agent(analysis_id, "site", "running")
+    repository.upsert_agent(analysis_id, "site", "error", error="Сбой обхода")
+    repository.upsert_agent(analysis_id, "checks", "waiting")
+
+    agents = {agent["agent"]: agent for agent in repository.agents(analysis_id)}
+    assert agents["site"]["status"] == "error"
+    assert agents["site"]["error"] == "Сбой обхода"
+    assert agents["checks"]["status"] == "waiting"
+    assert agents["supervisor"]["status"] == "pending"
+
+    repository.upsert_agent(analysis_id, "site", "done")
+    agents = {agent["agent"]: agent for agent in repository.agents(analysis_id)}
+    assert agents["site"]["status"] == "done"
+    assert agents["site"]["error"] is None
+    # The default rows survive a reopen: a fresh repository reads the same six agents.
+    assert [agent["agent"] for agent in seo_repo(tmp_path).agents(analysis_id)] == list(AGENTS)
+
+    with pytest.raises(ValidationError):
+        repository.upsert_agent(analysis_id, "неизвестный агент", "done")
+    with pytest.raises(ValidationError):
+        repository.upsert_agent(analysis_id, "site", "готово")
+    with pytest.raises(ValidationError):
+        repository.upsert_agent(analysis_id, "site", "done", error=42)  # type: ignore[arg-type]
+    with pytest.raises(RunNotFound):
+        repository.upsert_agent("нет такого анализа", "site", "done")
+
+
+def test_steps_are_ordered_monotonic_and_paged_by_cursor(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    indexes = [
+        repository.append_step(analysis_id, "supervisor", "tool", "handoff_to",
+                               arguments={"agent": "site"}, result_summary="передано"),
+        repository.append_step(analysis_id, "site", "tool", "fetch_site",
+                               arguments={"url": "https://example.ru/", "pages": 2},
+                               result_summary="2 страницы"),
+        repository.append_step(analysis_id, "site", "model", "turn", status="done"),
+        repository.append_step(analysis_id, "site", "tool", "fetch_site", status="error",
+                               error="Лимит прогона исчерпан"),
+        repository.append_step(analysis_id, "checks", "system", "budget",
+                               arguments={"pages": 2}, status="skipped"),
+    ]
+
+    assert indexes == [1, 2, 3, 4, 5]
+    first = repository.trace_page(analysis_id, limit=2)
+    assert [item["step_index"] for item in first["items"]] == [1, 2]
+    assert first["next_cursor"] is not None
+    assert set(first["items"][0]) == TRACE_FIELDS
+    assert first["items"][0] == {
+        "step_index": 1, "agent": "supervisor", "kind": "tool", "name": "handoff_to",
+        "arguments": {"agent": "site"}, "result_summary": "передано", "status": "done", "error": None,
+        "created_at": first["items"][0]["created_at"],
+    }
+    # `arguments` comes back as a parsed object, never as the stored JSON string.
+    assert first["items"][1]["arguments"] == {"url": "https://example.ru/", "pages": 2}
+    second = repository.trace_page(analysis_id, cursor=first["next_cursor"], limit=2)
+    assert [item["step_index"] for item in second["items"]] == [3, 4]
+    assert second["items"][1]["status"] == "error"
+    assert second["items"][1]["error"] == "Лимит прогона исчерпан"
+    assert second["items"][0]["arguments"] == {}
+    assert second["items"][0]["result_summary"] is None
+    third = repository.trace_page(analysis_id, cursor=second["next_cursor"], limit=2)
+    assert [item["step_index"] for item in third["items"]] == [5]
+    assert third["items"][0]["status"] == "skipped"
+    assert third["next_cursor"] is None
+
+    # A restarted repository keeps numbering the same trace.
+    assert seo_repo(tmp_path).append_step(analysis_id, "report", "model", "turn") == 6
+    assert [item["step_index"] for item in repository.trace_page(analysis_id)["items"]] == [1, 2, 3, 4, 5, 6]
+    assert repository.trace_page(analysis_id, limit=100)["next_cursor"] is None
+
+    with pytest.raises(ValidationError):
+        repository.trace_page(analysis_id, cursor="../bad")
+    with pytest.raises(ValidationError):
+        repository.trace_page(analysis_id, cursor="a" * 257)
+    with pytest.raises(ValidationError):
+        repository.trace_page(analysis_id, cursor=repository._encode_cursor(["не число"]))
+    with pytest.raises(ValidationError):
+        repository.trace_page(analysis_id, limit=0)
+    with pytest.raises(ValidationError):
+        repository.trace_page(analysis_id, limit=101)
+    with pytest.raises(RunNotFound):
+        repository.trace_page("нет такого анализа")
+    with pytest.raises(RunNotFound):
+        repository.append_step("нет такого анализа", "site", "tool", "fetch_site")
+
+
+def test_step_append_validates_kind_agent_and_arguments(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    with pytest.raises(ValidationError):
+        repository.append_step(analysis_id, "site", "unknown", "fetch_site")
+    with pytest.raises(ValidationError):
+        repository.append_step(analysis_id, "неизвестный агент", "tool", "fetch_site")
+    with pytest.raises(ValidationError):
+        repository.append_step(analysis_id, "site", "tool", "fetch_site", status="готово")
+    with pytest.raises(ValidationError):
+        repository.append_step(analysis_id, "site", "tool", "fetch_site", arguments=["не", "объект"])  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        repository.append_step(analysis_id, "site", "tool", "fetch_site", arguments={"плохо": object()})  # type: ignore[dict-item]
+    with pytest.raises(ValidationError):
+        repository.append_step(analysis_id, "site", "tool", "")
+    assert repository.trace_page(analysis_id)["items"] == []
+
+
+def test_step_indexes_stay_monotonic_under_concurrent_appends(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+    per_worker = 20
+
+    def append(indexes: list[int]) -> None:
+        for _ in range(per_worker):
+            indexes.append(repository.append_step(analysis_id, "checks", "tool", "read_checks"))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results: list[list[int]] = [[], [], [], []]
+        futures = [pool.submit(append, indexes) for indexes in results]
+        for future in futures:
+            future.result(timeout=60)
+
+    returned = sorted(index for indexes in results for index in indexes)
+    assert returned == list(range(1, len(results) * per_worker + 1))
+    page = repository.trace_page(analysis_id, limit=100)
+    assert [item["step_index"] for item in page["items"]] == returned
+
+
+def test_conclusions_round_trip_and_replace(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    assert repository.conclusions(analysis_id) is None
+
+    repository.save_conclusions(
+        analysis_id, summary="Итог", recommendations="Рекомендации", model="gpt-test",
+    )
+    saved = repository.conclusions(analysis_id)
+    assert saved is not None
+    assert saved["summary"] == "Итог"
+    assert saved["recommendations"] == "Рекомендации"
+    assert saved["model"] == "gpt-test"
+    assert isinstance(saved["created_at"], str)
+    assert set(saved) == {"summary", "recommendations", "model", "created_at"}
+
+    repository.save_conclusions(
+        analysis_id, summary="Новый итог", recommendations="Новые рекомендации", model="gpt-test-2",
+    )
+    assert repository.conclusions(analysis_id)["summary"] == "Новый итог"
+    assert repository.conclusions(analysis_id)["model"] == "gpt-test-2"
+    assert len(seo_repo(tmp_path).conclusions(analysis_id) or {}) == 4
+
+    with pytest.raises(ValidationError):
+        repository.save_conclusions(analysis_id, summary=42, recommendations="r", model="m")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        repository.save_conclusions(analysis_id, summary="s", recommendations="r", model="")
+    with pytest.raises(RunNotFound):
+        repository.save_conclusions("нет такого", summary="s", recommendations="r", model="m")
+    with pytest.raises(RunNotFound):
+        repository.conclusions("нет такого")
+
+
+def test_budget_state_counts_every_saved_row(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    assert repository.budget_state(analysis_id) == {
+        "pages": 0, "searches": 0, "seed_searches": 0, "model_rows": 0, "steps": 0,
+        "tool_calls": 0, "handoffs": 0,
+        "agent_steps": {agent: 0 for agent in AGENTS},
+    }
+
+    repository.save_site_facts(
+        analysis_id, "Ромашка", ("Букеты",),
+        (("https://example.ru/", "Главная"), ("https://example.ru/dostavka", "Доставка")),
+    )
+    repository.replace_queries(analysis_id, [query(f"запрос {index}", index) for index in range(3)])
+    repository.save_search_row(analysis_id, 0, status="found", site_position=1)
+    repository.save_search_row(analysis_id, 1, status="absent")
+    repository.save_seed_row(analysis_id, 0, status="found")
+    repository.save_model_row(analysis_id, "chatgpt", "ChatGPT", 0, status="found", answer="да")
+    repository.save_model_row(analysis_id, "claude", "Claude", 0, status="found", answer="нет")
+    repository.append_step(analysis_id, "supervisor", "tool", "handoff_to")
+    repository.append_step(analysis_id, "site", "tool", "fetch_site")
+    repository.append_step(analysis_id, "site", "model", "turn")
+    repository.append_step(analysis_id, "checks", "system", "budget", status="skipped")
+
+    budget = repository.budget_state(analysis_id)
+    assert budget == {
+        "pages": 2, "searches": 2, "seed_searches": 1, "model_rows": 2, "steps": 4,
+        "tool_calls": 2, "handoffs": 1,
+        "agent_steps": {
+            "supervisor": 1, "site": 2, "competitors": 0, "queries": 0, "checks": 1, "report": 0,
+        },
+    }
+    assert seo_repo(tmp_path).budget_state(analysis_id) == budget
+    with pytest.raises(RunNotFound):
+        repository.budget_state("нет такого анализа")
+
+
+def test_snapshot_exposes_agents_budget_and_conclusions_without_answers(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+    repository.replace_queries(analysis_id, [query("запрос", 0)])
+    repository.upsert_agent(analysis_id, "site", "error", error="Сбой обхода")
+    repository.append_step(
+        analysis_id, "site", "tool", "fetch_site",
+        arguments={"url": "https://example.ru/"}, result_summary="2 страницы",
+    )
+    repository.append_step(analysis_id, "site", "tool", "fetch_site", status="error",
+                           error="Лимит прогона исчерпан")
+    repository.save_conclusions(
+        analysis_id, summary="Итог модели", recommendations="Рекомендации модели", model="gpt-test",
+    )
+    repository.save_search_row(
+        analysis_id, 0, status="found", operation_id="op-private-1", site_position=2,
+        site_url="https://example.ru/",
+    )
+    repository.save_model_row(
+        analysis_id, "chatgpt", "ChatGPT", 0, status="found", answer="секретный ответ модели",
+        name_mentioned=True,
+    )
+
+    snapshot = repository.snapshot(analysis_id)
+
+    assert set(snapshot) >= {
+        "stages", "counters", "readiness", "aggregates", "agents", "budget", "conclusions",
+    }
+    assert [(agent["agent"], agent["status"]) for agent in snapshot["agents"]] == [
+        ("supervisor", "pending"), ("site", "error"), ("competitors", "pending"),
+        ("queries", "pending"), ("checks", "pending"), ("report", "pending"),
+    ]
+    assert snapshot["agents"][1]["error"] == "Сбой обхода"
+    assert snapshot["budget"]["steps"] == 2
+    assert snapshot["budget"]["searches"] == 1
+    assert snapshot["budget"]["tool_calls"] == 2
+    assert snapshot["budget"]["agent_steps"]["site"] == 2
+    assert snapshot["conclusions"]["summary"] == "Итог модели"
+    assert snapshot["conclusions"]["model"] == "gpt-test"
+    # Answers and operation IDs stay inside the database, agents and budget included.
+    payload = json.dumps(snapshot, ensure_ascii=False)
+    assert "секретный ответ модели" not in payload
+    assert "op-private-1" not in payload
+

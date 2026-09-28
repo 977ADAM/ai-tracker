@@ -1,17 +1,24 @@
 """Owner-only SQLite persistence for durable SEO analyses.
 
 The SEO tables live in the existing `runs.sqlite3` beside the brand-check
-tables. This repository owns the `user_version = 3` migration: it creates its
+tables. This repository owns the `user_version = 4` migration: it creates its
 own tables and raises the schema version, while `RunRepository` keeps accepting
 every supported version and stays the only owner of `runs`, `model_rows`, and
 `search_rows`.
+
+Revision 1 wrote the fixed six-stage tables at version 3. Version 4 keeps them
+untouched — already-saved analyses stay readable and the old pipeline keeps
+writing its stages — and adds the agent state, the agent trace, and the report
+conclusions of the multi-agent run.
 
 Durability rules of the SEO flow: an analysis exists before the first external
 call, every finished row is committed in its own `BEGIN IMMEDIATE` transaction,
 WAL plus a bounded `busy_timeout` keep hundreds of rows from locking the file,
 and the deferred Yandex operation ID is stored so a restart resumes polling it
-without paying twice. Secrets never reach these tables and operation IDs are
-never returned by a read.
+without paying twice. A trace step takes its `step_index` inside the same
+`BEGIN IMMEDIATE` transaction that inserts it, so parallel tool calls can never
+share an index. Secrets never reach these tables and operation IDs are never
+returned by a read.
 """
 
 from __future__ import annotations
@@ -43,9 +50,11 @@ from app.domain.seo import (
 from app.domain.seo_report import build_report
 
 FILE_NAME = "runs.sqlite3"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 BUSY_TIMEOUT_MS = 5000
 STAGE_COUNT = 6
+# The six agents of the supervised run, in the order every read reports them.
+AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
 
 STORAGE_FAILED = "Не удалось сохранить или прочитать SEO-анализ"
 ANALYSIS_NOT_FOUND = "SEO-анализ не найден"
@@ -56,16 +65,29 @@ INVALID_STAGE = "Неизвестный этап SEO-анализа"
 INVALID_STAGE_STATUS = "Неизвестное состояние этапа SEO-анализа"
 INVALID_ROW_STATUS = "Неизвестное состояние строки SEO-анализа"
 INVALID_ROWS_KIND = "Неизвестный вид строк SEO-анализа"
+INVALID_AGENT = "Неизвестный агент SEO-анализа"
+INVALID_AGENT_STATUS = "Неизвестное состояние агента SEO-анализа"
+INVALID_STEP_KIND = "Неизвестный вид шага трассы"
+INVALID_STEP_STATUS = "Неизвестное состояние шага трассы"
 INVALID_CURSOR = "Некорректная страница истории"
 INVALID_ROWS_CURSOR = "Некорректная страница результатов"
+INVALID_TRACE_CURSOR = "Некорректная страница трассы"
 
 CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
 SeoAnalysisStatus = Literal["running", "completed", "failed", "interrupted", "cancelled"]
 SeoStageStatus = Literal["pending", "running", "done", "error", "skipped"]
+AgentStatus = Literal["pending", "running", "waiting", "done", "error", "skipped"]
+AgentStepKind = Literal["model", "tool", "handoff", "system"]
 
 TERMINAL_ANALYSIS_STATUSES = frozenset({"completed", "failed", "interrupted", "cancelled"})
 STAGE_STATUSES = frozenset(get_args(SeoStageStatus))
+AGENT_STATUSES = frozenset(get_args(AgentStatus))
+STEP_KINDS = frozenset(get_args(AgentStepKind))
+# A trace step is normally `done`; `error` carries a safe failure text, `rejected`
+# a refused tool call, and `pending`/`running` a step whose result is still open.
+STEP_STATUSES = frozenset({"pending", "running", "done", "error", "rejected", "skipped"})
+
 # Stored row vocabulary: `SeoRowOutcome` in `domain.seo` owns every final row
 # value the report consumes. A deferred Yandex operation and a queued model call
 # are additionally recorded with a pending status before their outcome is known,
@@ -80,6 +102,9 @@ ERROR_SQL = "(" + ", ".join(f"'{status}'" for status in sorted(ERROR_ROW_STATUSE
 
 CHILD_TABLES = (
     "seo_stages",
+    "seo_agents",
+    "seo_agent_steps",
+    "seo_conclusions",
     "seo_pages",
     "seo_candidates",
     "seo_queries",
@@ -185,6 +210,35 @@ CREATE TABLE IF NOT EXISTS seo_seed_rows (
     operation_id TEXT,
     error TEXT,
     PRIMARY KEY (analysis_id, seed_index)
+);
+CREATE TABLE IF NOT EXISTS seo_agents (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    agent TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, agent)
+);
+CREATE TABLE IF NOT EXISTS seo_agent_steps (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    step_index INTEGER NOT NULL,
+    agent TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    arguments_json TEXT NOT NULL DEFAULT '{}',
+    result_summary TEXT,
+    status TEXT NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, step_index)
+);
+CREATE TABLE IF NOT EXISTS seo_conclusions (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    summary TEXT NOT NULL,
+    recommendations TEXT NOT NULL,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (analysis_id)
 );
 """
 
@@ -344,6 +398,14 @@ class SeoRepository:
                 "INSERT INTO seo_stages (analysis_id, stage, status, error, counters_json, updated_at) "
                 "VALUES (?, ?, 'pending', NULL, '{}', ?)",
                 [(analysis_id, stage, now) for stage in range(1, STAGE_COUNT + 1)],
+            )
+            # The version-4 agent layer starts beside the frozen stage rows: the
+            # old fixed pipeline keeps writing `seo_stages`, the supervisor
+            # runtime reads and writes the six agent rows.
+            connection.executemany(
+                "INSERT INTO seo_agents (analysis_id, agent, status, error, updated_at) "
+                "VALUES (?, ?, 'pending', NULL, ?)",
+                [(analysis_id, agent, now) for agent in AGENTS],
             )
         return analysis_id
 
@@ -574,6 +636,108 @@ class SeoRepository:
                 (text, now, analysis_id),
             )
 
+    # -- agents, trace, and conclusions ----------------------------------
+
+    def upsert_agent(
+        self, analysis_id: str, agent: str, status: str, *, error: str | None = None,
+    ) -> None:
+        """Record one agent transition of one analysis.
+
+        The agent name and the status come from fixed literals, and an unknown
+        analysis fails like every other write. The upsert replaces the previous
+        state, so `error` is cleared by a later status without an error.
+        """
+        _require_agent(agent)
+        _require_agent_status(status)
+        message = _optional_str(error)
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_analysis(connection, analysis_id)
+            connection.execute(
+                "INSERT INTO seo_agents (analysis_id, agent, status, error, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(analysis_id, agent) DO UPDATE SET status=excluded.status, "
+                "error=excluded.error, updated_at=excluded.updated_at",
+                (analysis_id, agent, status, message, now),
+            )
+            connection.execute("UPDATE seo_analyses SET updated_at=? WHERE id=?", (now, analysis_id))
+
+    def agents(self, analysis_id: str) -> tuple[dict, ...]:
+        """Return the six agents in fixed order; a missing row reads as `pending`.
+
+        A database migrated from version 3 has no agent rows, so the fixed
+        `pending` default is what makes an old analysis readable.
+        """
+        with self._connection() as connection:
+            self._require_analysis(connection, analysis_id)
+            return self._agents_in(connection, analysis_id)
+
+    def append_step(
+        self,
+        analysis_id: str,
+        agent: str,
+        kind: str,
+        name: str,
+        *,
+        arguments: Mapping[str, object] | None = None,
+        result_summary: str | None = None,
+        status: str = "done",
+        error: str | None = None,
+    ) -> int:
+        """Append one trace step and return its monotonic `step_index`.
+
+        The index is `MAX(step_index) + 1` read and inserted inside one
+        `BEGIN IMMEDIATE` transaction: the write lock is already held when the
+        maximum is read, so parallel tool calls of the same analysis can never
+        receive the same index. Arguments are stored as JSON and returned as a
+        parsed object; safe summaries and errors stay short by contract.
+        """
+        _require_agent(agent)
+        _require_step_kind(kind)
+        title = _required_str(name)
+        _require_step_status(status)
+        payload = _json_object(arguments)
+        summary = _optional_str(result_summary)
+        message = _optional_str(error)
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_analysis(connection, analysis_id)
+            step_index = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(step_index), 0) + 1 FROM seo_agent_steps "
+                    "WHERE analysis_id=?",
+                    (analysis_id,),
+                ).fetchone()[0]
+            )
+            connection.execute(
+                "INSERT INTO seo_agent_steps (analysis_id, step_index, agent, kind, name, "
+                "arguments_json, result_summary, status, error, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (analysis_id, step_index, agent, kind, title, payload, summary, status, message, now),
+            )
+            connection.execute("UPDATE seo_analyses SET updated_at=? WHERE id=?", (now, analysis_id))
+        return step_index
+
+    def save_conclusions(
+        self, analysis_id: str, *, summary: str, recommendations: str, model: str,
+    ) -> None:
+        """Store the report agent's text block: model output beside server numbers."""
+        _require_text(summary)
+        _require_text(recommendations)
+        model_name = _required_str(model)
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_analysis(connection, analysis_id)
+            connection.execute(
+                "INSERT INTO seo_conclusions (analysis_id, summary, recommendations, model, created_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(analysis_id) DO UPDATE SET summary=excluded.summary, "
+                "recommendations=excluded.recommendations, model=excluded.model, "
+                "created_at=excluded.created_at",
+                (analysis_id, summary, recommendations, model_name, now),
+            )
+            connection.execute("UPDATE seo_analyses SET updated_at=? WHERE id=?", (now, analysis_id))
+
     # -- lifecycle -------------------------------------------------------
 
     def finish_analysis(self, analysis_id: str) -> None:
@@ -693,14 +857,76 @@ class SeoRepository:
     # -- reads -----------------------------------------------------------
 
     def snapshot(self, analysis_id: str) -> dict:
-        """Return stages, inputs, extracted facts, rows' aggregates, and readiness.
+        """Return stages, agent state, budget, conclusions, facts, and aggregates.
 
         Saved model answers and Yandex operation IDs are deliberately absent:
-        the detail page reads them from `rows_page` instead.
+        the detail page reads them from `rows_page` instead, and the trace keeps
+        only safe arguments and short results.
         """
         with self._connection() as connection:
             row = self._require_analysis(connection, analysis_id)
             return self._snapshot(connection, row)
+
+    def trace_page(self, analysis_id: str, cursor: str | None = None, limit: int = 100) -> dict:
+        """Return one page of the agent trace, oldest step first.
+
+        The cursor is the base64url `step_index` of the last returned step, so
+        new steps arriving between two pages never shift the window; a malformed
+        cursor is a validation error and an unknown analysis is not found.
+        `arguments_json` is parsed before it leaves the repository.
+        """
+        if not _is_index(limit) or not 1 <= limit <= 100:
+            raise ValidationError(INVALID_TRACE_CURSOR)
+        with self._connection() as connection:
+            self._require_analysis(connection, analysis_id)
+            after = (
+                self._decode_cursor(cursor, (int,), INVALID_TRACE_CURSOR)
+                if cursor is not None
+                else None
+            )
+            where = "AND step_index > ?" if after else ""
+            params: tuple = (analysis_id, *after, limit + 1) if after else (analysis_id, limit + 1)
+            rows = connection.execute(
+                "SELECT step_index, agent, kind, name, arguments_json, result_summary, status, "
+                f"error, created_at FROM seo_agent_steps WHERE analysis_id=? {where} "
+                "ORDER BY step_index LIMIT ?",
+                params,
+            ).fetchall()
+            page = rows[:limit]
+            items = [
+                {
+                    "step_index": row["step_index"],
+                    "agent": row["agent"],
+                    "kind": row["kind"],
+                    "name": row["name"],
+                    "arguments": _json_read(row["arguments_json"]),
+                    "result_summary": row["result_summary"],
+                    "status": row["status"],
+                    "error": row["error"],
+                    "created_at": row["created_at"],
+                }
+                for row in page
+            ]
+        key: list | None = [page[-1]["step_index"]] if len(rows) > limit else None
+        return {"items": items, "next_cursor": self._encode_cursor(key) if key else None}
+
+    def conclusions(self, analysis_id: str) -> dict | None:
+        """Return the stored model text block, or `None` while it is missing."""
+        with self._connection() as connection:
+            self._require_analysis(connection, analysis_id)
+            return self._conclusions_in(connection, analysis_id)
+
+    def budget_state(self, analysis_id: str) -> dict:
+        """Count the resources a run already spent, from its saved rows alone.
+
+        Pages, searches, seed searches, and model rows come from their tables;
+        steps, tool calls (`kind = 'tool'`), and handoffs (`name = 'handoff_to'`)
+        come from the trace. `agent_steps` counts the trace by agent and always
+        names all six agents, so a reader sees zeroes instead of missing keys.
+        """
+        with self._connection() as connection:
+            self._require_analysis(connection, analysis_id)
+            return self._budget_state(connection, analysis_id)
 
     def list_page(self, cursor: str | None = None, limit: int = 20) -> dict:
         """Return one light history page, newest first, without building reports."""
@@ -1028,6 +1254,8 @@ class SeoRepository:
             "services": list(services),
             "pages": pages,
             "stages": self._stages(connection, analysis_id),
+            "agents": list(self._agents_in(connection, analysis_id)),
+            "budget": self._budget_state(connection, analysis_id),
             "candidates": [_plain(candidate) for candidate in candidates],
             "queries": [
                 {
@@ -1040,6 +1268,7 @@ class SeoRepository:
                 for index, item in enumerate(queries)
             ],
             "summary": row["summary_text"],
+            "conclusions": self._conclusions_in(connection, analysis_id),
             "counters": _row_counters(searches, models, len(queries)),
             "readiness": self._readiness(connection, row, queries, searches, models),
             "aggregates": _plain(aggregates),
@@ -1060,6 +1289,73 @@ class SeoRepository:
                 (analysis_id,),
             )
         ]
+
+    @staticmethod
+    def _agents_in(connection: sqlite3.Connection, analysis_id: str) -> tuple[dict, ...]:
+        """Project the stored agent rows onto the fixed six-agent order."""
+        stored = {
+            row["agent"]: row
+            for row in connection.execute(
+                "SELECT agent, status, error, updated_at FROM seo_agents WHERE analysis_id=?",
+                (analysis_id,),
+            )
+        }
+        return tuple(
+            {
+                "agent": agent,
+                "status": stored[agent]["status"] if agent in stored else "pending",
+                "error": stored[agent]["error"] if agent in stored else None,
+                "updated_at": stored[agent]["updated_at"] if agent in stored else None,
+            }
+            for agent in AGENTS
+        )
+
+    @staticmethod
+    def _conclusions_in(connection: sqlite3.Connection, analysis_id: str) -> dict | None:
+        row = connection.execute(
+            "SELECT summary, recommendations, model, created_at FROM seo_conclusions "
+            "WHERE analysis_id=?",
+            (analysis_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "summary": row["summary"],
+            "recommendations": row["recommendations"],
+            "model": row["model"],
+            "created_at": row["created_at"],
+        }
+
+    @staticmethod
+    def _budget_state(connection: sqlite3.Connection, analysis_id: str) -> dict:
+        counts = connection.execute(
+            "SELECT (SELECT count(*) FROM seo_pages WHERE analysis_id=?) AS pages, "
+            "(SELECT count(*) FROM seo_search_rows WHERE analysis_id=?) AS searches, "
+            "(SELECT count(*) FROM seo_seed_rows WHERE analysis_id=?) AS seed_searches, "
+            "(SELECT count(*) FROM seo_model_rows WHERE analysis_id=?) AS model_rows, "
+            "(SELECT count(*) FROM seo_agent_steps WHERE analysis_id=?) AS steps, "
+            "(SELECT count(*) FROM seo_agent_steps WHERE analysis_id=? AND kind='tool') "
+            "AS tool_calls, "
+            "(SELECT count(*) FROM seo_agent_steps WHERE analysis_id=? AND name='handoff_to') "
+            "AS handoffs",
+            (analysis_id,) * 7,
+        ).fetchone()
+        agent_steps = {agent: 0 for agent in AGENTS}
+        for row in connection.execute(
+            "SELECT agent, count(*) AS steps FROM seo_agent_steps WHERE analysis_id=? GROUP BY agent",
+            (analysis_id,),
+        ):
+            agent_steps[row["agent"]] = row["steps"]
+        return {
+            "pages": counts["pages"],
+            "searches": counts["searches"],
+            "seed_searches": counts["seed_searches"],
+            "model_rows": counts["model_rows"],
+            "steps": counts["steps"],
+            "tool_calls": counts["tool_calls"],
+            "handoffs": counts["handoffs"],
+            "agent_steps": agent_steps,
+        }
 
     def _readiness(
         self,
@@ -1110,6 +1406,51 @@ def _require_index(value: object) -> None:
 def _require_row_status(status: object) -> None:
     if status not in ROW_STATUSES:
         raise ValidationError(INVALID_ROW_STATUS)
+
+
+def _require_agent(agent: object) -> None:
+    if agent not in AGENTS:
+        raise ValidationError(INVALID_AGENT)
+
+
+def _require_agent_status(status: object) -> None:
+    if status not in AGENT_STATUSES:
+        raise ValidationError(INVALID_AGENT_STATUS)
+
+
+def _require_step_kind(kind: object) -> None:
+    if kind not in STEP_KINDS:
+        raise ValidationError(INVALID_STEP_KIND)
+
+
+def _require_step_status(status: object) -> None:
+    if status not in STEP_STATUSES:
+        raise ValidationError(INVALID_STEP_STATUS)
+
+
+def _require_text(value: object) -> str:
+    """Accept any text, including an empty one, but never another type."""
+    if not isinstance(value, str):
+        raise ValidationError(INVALID_INPUT)
+    return value
+
+
+def _json_object(arguments: Mapping[str, object] | None) -> str:
+    """Serialize safe step arguments, refusing a non-mapping or a non-JSON value."""
+    if arguments is None:
+        return "{}"
+    if not isinstance(arguments, Mapping):
+        raise ValidationError(INVALID_INPUT)
+    try:
+        return json.dumps(dict(arguments), ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(INVALID_INPUT) from exc
+
+
+def _json_read(value: object) -> dict:
+    """Parse stored step arguments back into an object."""
+    parsed = _loads(value, {})
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _required_str(value: object) -> str:
