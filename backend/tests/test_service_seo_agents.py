@@ -1,0 +1,524 @@
+"""Happy path of the LangGraph supervisor runtime on a real graph.
+
+The suite builds the actual `StateGraph` over a real `SeoToolbox` and a scripted
+`BaseChatModel`: one scripted turn per model call, in the exact order the graph
+makes them (supervisor, then every specialist, then the supervisor again). Every
+external collaborator is a fake and the configuration directory is temporary, so
+no test reaches a paid API or the production config directory.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, ClassVar
+
+import pytest
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+from app.db.seo import SeoRepository
+from app.domain.search import SearchDocument
+from app.domain.seo import SeoInput, normalize_seo_request
+from app.domain.seo_tools import TOOL_ARGUMENTS, SeoBudget
+from app.service.connections import ConnectionService
+from app.service.seo_agents import (
+    CHECKPOINT_FILE_MODE,
+    CHECKPOINT_FILE_NAME,
+    SeoAgentRuntime,
+    build_agent_graph,
+    checkpoint_path,
+    langchain_tools,
+)
+from app.service.seo_tools import SeoToolbox
+from tests.fakes import (
+    DEFAULT_SEO_PAGE,
+    FakeSiteFetcher,
+    ScriptedSeoGateway,
+    SeoProviderFactorySpy,
+)
+
+SEEDS = ("букет цветов", "доставка цветов", "розы")
+SPHERE = "Цветочный магазин"
+SERVICES = ["Букеты", "Доставка"]
+CONNECTION_ID = "gigachat"
+ANALYSIS_QUERIES = [
+    {"query": f"купить букет {index}", "category": "commercial", "service": "Букеты"}
+    for index in range(5)
+]
+CANDIDATES = [{"host": "rival.ru", "note": "Соперник"}]
+DOCUMENTS = (
+    SearchDocument("https://rival.ru/page", "Соперник — букеты"),
+    SearchDocument("https://example.ru/page", "Ромашка — букеты"),
+)
+SUMMARY = "Ромашка упоминается в ответах частично."
+RECOMMENDATIONS = "Усилить информационные запросы."
+FINISH_REASON = "Отчёт сохранён"
+
+STEP_MODEL = "model"
+STEP_TOOL = "tool"
+STEP_HANDOFF = "handoff"
+SPECIALISTS = ("site", "competitors", "queries", "checks", "report")
+
+
+def payload() -> dict[str, object]:
+    return {
+        "url": "https://example.ru/",
+        "sphere": SPHERE,
+        "seeds": list(SEEDS),
+        "services": list(SERVICES),
+        "connection_ids": [CONNECTION_ID],
+    }
+
+
+def call(name: str, **arguments: object) -> AIMessage:
+    """One assistant answer that calls exactly one tool."""
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {"name": name, "args": dict(arguments), "id": f"call_{name}", "type": "tool_call"},
+        ],
+    )
+
+
+def happy_path_script() -> list[AIMessage]:
+    """The scripted dialogue of one complete run, in model-call order."""
+    return [
+        # Supervisor turn 1: the site agent.
+        call("handoff_to", agent="site", reason="Собрать сведения"),
+        # Site agent.
+        call("fetch_site", max_pages=2),
+        call("save_site_facts", company_name="Ромашка", services=["Свадьбы"]),
+        AIMessage(content="Сведения о сайте сохранены"),
+        # Supervisor turn 2: the competitors.
+        call("handoff_to", agent="competitors", reason="Найти конкурентов"),
+        # Competitor agent.
+        call("yandex_search", query=SEEDS[0]),
+        call("save_candidates", candidates=CANDIDATES),
+        AIMessage(content="Кандидаты сохранены"),
+        # Supervisor turn 3: the query agent.
+        call("handoff_to", agent="queries", reason="Подготовить запросы"),
+        # Query agent.
+        call("save_queries", queries=ANALYSIS_QUERIES),
+        AIMessage(content="Запросы сохранены"),
+        # Supervisor turn 4: the check agent.
+        call("handoff_to", agent="checks", reason="Запустить проверки"),
+        # Check agent.
+        call("search_many"),
+        call("ask_models"),
+        AIMessage(content="Проверки завершены"),
+        # Supervisor turn 5: the report agent.
+        call("handoff_to", agent="report", reason="Написать отчёт"),
+        # Report agent.
+        call("read_metrics"),
+        call("save_report", summary=SUMMARY, recommendations=RECOMMENDATIONS),
+        AIMessage(content="Отчёт сохранён"),
+        # Supervisor turn 6: the end.
+        call("finish_run", reason=FINISH_REASON),
+    ]
+
+
+HAPPY_PATH_TRACE = [
+    ("supervisor", STEP_MODEL, "supervisor"),
+    ("supervisor", STEP_HANDOFF, "handoff_to"),
+    ("site", STEP_MODEL, "site"),
+    ("site", STEP_TOOL, "fetch_site"),
+    ("site", STEP_MODEL, "site"),
+    ("site", STEP_TOOL, "save_site_facts"),
+    ("site", STEP_MODEL, "site"),
+    ("supervisor", STEP_MODEL, "supervisor"),
+    ("supervisor", STEP_HANDOFF, "handoff_to"),
+    ("competitors", STEP_MODEL, "competitors"),
+    ("competitors", STEP_TOOL, "yandex_search"),
+    ("competitors", STEP_MODEL, "competitors"),
+    ("competitors", STEP_TOOL, "save_candidates"),
+    ("competitors", STEP_MODEL, "competitors"),
+    ("supervisor", STEP_MODEL, "supervisor"),
+    ("supervisor", STEP_HANDOFF, "handoff_to"),
+    ("queries", STEP_MODEL, "queries"),
+    ("queries", STEP_TOOL, "save_queries"),
+    ("queries", STEP_MODEL, "queries"),
+    ("supervisor", STEP_MODEL, "supervisor"),
+    ("supervisor", STEP_HANDOFF, "handoff_to"),
+    ("checks", STEP_MODEL, "checks"),
+    ("checks", STEP_TOOL, "search_many"),
+    ("checks", STEP_MODEL, "checks"),
+    ("checks", STEP_TOOL, "ask_models"),
+    ("checks", STEP_MODEL, "checks"),
+    ("supervisor", STEP_MODEL, "supervisor"),
+    ("supervisor", STEP_HANDOFF, "handoff_to"),
+    ("report", STEP_MODEL, "report"),
+    ("report", STEP_TOOL, "read_metrics"),
+    ("report", STEP_MODEL, "report"),
+    ("report", STEP_TOOL, "save_report"),
+    ("report", STEP_MODEL, "report"),
+    ("supervisor", STEP_MODEL, "supervisor"),
+    ("supervisor", STEP_TOOL, "finish_run"),
+]
+
+# Model turns are `running` while the agent keeps calling tools and `done` when
+# it answers; every tool/handoff step is `done`.
+HAPPY_PATH_STATUSES = [
+    "running", "done", "running", "done", "running", "done", "done",
+    "running", "done", "running", "done", "running", "done", "done",
+    "running", "done", "running", "done", "done",
+    "running", "done", "running", "done", "running", "done", "done",
+    "running", "done", "running", "done", "running", "done", "done",
+    "running", "done",
+]
+
+
+class ScriptedChatModel(BaseChatModel):
+    """A `BaseChatModel` that answers with one scripted message per call.
+
+    It records every dialogue it was asked to answer, so a test can prove the
+    exact order of model calls without any network access. Tool binding is a
+    no-op: the graph still gets the tools from the tool node it built.
+    """
+
+    script: list[AIMessage]
+    index: int = 0
+    calls: ClassVar[list[list[BaseMessage]]] = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted-seo-agent"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self.calls.append(list(messages))
+        assert self.script, "unexpected model call"
+        # The last scripted answer repeats, so a test that only wants a fixed
+        # turn (a plain answer, or an idle supervisor) needs no padding.
+        index = min(self.index, len(self.script) - 1)
+        self.index += 1
+        return ChatResult(generations=[ChatGeneration(message=self.script[index])])
+
+
+@dataclass
+class Harness:
+    """One run: a real repository, a real toolbox, and the scripted model."""
+
+    repository: SeoRepository
+    input: SeoInput
+    analysis_id: str
+    model: ScriptedChatModel
+    config_dir: Path
+    connections: ConnectionService
+    fetcher: FakeSiteFetcher = field(default_factory=FakeSiteFetcher)
+    gateway: ScriptedSeoGateway = field(default_factory=lambda: ScriptedSeoGateway(DOCUMENTS))
+    factory: SeoProviderFactorySpy = field(default_factory=SeoProviderFactorySpy)
+    toolboxes: list[SeoToolbox] = field(default_factory=list)
+
+    def toolbox_factory(self, analysis_id: str, input: SeoInput, budget: SeoBudget) -> SeoToolbox:
+        toolbox = SeoToolbox(
+            self.repository,
+            self.fetcher,
+            self.gateway,
+            self.connections,
+            self.factory,
+            analysis_id=analysis_id,
+            input=input,
+            connection_ids=input.connection_ids,
+            budget=budget,
+            poll_interval=0.0,
+            model_name="seo-model",
+        )
+        self.toolboxes.append(toolbox)
+        return toolbox
+
+    def runtime(self, **overrides: Any) -> SeoAgentRuntime:
+        options: dict[str, Any] = {"checkpointer": checkpoint_factory(self.config_dir)}
+        options.update(overrides)
+        return SeoAgentRuntime(self.repository, self.toolbox_factory, self.model, **options)
+
+    def trace(self) -> list[dict]:
+        return self.repository.trace_page(self.analysis_id)["items"]
+
+
+def checkpoint_factory(config_dir: Path):
+    """A factory of owner-only SQLite checkpointers inside the temporary dir."""
+
+    @asynccontextmanager
+    async def open_checkpointer(_analysis_id: str):
+        path = checkpoint_path(config_dir)
+        async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
+            if path.exists():
+                path.chmod(CHECKPOINT_FILE_MODE)
+            yield saver
+
+    return open_checkpointer
+
+
+def make_harness(tmp_path: Path, connection_repository, settings, script=None) -> Harness:
+    repository = SeoRepository(tmp_path)
+    repository.initialize()
+    connections = ConnectionService(connection_repository, settings)
+    connections.save({"api_key": "key-1"}, CONNECTION_ID)
+    request = normalize_seo_request(payload())
+    analysis_id = repository.create_analysis(
+        request,
+        {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+    )
+    return Harness(
+        repository=repository,
+        input=request,
+        analysis_id=analysis_id,
+        model=ScriptedChatModel(script=happy_path_script() if script is None else script),
+        config_dir=tmp_path,
+        connections=connections,
+    )
+
+
+# -- the bridge --------------------------------------------------------------
+
+
+def _resolve(schema: dict, root: dict) -> dict:
+    """Inline one `$ref` of a pydantic model schema, so an assertion can read it."""
+    while "$ref" in schema:
+        name = schema["$ref"].rsplit("/", 1)[-1]
+        schema = root["$defs"][name]
+    return schema
+
+
+@pytest.mark.anyio
+async def test_bridge_tools_mirror_the_declared_schemas_of_every_agent(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+    toolbox = harness.toolbox_factory(
+        harness.analysis_id, harness.input, SeoBudget.for_connections(1),
+    )
+
+    for agent in ("supervisor", *SPECIALISTS):
+        tools = langchain_tools(toolbox, agent)
+        assert [tool.name for tool in tools] == [schema.name for schema in toolbox.schemas_for(agent)]
+        for tool in tools:
+            root = tool.args_schema.model_json_schema()
+            specs = TOOL_ARGUMENTS[tool.name]
+            assert root["additionalProperties"] is False
+            assert set(root["properties"]) == {spec.name for spec in specs}
+            assert set(root.get("required", [])) == {spec.name for spec in specs if spec.required}
+        if agent == "site":
+            bound = _resolve(
+                next(tool for tool in tools if tool.name == "fetch_site")
+                .args_schema.model_json_schema()["properties"]["max_pages"],
+                next(tool for tool in tools if tool.name == "fetch_site").args_schema.model_json_schema(),
+            )
+            assert (bound["minimum"], bound["maximum"]) == (1, 20)
+        if agent == "queries":
+            root = next(tool for tool in tools if tool.name == "save_queries").args_schema.model_json_schema()
+            items = root["properties"]["queries"]
+            assert (items["minItems"], items["maxItems"]) == (1, 40)
+            item = _resolve(items["items"], root)
+            assert item["additionalProperties"] is False
+            assert set(item["properties"]) == {"query", "category", "service"}
+            assert set(item["required"]) == {"query", "category"}
+        if agent == "competitors":
+            root = next(tool for tool in tools if tool.name == "save_candidates").args_schema.model_json_schema()
+            item = _resolve(root["properties"]["candidates"]["items"], root)
+            assert item["additionalProperties"] is False
+            assert set(item["properties"]) == {"host", "note"}
+            assert item["required"] == ["host"]
+
+
+# -- the happy path ----------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_happy_path_runs_every_agent_and_completes_the_analysis(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    assert harness.model.index == len(happy_path_script())
+    assert len(harness.model.calls) == len(happy_path_script())
+    statuses = {
+        entry["agent"]: entry["status"] for entry in harness.repository.agents(harness.analysis_id)
+    }
+    # `save_*` marks its own agent `done`; the check agent only reads, so it is
+    # closed as `skipped` by the runtime like every other agent without a status.
+    assert statuses == {
+        "supervisor": "running",
+        "site": "done",
+        "competitors": "done",
+        "queries": "done",
+        "checks": "skipped",
+        "report": "done",
+    }
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "completed"
+
+    trace = [(item["agent"], item["kind"], item["name"]) for item in harness.trace()]
+    assert trace == HAPPY_PATH_TRACE
+    assert [item["step_index"] for item in harness.trace()] == list(range(1, len(trace) + 1))
+    assert [item["status"] for item in harness.trace()] == HAPPY_PATH_STATUSES
+
+
+@pytest.mark.anyio
+async def test_model_steps_record_only_the_agent_and_the_turn_status(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    steps = [item for item in harness.trace() if item["kind"] == STEP_MODEL]
+    assert len(steps) == 20
+    assert [item["status"] for item in steps] == [
+        status
+        for (agent, kind, _name), status in zip(HAPPY_PATH_TRACE, HAPPY_PATH_STATUSES, strict=True)
+        if kind == STEP_MODEL
+    ]
+    assert all(item["result_summary"] is None for item in steps)
+    assert all(item["arguments"] == {} for item in steps)
+    dumped = json.dumps(steps, ensure_ascii=False)
+    assert "Ромашка" not in dumped
+    assert "купить букет" not in dumped
+
+
+@pytest.mark.anyio
+async def test_saved_rows_reach_the_repository_and_the_paid_calls_stay_inside_the_budget(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    snapshot = harness.repository.snapshot(harness.analysis_id)
+    assert [page["url"] for page in snapshot["pages"]] == [DEFAULT_SEO_PAGE.url]
+    assert snapshot["company_name"] == "Ромашка"
+    assert set(snapshot["services"]) == {"Букеты", "Доставка", "Свадьбы"}
+    assert [candidate["host"] for candidate in snapshot["candidates"]] == ["rival.ru"]
+    assert [query["text"] for query in snapshot["queries"]] == [
+        item["query"] for item in ANALYSIS_QUERIES
+    ]
+    assert snapshot["conclusions"]["summary"] == SUMMARY
+    assert snapshot["conclusions"]["recommendations"] == RECOMMENDATIONS
+    assert snapshot["conclusions"]["model"] == "seo-model"
+
+    # One paid key search plus five generated searches, and five model answers.
+    # Tool batches run concurrently, so only the sets are ordered by contract.
+    assert sorted(harness.gateway.submitted) == sorted(
+        [(SEEDS[0], 225)] + [(item["query"], 225) for item in ANALYSIS_QUERIES],
+    )
+    assert sorted(harness.factory.calls) == sorted(
+        (CONNECTION_ID, item["query"]) for item in ANALYSIS_QUERIES
+    )
+
+    budget = harness.repository.budget_state(harness.analysis_id)
+    assert budget["pages"] == 1
+    assert budget["seed_searches"] == 1
+    assert budget["searches"] == 5
+    assert budget["model_rows"] == 5
+    assert budget["handoffs"] == 5
+
+
+@pytest.mark.anyio
+async def test_finish_run_only_flags_the_end_and_the_runtime_completes_the_analysis(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    toolbox = harness.toolboxes[-1]
+    # `finish_run` belongs to the toolbox: it flags the end and never finalizes.
+    assert toolbox.finished is True
+    assert toolbox.finish_reason == FINISH_REASON
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_without_finish_run_the_run_stays_running_and_the_agents_stay_open(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(
+        tmp_path, repository, settings, script=[AIMessage(content="Пока ничего")],
+    )
+
+    await harness.runtime(max_supervisor_turns=2).run(harness.analysis_id, harness.input)
+
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "running"
+    statuses = {
+        entry["agent"]: entry["status"] for entry in harness.repository.agents(harness.analysis_id)
+    }
+    # An open run keeps its unfinished agents open: the runtime only closes them
+    # when `finish_run` completed the run.
+    assert statuses["supervisor"] == "running"
+    assert all(statuses[agent] == "pending" for agent in SPECIALISTS)
+    assert harness.model.index == 2
+    assert [item["name"] for item in harness.trace()] == ["supervisor", "supervisor"]
+
+
+# -- checkpointing and containment -------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_checkpoint_is_owner_only_and_a_second_graph_sees_the_finished_state(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    path = checkpoint_path(tmp_path)
+    assert path.name == CHECKPOINT_FILE_NAME
+    assert path.exists()
+    assert path.stat().st_mode & 0o777 == CHECKPOINT_FILE_MODE
+
+    # A second graph over the same checkpoint file reads the finished run without
+    # a single further model call.
+    reader = ScriptedChatModel(script=[])
+    toolbox = harness.toolbox_factory(harness.analysis_id, harness.input, SeoBudget.for_connections(1))
+    async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
+        graph = build_agent_graph(reader, toolbox, checkpointer=saver)
+        state = await graph.aget_state({"configurable": {"thread_id": harness.analysis_id}})
+
+    assert state.values["finished"] is True
+    assert state.values["finish_reason"] == FINISH_REASON
+    assert state.values["specialists"] == {
+        "supervisor": 6, "site": 1, "competitors": 1, "queries": 1, "checks": 1, "report": 1,
+    }
+    assert reader.index == 0
+
+
+@pytest.mark.anyio
+async def test_runtime_contains_a_failing_model_as_a_safe_supervisor_error(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings, script=[])
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    agents = {entry["agent"]: entry for entry in harness.repository.agents(harness.analysis_id)}
+    assert agents["supervisor"]["status"] == "error"
+    assert agents["supervisor"]["error"] is not None
+    assert "unexpected model call" not in agents["supervisor"]["error"]
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "running"
+
+
+@pytest.mark.anyio
+async def test_the_run_is_an_awaitable_task_that_never_raises(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+
+    task = asyncio.create_task(harness.runtime().run(harness.analysis_id, harness.input))
+    await task
+
+    assert task.exception() is None

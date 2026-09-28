@@ -657,7 +657,7 @@ class SeoToolbox:
             raise ToolRejected(INVALID_AGENT)
         self.budget = self.budget.spend_handoff()
         agents = {agent["agent"]: agent for agent in self.repository.agents(self.analysis_id)}
-        entry = agents[target]
+        entry = agents.get(target, {"status": "pending", "error": None})
         return {
             "agent": target,
             "agent_status": entry["status"],
