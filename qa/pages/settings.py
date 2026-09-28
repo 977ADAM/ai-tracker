@@ -50,7 +50,11 @@ class SettingsPage:
 
     @property
     def rail(self) -> Locator:
-        return self.dialog.get_by_role("navigation", name="Разделы настроек")
+        return self.dialog.get_by_role("tablist", name="Разделы настроек")
+
+    @property
+    def tabs(self) -> Locator:
+        return self.rail.get_by_role("tab")
 
     @property
     def configuration_file_button(self) -> Locator:

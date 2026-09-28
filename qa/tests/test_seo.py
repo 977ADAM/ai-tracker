@@ -71,13 +71,17 @@ MODEL_ANSWER = "Ромашка и flower-shop.example предлагают до�
 ANALYSIS_TABLES = (
     "seo_candidate_hits",
     "seo_search_rows",
+    "seo_seed_rows",
     "seo_model_rows",
     "seo_queries",
     "seo_candidates",
     "seo_pages",
     "seo_stages",
-    "seo_analyses",
 )
+
+# The parent table keys its rows by `id`; every child table references it as
+# `analysis_id`.
+PARENT_TABLE = "seo_analyses"
 
 
 # -- the database the application already reads -------------------------------
@@ -184,6 +188,8 @@ def drop_analysis(analysis_id: str) -> None:
         for table in ANALYSIS_TABLES:
             if table in existing:
                 connection.execute(f"DELETE FROM {table} WHERE analysis_id=?", (analysis_id,))
+        if PARENT_TABLE in existing:
+            connection.execute(f"DELETE FROM {PARENT_TABLE} WHERE id=?", (analysis_id,))
         connection.commit()
 
 

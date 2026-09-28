@@ -61,12 +61,16 @@ def test_configuration_file_button_opens_its_own_window(settings_page: SettingsP
     expect(settings_page.dialog.get_by_role("heading", name="Модели")).to_be_visible()
 
 
-def test_dialog_offers_only_the_models_section(settings_page: SettingsPage) -> None:
+def test_dialog_offers_the_three_settings_sections(settings_page: SettingsPage) -> None:
     expect(settings_page.dialog.get_by_role("heading", name="Модели")).to_be_visible()
-    expect(settings_page.rail.get_by_text("Модели")).to_be_visible()
-    # «Модели» is the only section, and it marks the active one instead of being
-    # yet another control that does nothing.
-    expect(settings_page.rail.get_by_role("button")).to_have_count(0)
+    tabs = settings_page.tabs
+    # «Модели», «Поисковые системы» and «SEO-анализ» are tabs, and the first one
+    # marks the active section instead of being a control that does nothing.
+    expect(tabs).to_have_count(3)
+    expect(tabs.nth(0)).to_have_text("Модели")
+    expect(tabs.nth(0)).to_have_attribute("aria-selected", "true")
+    expect(tabs.nth(1)).to_have_text("Поисковые системы")
+    expect(tabs.nth(2)).to_have_text("SEO-анализ")
     expect(settings_page.rail.get_by_role("link")).to_have_count(0)
     expect(settings_page.dialog.get_by_role("button", name="Добавить провайдера")).to_be_visible()
 
