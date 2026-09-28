@@ -132,3 +132,13 @@ def test_a_public_response_carries_no_operation_id_or_credentials(make_client):
     assert "api_key" not in text
     assert "folder_id" not in text
     assert "rawData" not in text
+
+
+def test_disabled_yandex_rejects_direct_search_without_submission(make_client):
+    gateway = FakeSearchGateway()
+    with make_client(search_gateway=gateway) as client:
+        assert client.put("/api/search/settings", json={"enabled": False}).status_code == 200
+        response = client.post("/api/search", json=BODY)
+        assert response.status_code == 400
+        assert "выключен" in response.json()["detail"]
+    assert gateway.submitted == []

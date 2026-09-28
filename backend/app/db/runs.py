@@ -48,7 +48,7 @@ class RunRepository:
             raise StorageError(STORAGE_FAILED) from exc
         with self._connection(write=True) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise StorageError(STORAGE_FAILED)
             connection.executescript("""
                 CREATE TABLE IF NOT EXISTS runs (
@@ -81,6 +81,7 @@ class RunRepository:
                     prompt TEXT NOT NULL,
                     region_id INTEGER NOT NULL,
                     region_name TEXT NOT NULL,
+                    engine TEXT NOT NULL DEFAULT 'yandex',
                     status TEXT NOT NULL,
                     position INTEGER,
                     url TEXT,
@@ -89,7 +90,10 @@ class RunRepository:
                 );
             """)
             if version == 0:
-                connection.execute("PRAGMA user_version=1")
+                connection.execute("PRAGMA user_version=2")
+            elif version == 1:
+                connection.execute("ALTER TABLE search_rows ADD COLUMN engine TEXT NOT NULL DEFAULT 'yandex'")
+                connection.execute("PRAGMA user_version=2")
 
     @contextmanager
     def _connection(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
@@ -128,9 +132,11 @@ class RunRepository:
                  for prompt_index, prompt in enumerate(request.prompts)],
             )
             connection.executemany(
-                "INSERT INTO search_rows VALUES (?, ?, ?, ?, ?, ?, ?, 'submitting', NULL, NULL, NULL)",
+                "INSERT INTO search_rows (run_id, search_index, prompt_index, region_index, prompt, region_id, region_name, engine, status, position, url, error) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'submitting', NULL, NULL, NULL)",
                 [(run_id, prompt_index * len(request.regions) + region_index, prompt_index,
-                  region_index, prompt, region_id, REGION_NAMES[region_id])
+                  region_index, prompt, region_id, REGION_NAMES[region_id],
+                  request.region_engines[region_index] if request.region_engines else "yandex")
                  for prompt_index, prompt in enumerate(request.prompts)
                  for region_index, region_id in enumerate(request.regions)],
             )
@@ -207,7 +213,7 @@ class RunRepository:
         for row in models:
             row["mentioned"] = bool(row["mentioned"]) if row["mentioned"] is not None else None
         search = [dict(row) for row in connection.execute(
-                "SELECT search_index, prompt_index, region_index, prompt, region_id, region_name, "
+                "SELECT search_index, prompt_index, region_index, prompt, region_id, region_name, engine, "
                 "status, position, url, error FROM search_rows WHERE run_id=? ORDER BY search_index",
                 (run_id,),
         )]

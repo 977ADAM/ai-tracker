@@ -31,6 +31,26 @@ def test_normalizes_a_hostname_prompts_and_regions():
     assert result.host == "example.ru"
     assert result.prompts == ("первый", "второй")
     assert result.regions == (1, 213)
+    assert result.engines == ("yandex", "yandex")
+
+
+def test_normalizes_region_targets_in_region_order():
+    result = normalize_search_request(payload(
+        regions=[1, 213], region_targets=[{"region": 213, "engine": "yandex"}, {"region": 1, "engine": "yandex"}]
+    ))
+    assert result.engines == ("yandex", "yandex")
+
+
+@pytest.mark.parametrize("targets", [
+    [{"region": 1, "engine": "google"}],
+    [{"region": 213, "engine": "yandex"}],
+    [{"region": 1, "engine": "yandex"}, {"region": 1, "engine": "yandex"}],
+    [{"region": True, "engine": "yandex"}],
+    "yandex",
+])
+def test_rejects_invalid_region_targets(targets):
+    with pytest.raises(ValidationError):
+        normalize_search_request(payload(region_targets=targets))
 
 
 def test_a_url_keeps_its_host_and_ignores_scheme_path_and_port():

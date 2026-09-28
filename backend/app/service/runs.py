@@ -14,7 +14,7 @@ from app.db.runs import RunRepository
 from app.domain.models import PromptResult
 from app.domain.runs import RunInput, normalize_run_request
 from app.service.checks import UNKNOWN_CONNECTION_MESSAGE, CheckService
-from app.service.search import MISSING_CREDENTIALS, SearchRow, SearchService
+from app.service.search import SearchRow, SearchService
 
 LOGGER = logging.getLogger(__name__)
 MODEL_FAILURE = "Не удалось завершить проверку моделей"
@@ -55,28 +55,29 @@ class RunService:
         if request.regions:
             if self.stopping.is_set():
                 raise StorageError(STOPPED)
-            if self.search.gateway is None:
-                self._fail_branch(run_id, "search", MISSING_CREDENTIALS)
-            else:
-                try:
-                    created = await self.search.start(
-                        {"domain": request.domain, "prompts": list(request.prompts),
-                         "regions": list(request.regions)},
-                        on_row=lambda index, row: self._save_search(run_id, index, row),
-                        on_expire=lambda: self.repository.interrupt_search(run_id),
-                        should_stop=self.stopping.is_set,
-                    )
-                    self.search_jobs[run_id] = str(created["id"])
-                    if self.stopping.is_set():
-                        self.search.abort(self.search_jobs[run_id])
-                        raise StorageError(STOPPED)
-                except StorageError:
-                    self._storage_failure(run_id)
-                    raise
-                except AppError as exc:
-                    self._fail_branch(run_id, "search", str(exc))
-                except Exception:  # noqa: BLE001 - safe branch failure after run creation
-                    self._fail_branch(run_id, "search", SEARCH_FAILURE)
+            try:
+                created = await self.search.start(
+                    {"domain": request.domain, "prompts": list(request.prompts),
+                     "regions": list(request.regions),
+                     "region_targets": [
+                         {"region": region, "engine": engine}
+                         for region, engine in zip(request.regions, request.region_engines, strict=True)
+                     ]},
+                    on_row=lambda index, row: self._save_search(run_id, index, row),
+                    on_expire=lambda: self.repository.interrupt_search(run_id),
+                    should_stop=self.stopping.is_set,
+                )
+                self.search_jobs[run_id] = str(created["id"])
+                if self.stopping.is_set():
+                    self.search.abort(self.search_jobs[run_id])
+                    raise StorageError(STOPPED)
+            except StorageError:
+                self._storage_failure(run_id)
+                raise
+            except AppError as exc:
+                self._fail_branch(run_id, "search", str(exc))
+            except Exception:  # noqa: BLE001 - safe branch failure after run creation
+                self._fail_branch(run_id, "search", SEARCH_FAILURE)
         return {"id": run_id, "status": self.snapshot(run_id)["status"]}
 
     def _run_models(self, run_id: str, request: RunInput) -> None:
@@ -118,7 +119,14 @@ class RunService:
         self.failed_runs.update((*self.tasks.keys(), *self.search_jobs.keys(), run_id))
         self.stopping.set()
         if self.loop is not None and not self.loop.is_closed():
-            self.loop.call_soon_threadsafe(self._abort_search_jobs)
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            if current_loop is self.loop:
+                self._abort_search_jobs()
+            else:
+                self.loop.call_soon_threadsafe(self._abort_search_jobs)
 
     def _abort_search_jobs(self) -> None:
         for job_id in self.search_jobs.values():

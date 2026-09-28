@@ -20,7 +20,7 @@ from app.service.search import SearchRow
 def run_input() -> RunInput:
     return RunInput(
         brand="Ромашка", domain="example.ru", prompts=("цветы", "цветы"),
-        provider_ids=("p",), regions=(1,), search_host="example.ru",
+        provider_ids=("p",), regions=(1,), search_host="example.ru", region_engines=("yandex",),
     )
 
 
@@ -54,6 +54,7 @@ def test_saved_duplicate_prompt_answers_remain_distinct_after_reopen(tmp_path, r
     assert [r["status"] for r in saved["models"]] == ["mentioned", "pending"]
     assert [r["status"] for r in saved["search"]] == ["submitting", "found"]
     assert saved["search"][1]["position"] == 2
+    assert saved["search"][1]["engine"] == "yandex"
     assert "operation_id" not in str(saved)
     assert "api_key" not in str(saved)
 
@@ -124,6 +125,35 @@ def test_unusable_database_fails_safely(tmp_path):
     with pytest.raises(StorageError) as raised:
         repo(tmp_path)
     assert str(path) not in str(raised.value)
+
+
+def test_version_one_database_migrates_existing_search_rows_to_yandex(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "runs.sqlite3"
+    tmp_path.mkdir(exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.executescript("""
+        CREATE TABLE runs (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, finished_at TEXT,
+            brand TEXT NOT NULL, domain TEXT NOT NULL, prompts_json TEXT NOT NULL,
+            provider_ids_json TEXT NOT NULL, regions_json TEXT NOT NULL);
+        CREATE TABLE model_rows (run_id TEXT, provider_id TEXT, prompt_index INTEGER,
+            provider_name TEXT, prompt TEXT, status TEXT, answer TEXT, mentioned INTEGER, error TEXT,
+            PRIMARY KEY (run_id, provider_id, prompt_index));
+        CREATE TABLE search_rows (run_id TEXT, search_index INTEGER, prompt_index INTEGER,
+            region_index INTEGER, prompt TEXT, region_id INTEGER, region_name TEXT, status TEXT,
+            position INTEGER, url TEXT, error TEXT, PRIMARY KEY (run_id, search_index));
+        PRAGMA user_version=1;
+    """)
+    connection.close()
+
+    repo(tmp_path)
+    connection = sqlite3.connect(path)
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(search_rows)")}
+    connection.close()
+    assert version == 2
+    assert "engine" in columns
 
 
 def test_snapshot_remains_complete_while_terminal_run_is_deleted(tmp_path, run_input):

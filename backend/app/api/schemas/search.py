@@ -13,6 +13,7 @@ SEARCH_EXAMPLE = {
     "domain": "example.ru",
     "prompts_text": "Где заказать цветы?",
     "regions": [1, 213],
+    "region_targets": [{"region": 1, "engine": "yandex"}, {"region": 213, "engine": "yandex"}],
 }
 
 
@@ -35,6 +36,10 @@ class SearchRequest(BaseModel):
     regions: list[int] | None = Field(
         default=None,
         description="От 1 до 5 разных регионов из справочника `/api/search/regions`",
+    )
+    region_targets: list[dict[str, object]] | None = Field(
+        default=None,
+        description="Поисковая система для каждого региона; пока поддерживается только yandex",
     )
 
 
@@ -59,6 +64,7 @@ class SearchResultResponse(BaseModel):
     prompt: str
     region_id: int
     region_name: str
+    engine: str = Field(description="Выбранная поисковая система")
     status: RowStatus = Field(
         description="submitting/waiting — ещё считаем, found — сайт в первой десятке, absent — нет, error — запрос не удался"
     )

@@ -17,6 +17,7 @@ class RunInput:
     provider_ids: tuple[str, ...]
     regions: tuple[int, ...]
     search_host: str | None
+    region_engines: tuple[str, ...] = ()
 
 
 def normalize_run_request(payload: object) -> RunInput:
@@ -35,6 +36,7 @@ def normalize_run_request(payload: object) -> RunInput:
         provider_ids=tuple(normalize_provider_ids(payload)) if ids else (),
         regions=search.regions if search else (),
         search_host=search.host if search else None,
+        region_engines=search.engines if search else (),
     )
 
 
@@ -66,7 +68,7 @@ def summary_rows(
         status = row["status"]
         output.append({
             "prompt": row["prompt"],
-            "source": "Яндекс",
+            "source": "Яндекс" if row.get("engine", "yandex") == "yandex" else str(row["engine"]),
             "language": "ru",
             "region": row["region_name"],
             "ai_answer": "—",

@@ -52,6 +52,7 @@ MAX_REQUESTS_PER_SECOND = 10
 DEFAULT_CLEANUP_INTERVAL = 60.0
 
 MISSING_CREDENTIALS = "Не заданы ключ и каталог для поиска Яндекса"
+DISABLED_ENGINE = "Поиск Яндекса выключен"
 JOB_NOT_FOUND = "Задача поиска не найдена"
 UNEXPECTED_FAILURE = "Не удалось получить выдачу Яндекса"
 
@@ -71,6 +72,7 @@ class SearchRow:
     url: str | None = None
     error: str | None = None
     finished_at: float | None = None
+    engine: str = "yandex"
 
     @property
     def finished(self) -> bool:
@@ -98,6 +100,7 @@ class SearchRow:
             "prompt": self.prompt,
             "region_id": self.region,
             "region_name": self.region_name,
+            "engine": self.engine,
             "status": self.status,
             "position": self.position,
             "url": self.url,
@@ -246,6 +249,7 @@ class SearchService:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.gateway = gateway
+        self.enabled = True
         self.max_concurrency = max_concurrency
         self.poll_interval = poll_interval
         self.max_poll_interval = max_poll_interval
@@ -269,7 +273,10 @@ class SearchService:
         should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, object]:
         """Validate a run, create its pairs, and return before any pair finishes."""
-        if self.gateway is None:
+        if not self.enabled:
+            raise ConfigurationError(DISABLED_ENGINE)
+        gateway = self.gateway
+        if gateway is None:
             raise ConfigurationError(MISSING_CREDENTIALS)
         request = normalize_search_request(payload)
         self._drop_expired()
@@ -278,12 +285,17 @@ class SearchService:
         self.store.add(job)
         if on_expire is not None:
             self.expiry_callbacks[job.id] = on_expire
-        task = asyncio.create_task(self._run(job, on_row, should_stop))
+        task = asyncio.create_task(self._run(job, gateway, on_row, should_stop))
         self.tasks[job.id] = task
         task.add_done_callback(lambda finished, job_id=job.id: self._task_done(job_id, finished))
         if self.cleanup_task is None or self.cleanup_task.done():
             self.cleanup_task = asyncio.create_task(self._cleanup_expired_periodically())
         return {"id": job.id, "total": job.total, "status": job.status}
+
+    def configure(self, gateway: SearchGateway | None, enabled: bool) -> None:
+        """Set the gateway and availability used by subsequent jobs."""
+        self.gateway = gateway
+        self.enabled = enabled
 
     def snapshot(self, job_id: str) -> dict[str, object]:
         """Return a copy of one job's public state, or refuse an unknown ID."""
@@ -319,9 +331,9 @@ class SearchService:
 
     def _create_job(self, request: SearchInput) -> SearchJob:
         rows = [
-            SearchRow(prompt=prompt, region=region, region_name=REGION_NAMES[region])
+            SearchRow(prompt=prompt, region=region, region_name=REGION_NAMES[region], engine=engine)
             for prompt in request.prompts
-            for region in request.regions
+            for region, engine in zip(request.regions, request.engines, strict=True)
         ]
         return SearchJob(
             id=secrets.token_urlsafe(16),
@@ -360,7 +372,8 @@ class SearchService:
             self._drop_expired()
 
     async def _run(
-        self, job: SearchJob, on_row: Callable[[int, SearchRow], None] | None,
+        self, job: SearchJob, gateway: SearchGateway,
+        on_row: Callable[[int, SearchRow], None] | None,
         should_stop: Callable[[], bool] | None,
     ) -> None:
         next_index = 0
@@ -370,7 +383,7 @@ class SearchService:
             while next_index < len(job.rows):
                 index = next_index
                 next_index += 1
-                await self._run_pair(job, index, job.rows[index], on_row, should_stop)
+                await self._run_pair(job, gateway, index, job.rows[index], on_row, should_stop)
 
         try:
             async with asyncio.TaskGroup() as group:
@@ -381,12 +394,10 @@ class SearchService:
             self.pair_tasks.pop(job.id, None)
 
     async def _run_pair(
-        self, job: SearchJob, index: int, row: SearchRow,
+        self, job: SearchJob, gateway: SearchGateway, index: int, row: SearchRow,
         on_row: Callable[[int, SearchRow], None] | None,
         should_stop: Callable[[], bool] | None,
     ) -> None:
-        gateway = self.gateway
-        assert gateway is not None  # `start` refuses a run without credentials
         try:
             async with self.semaphore:
                 if should_stop is not None and should_stop():

@@ -7,6 +7,7 @@ import asyncio
 from app.api.deps import build_container
 from app.core.config import Settings, load_env_file
 from app.integrations.yandex_search import YandexSearchGateway
+from tests.fakes import MemorySecrets
 
 
 def test_prefixed_variables_win_over_the_legacy_names():
@@ -51,15 +52,24 @@ def test_absent_credentials_stay_none():
     assert settings.yandex_search_folder_id is None
 
 
-def test_a_container_without_credentials_has_no_gateway():
-    container = build_container(Settings())
+def test_a_container_without_credentials_keeps_a_client_for_later_configuration(tmp_path):
+    container = build_container(Settings(config_dir=tmp_path), secrets=MemorySecrets())
 
-    assert container.search.gateway is None
-    assert container.search_client is None
+    try:
+        assert container.search.gateway is None
+        assert container.search_client is not None
+        container.search_settings.update({"api_key": "saved-key", "folder_id": "saved-folder"})
+        assert isinstance(container.search.gateway, YandexSearchGateway)
+        assert container.search.gateway.client is container.search_client
+    finally:
+        asyncio.run(container.search_client.aclose())
 
 
-def test_a_container_builds_the_gateway_from_credentials():
-    container = build_container(Settings(yandex_search_api_key="key", yandex_search_folder_id="folder"))
+def test_a_container_builds_the_gateway_from_credentials(tmp_path):
+    container = build_container(
+        Settings(config_dir=tmp_path, yandex_search_api_key="key", yandex_search_folder_id="folder"),
+        secrets=MemorySecrets(),
+    )
 
     try:
         assert isinstance(container.search.gateway, YandexSearchGateway)
@@ -71,15 +81,18 @@ def test_a_container_builds_the_gateway_from_credentials():
             asyncio.run(container.search_client.aclose())
 
 
-def test_an_injected_gateway_wins_over_the_environment():
+def test_an_injected_gateway_wins_over_the_environment(tmp_path):
     injected = object()
     container = build_container(
-        Settings(yandex_search_api_key="key", yandex_search_folder_id="folder"),
-        search_gateway=injected,
+        Settings(config_dir=tmp_path, yandex_search_api_key="key", yandex_search_folder_id="folder"),
+        search_gateway=injected, secrets=MemorySecrets(),
     )
 
-    assert container.search.gateway is injected
-    assert container.search_client is None
+    try:
+        assert container.search.gateway is injected
+        assert container.search_client is not None
+    finally:
+        asyncio.run(container.search_client.aclose())
 
 
 def test_the_root_env_file_never_overrides_the_environment(tmp_path, monkeypatch):
