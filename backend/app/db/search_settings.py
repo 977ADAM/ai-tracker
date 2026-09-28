@@ -138,11 +138,12 @@ class SearchSettingsRepository:
         except OSError as exc:
             raise StorageError("Не удалось сохранить настройки поиска") from exc
         finally:
+            write_failed = sys.exc_info()[0] is not None
             if temporary is not None and os.path.exists(temporary):
                 try:
                     os.unlink(temporary)
                 except OSError as exc:
-                    if sys.exc_info()[0] is None:
+                    if not write_failed:
                         raise StorageError("Не удалось очистить временные настройки поиска") from exc
 
     def _saved_key(self) -> str | None:

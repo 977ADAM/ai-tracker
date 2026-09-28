@@ -1,6 +1,7 @@
 """Yandex settings metadata and credential persistence."""
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -159,3 +160,13 @@ def test_cleanup_failure_does_not_mask_storage_error_or_prevent_key_rollback(tmp
         repository.update({"api_key": "new-key", "folder_id": "new-folder"})
     assert store.values[("test-service", "yandex-search")] == "old-key"
     assert metadata(tmp_path) == {"folder_id": "old-folder"}
+
+
+def test_cleanup_only_failure_is_reported_as_storage_error(tmp_path, monkeypatch):
+    repository = repo(tmp_path, MemorySecrets())
+    # Keep the temporary file after an otherwise successful write so cleanup runs.
+    monkeypatch.setattr("app.db.search_settings.os.replace", shutil.copyfile)
+    monkeypatch.setattr("app.db.search_settings.os.unlink", lambda *_: (_ for _ in ()).throw(OSError("cleanup")))
+
+    with pytest.raises(StorageError, match="очистить временные настройки"):
+        repository._write({"enabled": False})
