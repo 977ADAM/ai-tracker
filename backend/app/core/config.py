@@ -22,6 +22,12 @@ ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 YANDEX_SEARCH_API_KEY_VARIABLES = ("YANDEX_SEARCH_API_KEY", "API_KEY")
 YANDEX_SEARCH_FOLDER_ID_VARIABLES = ("YANDEX_SEARCH_FOLDER_ID", "FOLDER_ID")
 
+# SEO service LLM. These are only fallbacks: a value saved in the settings
+# screen always wins over the environment.
+SEO_LLM_ENDPOINT_VARIABLES = ("SEO_LLM_ENDPOINT",)
+SEO_LLM_MODEL_VARIABLES = ("SEO_LLM_MODEL",)
+SEO_LLM_API_KEY_VARIABLES = ("SEO_LLM_API_KEY",)
+
 # Environment variable that may hold a key per saved connection ID. It is only a
 # fallback: a key saved in the settings screen always wins.
 DEFAULT_ENV_API_KEYS = {
@@ -75,6 +81,9 @@ class Settings:
     presets: tuple[ConnectionPreset, ...] = BUILTIN_PRESETS
     yandex_search_api_key: str | None = None
     yandex_search_folder_id: str | None = None
+    seo_llm_endpoint: str | None = None
+    seo_llm_model: str | None = None
+    seo_llm_api_key: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -84,12 +93,20 @@ class Settings:
             default_scope=source.get("GIGACHAT_SCOPE") or DEFAULT_SCOPE,
             yandex_search_api_key=first_value(source, YANDEX_SEARCH_API_KEY_VARIABLES),
             yandex_search_folder_id=first_value(source, YANDEX_SEARCH_FOLDER_ID_VARIABLES),
+            seo_llm_endpoint=first_value(source, SEO_LLM_ENDPOINT_VARIABLES),
+            seo_llm_model=first_value(source, SEO_LLM_MODEL_VARIABLES),
+            seo_llm_api_key=first_value(source, SEO_LLM_API_KEY_VARIABLES),
         )
 
     @property
     def has_yandex_search_credentials(self) -> bool:
         """Both halves of the Yandex Search API credentials are present."""
         return bool(self.yandex_search_api_key and self.yandex_search_folder_id)
+
+    @property
+    def has_seo_llm_credentials(self) -> bool:
+        """The SEO service LLM can be configured from the environment alone."""
+        return bool(self.seo_llm_endpoint and self.seo_llm_model and self.seo_llm_api_key)
 
     def with_presets(self, presets: Iterable[ConnectionPreset]) -> Settings:
         return replace(self, presets=tuple(presets))

@@ -52,6 +52,40 @@ def test_absent_credentials_stay_none():
     assert settings.yandex_search_folder_id is None
 
 
+def test_seo_llm_variables_are_read_from_the_environment():
+    settings = Settings.from_env(
+        {
+            "SEO_LLM_ENDPOINT": "https://llm.example.com/v1/chat/completions",
+            "SEO_LLM_MODEL": "seo-model",
+            "SEO_LLM_API_KEY": "seo-key",
+        }
+    )
+
+    assert settings.seo_llm_endpoint == "https://llm.example.com/v1/chat/completions"
+    assert settings.seo_llm_model == "seo-model"
+    assert settings.seo_llm_api_key == "seo-key"
+    assert settings.has_seo_llm_credentials is True
+
+
+def test_blank_seo_llm_values_are_ignored():
+    settings = Settings.from_env({"SEO_LLM_ENDPOINT": "  ", "SEO_LLM_MODEL": "", "SEO_LLM_API_KEY": "  key  "})
+
+    assert settings.seo_llm_endpoint is None
+    assert settings.seo_llm_model is None
+    assert settings.seo_llm_api_key == "key"
+    assert settings.has_seo_llm_credentials is False
+
+
+def test_absent_seo_llm_credentials_stay_none(monkeypatch):
+    for variable in ("SEO_LLM_ENDPOINT", "SEO_LLM_MODEL", "SEO_LLM_API_KEY"):
+        monkeypatch.delenv(variable, raising=False)
+
+    settings = Settings.from_env()
+
+    assert (settings.seo_llm_endpoint, settings.seo_llm_model, settings.seo_llm_api_key) == (None, None, None)
+    assert settings.has_seo_llm_credentials is False
+
+
 def test_a_container_without_credentials_keeps_a_client_for_later_configuration(tmp_path):
     container = build_container(Settings(config_dir=tmp_path), secrets=MemorySecrets())
 
