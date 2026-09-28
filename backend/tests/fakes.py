@@ -8,6 +8,7 @@ from typing import Any
 from app.core.config import ConnectionPreset
 from app.core.errors import ProviderError, StorageError
 from app.domain.search import SearchDocument
+from app.domain.seo_llm import AgentMessage, AgentTurn, ToolCall, ToolSchema
 from app.domain.site_fetch import FetchedPage
 from app.integrations.yandex_search import RESULT_FAILED, SUBMIT_FAILED
 
@@ -236,6 +237,41 @@ class ScriptedSeoLlmFactory:
 
     def __call__(self) -> ScriptedSeoLlmClient:
         return ScriptedSeoLlmClient(self.responses, calls=self.calls)
+
+
+class FakeAgentModel:
+    """A scripted `AgentModel`: one turn or one error per `step` call.
+
+    It records every dialogue it is asked to answer, including the offered tool
+    schemas, so a test can prove what the caller sent without any network call.
+    """
+
+    def __init__(self, turn: AgentTurn | None = None, *, error: BaseException | None = None) -> None:
+        self.turn = turn if turn is not None else AgentTurn(text="OK", tool_calls=())
+        self.error = error
+        self.steps: list[tuple[tuple[AgentMessage, ...], tuple[ToolSchema, ...]]] = []
+        self.closed = False
+
+    async def step(
+        self, messages: Sequence[AgentMessage], tools: Sequence[ToolSchema],
+    ) -> AgentTurn:
+        self.steps.append((tuple(messages), tuple(tools)))
+        if self.error is not None:
+            raise self.error
+        return self.turn
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def tool_call_turn(
+    name: str, arguments: dict[str, object] | None = None, call_id: str = "call_1",
+) -> AgentTurn:
+    """A turn that calls one tool: the shape a tool-supporting model returns."""
+    return AgentTurn(
+        text="",
+        tool_calls=(ToolCall(id=call_id, name=name, arguments=dict(arguments or {})),),
+    )
 
 
 class ScriptedSeoGateway:

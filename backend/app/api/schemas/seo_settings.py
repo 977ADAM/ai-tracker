@@ -34,3 +34,5 @@ class SeoSettingsTestResponse(BaseModel):
     ok: bool
     model: str | None = None
     error: str | None = None
+    # Omitted while the probe failed or found no tool support.
+    tools: bool | None = None
