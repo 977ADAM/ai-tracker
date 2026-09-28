@@ -297,7 +297,7 @@
                 <p class="mb-4 max-w-3xl text-xs leading-5 text-muted">
                     Добавьте до пяти регионов. Поиск проверит первую десятку по каждому вопросу и может занять несколько часов.
                 </p>
-                
+
                 {#if data.searchRegionError}
                     <p role="alert" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                         {data.searchRegionError}. Проверка моделей работает без него.
@@ -306,11 +306,11 @@
                 <div class="space-y-3">
                     {#each regionRows as value, index (index)}
                         <div class="flex items-center gap-3" data-region-row>
-                            
+
                             <label class="sr-only" for={`region-${index}`}>
                                 Регион {index + 1}
                             </label>
-                            
+
                             <select id={`region-${index}`} class="min-h-12 w-full max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent" bind:value={regionRows[index]}>
                                 <option value="">
                                     Выберите регион
@@ -321,19 +321,19 @@
                                     </option>
                                 {/each}
                             </select>
-                            
+
                             <button type="button" onclick={() => removeRegion(index)} aria-label={`Удалить регион ${index + 1}`} class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700">
                                 ×
                             </button>
-                            
+
                         </div>
                     {/each}
                 </div>
-                
+
                 <button type="button" onclick={addRegion} disabled={regionRows.length >= MAX_REGIONS || !catalog.length} class="mt-4 inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">
                     ＋ Добавить регион
                 </button>
-                
+
                 {#if chosenRegions.length > 0}
                     <p class="mt-3 text-xs text-muted">
                         <span class="font-semibold text-ink" data-request-count>
@@ -343,15 +343,15 @@
                     </p>
                 {/if}
             </fieldset>
-            
+
             {#if error}
                 <p role="alert" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
                     {error}
                 </p>
             {/if}
-            
+
             <div class="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
-                
+
                 <p class="max-w-xl text-xs leading-5 text-muted">
                     Ответы и выдача отражают момент проверки. Прогон сохранится в истории.
                 </p>
@@ -360,14 +360,29 @@
                     <span aria-hidden="true">
                         ↗
                     </span>
-                    
+
                 </button>
-            
+
             </div>
         </form>
     </section>
-    {#if snapshot}<RunResults {snapshot} />{:else}<section class="mt-8 rounded-3xl border border-dashed border-line bg-white px-6 py-14 text-center shadow-sm"><h2 class="text-xl font-bold">Пока нет проверки</h2><p class="mt-2 text-sm text-muted">Запустите проверку или откройте сохранённый прогон из истории.</p></section>{/if}
-    {#if historyError}<p role="alert" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{historyError}</p>{/if}
+    {#if snapshot}
+        <RunResults {snapshot} />
+        {:else}
+        <section class="mt-8 rounded-3xl border border-dashed border-line bg-white px-6 py-14 text-center shadow-sm">
+            <h2 class="text-xl font-bold">Пока нет проверки</h2>
+            <p class="mt-2 text-sm text-muted">Запустите проверку или откройте сохранённый прогон из истории.</p>
+        </section>
+    {/if}
+    {#if historyError}
+        <p role="alert" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            {historyError}
+        </p>
+    {/if}
     <RunHistory items={history} {nextCursor} onView={(id) => void loadRun(id)} onDelete={(id) => void deleteRun(id)} onMore={() => void loadMore()} loading={historyLoading} />
-    <aside class="mt-8 rounded-2xl border border-line bg-accent-soft px-6 py-5 text-sm leading-6 text-ink"><strong>Как читать результат</strong><p class="mt-2 text-muted">Поиск проверяет только первую десятку органических результатов в выбранных регионах. Ошибка или прерванный запрос не означает, что сайта нет в выдаче.</p></aside>
+
+    <aside class="mt-8 rounded-2xl border border-line bg-accent-soft px-6 py-5 text-sm leading-6 text-ink">
+        <strong>Как читать результат</strong>
+        <p class="mt-2 text-muted">Поиск проверяет только первую десятку органических результатов в выбранных регионах. Ошибка или прерванный запрос не означает, что сайта нет в выдаче.</p>
+    </aside>
 </main>
