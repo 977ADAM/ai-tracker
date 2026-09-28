@@ -1,6 +1,6 @@
 export type ApiPath =
   | '/api/providers' | '/api/check' | '/api/form' | '/api/providers/settings'
-  | '/api/search' | '/api/search/regions'
+  | '/api/search' | '/api/search/regions' | '/api/search/settings' | '/api/search/settings/credentials'
   | '/api/runs' | `/api/runs?cursor=${string}` | `/api/runs/${string}`
   | `/api/providers/settings/${string}` | `/api/providers/${string}` | `/api/search/${string}`;
 
@@ -65,6 +65,14 @@ export type CheckRow = CheckResult & { provider_name: string };
 export type CheckResponse = { brand: string; domain: string; checks: ProviderCheck[]; summary: CheckSummary; rows: CheckRow[] };
 
 export type SearchRegion = { id: number; name: string };
+
+export type YandexSearchSettings = {
+  enabled: boolean;
+  folder_id: string | null;
+  has_api_key: boolean;
+  api_key_source: 'ui' | 'env' | 'none';
+  folder_id_source: 'ui' | 'env' | 'none';
+};
 
 export type SearchJobStatus = 'pending' | 'done';
 export type SearchRowStatus = 'submitting' | 'waiting' | 'found' | 'absent' | 'error';

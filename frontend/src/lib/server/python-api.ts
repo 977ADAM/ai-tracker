@@ -1,7 +1,7 @@
 import type {
   ApiPath, FormConfig, PublicProvider, SearchCreated, SearchRegion, SearchRow, SearchRowStatus,
   SearchSnapshot, SettingsProvider, RunCreated, RunHistoryPage, RunSnapshot, RunSummaryRow,
-  RunModelRow, RunSearchRow
+  RunModelRow, RunSearchRow, YandexSearchSettings
 } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
@@ -114,7 +114,8 @@ function validPath(path: ApiPath): boolean {
   }
   if (path === '/api/providers' || path === '/api/check' || path === '/api/form' || path === '/api/providers/settings') return true;
   // The static catalog comes before the dynamic job route, exactly as in Python.
-  if (path === '/api/search' || path === '/api/search/regions') return true;
+  if (path === '/api/search' || path === '/api/search/regions' || path === '/api/search/settings' ||
+      path === '/api/search/settings/credentials') return true;
   if (path.startsWith('/api/search/')) {
     try { return searchPath(decodeURIComponent(path.slice('/api/search/'.length))) === path; }
     catch { return false; }
@@ -274,6 +275,19 @@ export function publicSearchRegions(value: unknown): SearchRegion[] {
   });
 }
 
+export function publicSearchSettings(value: unknown): { yandex: YandexSearchSettings } {
+  const item = record(record(value).yandex);
+  if (typeof item.enabled !== 'boolean' || typeof item.has_api_key !== 'boolean' ||
+      (item.folder_id !== null && typeof item.folder_id !== 'string')) throw new Error('Invalid search settings');
+  return { yandex: {
+    enabled: item.enabled,
+    folder_id: item.folder_id,
+    has_api_key: item.has_api_key,
+    api_key_source: oneOf(item.api_key_source, ['ui', 'env', 'none'] as const),
+    folder_id_source: oneOf(item.folder_id_source, ['ui', 'env', 'none'] as const)
+  } };
+}
+
 export function publicSearchCreated(value: unknown): SearchCreated {
   const item = record(value);
   const total = requiredInteger(item.total);
@@ -331,10 +345,11 @@ export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
 }
 
-export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; loadError: string }> {
+export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; searchSettings: YandexSearchSettings | null; searchSettingsError: string; loadError: string }> {
   // The region catalog is an independent request: a failure there must not stop
   // the model list, and vice versa.
   const { regions: searchRegions, error: searchRegionError } = await loadSearchRegions();
+  const { settings: searchSettings, error: searchSettingsError } = await loadSearchSettings();
   try {
     const [providerResponse, formResponse, settingsResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form'), pythonApi('/api/providers/settings')]);
     if (!providerResponse.ok || !formResponse.ok || !settingsResponse.ok ||
@@ -344,9 +359,20 @@ export async function loadPageData(): Promise<{ providers: PublicProvider[]; set
     const providers: unknown = await providerResponse.json();
     const settingsProviders: unknown = await settingsResponse.json();
     if (!Array.isArray(providers) || !Array.isArray(settingsProviders)) throw new Error('Invalid providers');
-    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, loadError: '' };
+    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, searchSettings, searchSettingsError, loadError: '' };
   } catch {
-    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, searchSettings, searchSettingsError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+  }
+}
+
+async function loadSearchSettings(): Promise<{ settings: YandexSearchSettings | null; error: string }> {
+  try {
+    const response = await pythonApi('/api/search/settings');
+    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || ''))
+      throw new Error('Invalid search settings');
+    return { settings: publicSearchSettings(await response.json()).yandex, error: '' };
+  } catch {
+    return { settings: null, error: 'Настройки поисковых систем недоступны' };
   }
 }
 
@@ -363,6 +389,9 @@ async function loadSearchRegions(): Promise<{ regions: SearchRegion[]; error: st
 export async function proxyJson(request: Request, path: ApiPath, method: string): Promise<Response> {
   if (!validPath(path)) return json({ detail: 'Некорректное подключение' }, 400);
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
+  const searchSettingsPath = path === '/api/search/settings' || path === '/api/search/settings/credentials';
+  if (searchSettingsPath && !(path === '/api/search/settings' ? ['GET', 'PUT'].includes(method) : method === 'DELETE'))
+    return json({ detail: 'Недопустимый метод' }, 405);
   let body: string | undefined;
   if (method !== 'GET') {
     const origin = request.headers.get('origin');
@@ -385,11 +414,12 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
   } catch {
     return json({ detail: 'Python API недоступен' }, 502);
   }
-  if (method === 'DELETE' && upstream.status === 204) return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+  if (method === 'DELETE' && upstream.status === 204 && !searchSettingsPath) return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
   if (!/^application\/json(?:\s*;|$)/i.test(upstream.headers.get('content-type') || '')) return json({ detail: 'Некорректный ответ Python API' }, 502);
   try {
     const value: unknown = await upstream.json();
     if (!upstream.ok) {
+      if (searchSettingsPath) return json({ detail: 'Ошибка настроек поисковой системы' }, upstream.status);
       const detail = record(value).detail;
       return json({ detail: typeof detail === 'string' ? detail : 'Ошибка Python API' }, upstream.status);
     }
@@ -398,6 +428,7 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
     if (path.startsWith('/api/runs/') && method === 'GET') return json(publicRunSnapshot(value), upstream.status);
     if (path === '/api/search' && method === 'POST') return json(publicSearchCreated(value), upstream.status);
     if (path === '/api/search/regions' && method === 'GET') return json(publicSearchRegions(value), upstream.status);
+    if (searchSettingsPath) return json(publicSearchSettings(value), upstream.status);
     if (path.startsWith('/api/search/') && method === 'GET') return json(publicSearchSnapshot(value), upstream.status);
     if (path === '/api/providers' && method === 'GET') {
       if (!Array.isArray(value)) throw new Error('Invalid providers');
