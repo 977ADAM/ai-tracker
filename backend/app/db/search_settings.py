@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -59,9 +60,12 @@ class SearchSettingsRepository:
         try:
             if updated != previous:
                 self._write(updated)
-        except StorageError:
+        except StorageError as storage_error:
             if write_key:
-                self._restore_key(old_key)
+                try:
+                    self._restore_key(old_key)
+                except ConfigurationError as rollback_error:
+                    raise rollback_error from storage_error
             raise
         return self._resolve(updated)
 
@@ -77,9 +81,12 @@ class SearchSettingsRepository:
         try:
             if updated != previous:
                 self._write(updated)
-        except StorageError:
+        except StorageError as storage_error:
             if old_key is not None:
-                self._restore_key(old_key)
+                try:
+                    self._restore_key(old_key)
+                except ConfigurationError as rollback_error:
+                    raise rollback_error from storage_error
             raise
         return self._resolve(updated)
 
@@ -132,7 +139,11 @@ class SearchSettingsRepository:
             raise StorageError("Не удалось сохранить настройки поиска") from exc
         finally:
             if temporary is not None and os.path.exists(temporary):
-                os.unlink(temporary)
+                try:
+                    os.unlink(temporary)
+                except OSError as exc:
+                    if sys.exc_info()[0] is None:
+                        raise StorageError("Не удалось очистить временные настройки поиска") from exc
 
     def _saved_key(self) -> str | None:
         try:
@@ -158,5 +169,5 @@ class SearchSettingsRepository:
                 self.secrets.delete_password(self.service_name, KEYRING_ACCOUNT)
             else:
                 self.secrets.set_password(self.service_name, KEYRING_ACCOUNT, previous)
-        except Exception:  # noqa: BLE001, S110 - preserve the original storage failure
-            pass
+        except Exception as exc:
+            raise ConfigurationError("Не удалось восстановить ключ в системном хранилище") from exc

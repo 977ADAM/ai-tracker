@@ -112,3 +112,50 @@ def test_reset_without_overrides_is_no_op_even_with_strict_store(tmp_path):
     settings = repository.reset_credentials()
     assert (settings.api_key_source, settings.folder_id_source) == ("none", "none")
     assert not (tmp_path / "search-settings.json").exists()
+
+
+def test_failed_update_reports_rollback_failure_with_storage_context(tmp_path, monkeypatch):
+    store = MemorySecrets()
+    repository = repo(tmp_path, store)
+    repository.update({"api_key": "old-key", "folder_id": "old-folder"})
+    original_set = store.set_password
+
+    def refuse_restore(service, username, password):
+        if password == "old-key":
+            raise RuntimeError("keyring rollback unavailable")
+        original_set(service, username, password)
+
+    store.set_password = refuse_restore
+    monkeypatch.setattr("app.db.search_settings.os.replace", lambda *_: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(ConfigurationError, match="восстановить ключ") as error:
+        repository.update({"api_key": "new-key", "folder_id": "new-folder"})
+    assert isinstance(error.value.__cause__, StorageError)
+    assert metadata(tmp_path) == {"folder_id": "old-folder"}
+
+
+def test_failed_reset_reports_rollback_failure_with_storage_context(tmp_path, monkeypatch):
+    store = MemorySecrets()
+    repository = repo(tmp_path, store)
+    repository.update({"api_key": "old-key", "folder_id": "old-folder"})
+
+    def refuse_restore(_service, _username, _password):
+        raise RuntimeError("keyring rollback unavailable")
+
+    store.set_password = refuse_restore
+    monkeypatch.setattr("app.db.search_settings.os.replace", lambda *_: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(ConfigurationError, match="восстановить ключ") as error:
+        repository.reset_credentials()
+    assert isinstance(error.value.__cause__, StorageError)
+    assert metadata(tmp_path) == {"folder_id": "old-folder"}
+
+
+def test_cleanup_failure_does_not_mask_storage_error_or_prevent_key_rollback(tmp_path, monkeypatch):
+    store = MemorySecrets()
+    repository = repo(tmp_path, store)
+    repository.update({"api_key": "old-key", "folder_id": "old-folder"})
+    monkeypatch.setattr("app.db.search_settings.os.replace", lambda *_: (_ for _ in ()).throw(OSError("disk")))
+    monkeypatch.setattr("app.db.search_settings.os.unlink", lambda *_: (_ for _ in ()).throw(OSError("cleanup")))
+    with pytest.raises(StorageError):
+        repository.update({"api_key": "new-key", "folder_id": "new-folder"})
+    assert store.values[("test-service", "yandex-search")] == "old-key"
+    assert metadata(tmp_path) == {"folder_id": "old-folder"}
