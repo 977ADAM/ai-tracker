@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 import pytest
 
 from app.core.errors import ValidationError
 from app.domain.seo import (
+    AGENT_LABELS,
+    AGENTS,
     CATEGORY_LABELS,
     GENERATED_QUERY_LIMIT,
     MAX_QUERY_LENGTH,
     MAX_QUERY_WORDS,
     MIN_GENERATED_QUERIES,
     QUERY_CATEGORIES,
+    AgentStatus,
     Candidate,
     GeneratedQuery,
     QueryFlags,
@@ -403,3 +407,32 @@ def test_flag_queries_marks_the_company_host_and_candidate_hosts():
     assert flagged[3].flags.mentions_candidate_host is True
     assert flagged[4].flags.mentions_company_host is True
     assert flagged[4].flags.branded is True
+
+
+def test_the_six_agents_and_their_russian_labels_are_fixed():
+    assert AGENTS == ("supervisor", "site", "competitors", "queries", "checks", "report")
+    assert set(AGENT_LABELS) == set(AGENTS)
+    assert AGENT_LABELS == {
+        "supervisor": "Супервизор",
+        "site": "Агент сайта",
+        "competitors": "Агент конкурентов",
+        "queries": "Агент запросов",
+        "checks": "Агент проверок",
+        "report": "Агент отчёта",
+    }
+
+
+def test_the_agent_status_vocabulary_is_the_agreed_six():
+    assert get_args(AgentStatus) == ("pending", "running", "waiting", "done", "error", "skipped")
+
+
+def test_the_agent_names_and_status_have_one_source_in_the_domain():
+    # The database and the tool layer must reuse the domain tuple and literal
+    # instead of repeating them: `is` fails as soon as either redefines its own.
+    from app.db import seo as db_seo
+    from app.domain import seo_tools
+
+    assert db_seo.AGENTS is AGENTS
+    assert seo_tools.AGENTS is AGENTS
+    assert get_args(db_seo.AgentStatus) == get_args(AgentStatus)
+    assert db_seo.AGENT_STATUSES == frozenset(get_args(AgentStatus))

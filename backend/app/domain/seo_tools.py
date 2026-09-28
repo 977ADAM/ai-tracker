@@ -21,6 +21,7 @@ from typing import Literal
 
 from app.core.errors import AppError
 from app.domain.seo import (
+    AGENTS,
     GENERATED_QUERY_LIMIT,
     MAX_CONNECTIONS,
     MAX_QUERY_LENGTH,
@@ -66,8 +67,9 @@ INVALID_QUERY = (
 BUDGET_EXHAUSTED = "Лимит прогона исчерпан"
 SUPERVISOR_ONLY = "Инструмент доступен только супервизору"
 
-AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
-SPECIALIST_AGENTS = ("site", "competitors", "queries", "checks", "report")
+# `AGENTS` is imported from `domain.seo`, the single source of the vocabulary;
+# the specialists are the same tuple without the supervisor.
+SPECIALIST_AGENTS = AGENTS[1:]
 
 
 class ToolRejected(AppError):

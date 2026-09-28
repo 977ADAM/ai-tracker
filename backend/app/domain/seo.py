@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -34,6 +34,20 @@ CATEGORY_LABELS = {
 }
 MAX_QUERY_LENGTH = 400
 MAX_QUERY_WORDS = 40
+
+# The six agents of the supervised run, in the order every read reports them.
+# This module is the single source of the vocabulary: `domain.seo_tools` and
+# `db.seo` import these names instead of repeating the tuple and the literal.
+AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
+AGENT_LABELS: Mapping[str, str] = {
+    "supervisor": "Супервизор",
+    "site": "Агент сайта",
+    "competitors": "Агент конкурентов",
+    "queries": "Агент запросов",
+    "checks": "Агент проверок",
+    "report": "Агент отчёта",
+}
+AgentStatus = Literal["pending", "running", "waiting", "done", "error", "skipped"]
 
 SEED_COUNT = 3
 MAX_SPHERE_LENGTH = 200

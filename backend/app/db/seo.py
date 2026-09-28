@@ -39,6 +39,8 @@ from typing import Literal, get_args
 from app.core.errors import RunConflict, RunNotFound, StorageError, ValidationError
 from app.domain.search import TOP_RESULTS
 from app.domain.seo import (
+    AGENTS,
+    AgentStatus,
     Candidate,
     CandidateHit,
     GeneratedQuery,
@@ -54,8 +56,6 @@ FILE_NAME = "runs.sqlite3"
 SCHEMA_VERSION = 4
 BUSY_TIMEOUT_MS = 5000
 STAGE_COUNT = 6
-# The six agents of the supervised run, in the order every read reports them.
-AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
 
 STORAGE_FAILED = "Не удалось сохранить или прочитать SEO-анализ"
 ANALYSIS_NOT_FOUND = "SEO-анализ не найден"
@@ -78,7 +78,8 @@ CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
 SeoAnalysisStatus = Literal["running", "completed", "failed", "interrupted", "cancelled"]
 SeoStageStatus = Literal["pending", "running", "done", "error", "skipped"]
-AgentStatus = Literal["pending", "running", "waiting", "done", "error", "skipped"]
+# `AgentStatus` is imported from `domain.seo`; the stored vocabulary below is
+# derived from that literal, so the DB never owns a second copy of it.
 AgentStepKind = Literal["model", "tool", "handoff", "system"]
 
 TERMINAL_ANALYSIS_STATUSES = frozenset({"completed", "failed", "interrupted", "cancelled"})

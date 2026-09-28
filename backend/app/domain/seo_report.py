@@ -40,6 +40,10 @@ are never read as an absent mention or an absent site. A Yandex success is
 corresponding flag. Candidate metrics are computed by host: hits come from
 `candidate_hits` (query index to top-ten hits) and candidate AI mentions are
 re-matched in the saved answer text, never on the SERP title.
+
+`report_payload` wraps that computed mapping for an agentic run: it copies
+every aggregate unchanged and adds the optional model `conclusions` block, so
+the report agent can never move a number.
 """
 
 from __future__ import annotations
@@ -176,6 +180,31 @@ def build_report(
             "model_errors": sum(1 for row in models if row.status in ERROR_OUTCOMES),
         },
     }
+
+
+def report_payload(
+    metrics: Mapping[str, object],
+    *,
+    conclusions: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Copy the computed metrics and attach the optional conclusions block.
+
+    Every aggregate key is copied unchanged, one level deep: this function
+    never reads or rewrites a metric, so a missing, empty, or nonsense
+    conclusions block cannot change a number. The block itself is kept as a
+    plain `dict` only when it is a non-empty mapping; otherwise it is `None`
+    and the report shows no model text.
+    """
+    payload: dict[str, object] = dict(metrics)
+    payload["conclusions"] = _conclusions_block(conclusions)
+    return payload
+
+
+def _conclusions_block(conclusions: object) -> dict[str, object] | None:
+    """Return the model conclusions as a plain dict, or `None` when unusable."""
+    if not isinstance(conclusions, Mapping) or not conclusions:
+        return None
+    return {key: value for key, value in conclusions.items()}
 
 
 def _search_metric(rows: Iterable[SearchRowValue]) -> Metric:
