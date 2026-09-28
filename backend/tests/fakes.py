@@ -227,6 +227,17 @@ class ScriptedSeoLlmClient:
         return response
 
 
+class ScriptedSeoLlmFactory:
+    """Builds one `ScriptedSeoLlmClient` per run over a shared script and call log."""
+
+    def __init__(self, responses: Sequence[str | BaseException]) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[str, str]] = []
+
+    def __call__(self) -> ScriptedSeoLlmClient:
+        return ScriptedSeoLlmClient(self.responses, calls=self.calls)
+
+
 class ScriptedSeoGateway:
     """A `SearchGateway` that answers each prompt with scripted documents.
 

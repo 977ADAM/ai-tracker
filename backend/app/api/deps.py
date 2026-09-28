@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +19,7 @@ from app.db.seo import SeoRepository
 from app.db.seo_settings import SeoSettingsRepository
 from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
+from app.domain.site_fetch import SiteFetcher
 from app.integrations.factory import build_provider
 from app.integrations.seo_llm import SeoLlmClient
 from app.integrations.site_fetcher import HttpxSiteFetcher
@@ -29,6 +31,7 @@ from app.service.runs import RunService
 from app.service.search import SearchService
 from app.service.search_settings import SearchSettingsService
 from app.service.seo import SeoService
+from app.service.seo_settings import SeoSettingsService
 
 CONNECT_TIMEOUT = 20
 READ_TIMEOUT = 60
@@ -50,6 +53,7 @@ class Container:
     search_client: httpx.AsyncClient
     seo: SeoRepository
     seo_service: SeoService
+    seo_settings: SeoSettingsService
 
 
 def build_container(
@@ -60,6 +64,12 @@ def build_container(
     provider_factory: ProviderFactory | None = None,
     search_gateway: SearchGateway | None = None,
     search_settings_repository: SearchSettingsRepository | None = None,
+    seo_repository: SeoRepository | None = None,
+    seo_settings_repository: SeoSettingsRepository | None = None,
+    seo_settings_service: SeoSettingsService | None = None,
+    seo_service: SeoService | None = None,
+    fetcher: SiteFetcher | None = None,
+    llm_factory: Callable[[], SeoLlmClient | None] | None = None,
 ) -> Container:
     secret_store = secrets or KeyringSecrets()
     if repository is None:
@@ -88,41 +98,45 @@ def build_container(
     run_repository.recover_unfinished()
     # The SEO repository owns the version-3 migration of the same file, so it
     # always initializes after the run repository opened and recovered.
-    seo_repository = SeoRepository(Path(settings.config_dir))
+    if seo_repository is None:
+        seo_repository = SeoRepository(Path(settings.config_dir))
     seo_repository.initialize()
     checks = CheckService(connections, factory)
     search = SearchService(None)
     search_settings = SearchSettingsService(
         search_settings_repository, search, search_client, gateway_override=search_gateway,
     )
-    # The SEO service owns the six-stage orchestrator. It captures the gateway
-    # and the service-LLM client once per run, so a settings change made while a
-    # run is in flight never swaps a collaborator underneath it.
-    seo_settings_repository = SeoSettingsRepository(
-        Path(settings.config_dir),
-        secret_store,
-        env_endpoint=settings.seo_llm_endpoint,
-        env_model=settings.seo_llm_model,
-        env_api_key=settings.seo_llm_api_key,
-        service_name=settings.service_name,
-    )
+    if seo_settings_repository is None:
+        seo_settings_repository = SeoSettingsRepository(
+            Path(settings.config_dir),
+            secret_store,
+            env_endpoint=settings.seo_llm_endpoint,
+            env_model=settings.seo_llm_model,
+            env_api_key=settings.seo_llm_api_key,
+            service_name=settings.service_name,
+        )
+    if seo_settings_service is None:
+        # The settings service shares the app's HTTP client and resolves its
+        # values lazily, so a settings change is visible to the next run.
+        seo_settings_service = SeoSettingsService(seo_settings_repository, search_client)
 
-    def llm_factory() -> SeoLlmClient | None:
-        resolved = seo_settings_repository.load()
-        if not resolved.configured or resolved.api_key is None:
-            return None
-        return SeoLlmClient(resolved.endpoint, resolved.api_key, resolved.model, search_client)
+    def resolved_llm_factory() -> SeoLlmClient | None:
+        return seo_settings_service.build_client()
 
-    seo_service = SeoService(
-        seo_repository,
-        seo_settings_repository,
-        llm_factory,
-        HttpxSiteFetcher(search_client),
-        search_settings,
-        connections,
-        factory,
-    )
-    seo_service.recover()
+    if seo_service is None:
+        # The orchestrator owns the six stages. It captures the gateway and the
+        # service-LLM client once per run, so a settings change made while a run
+        # is in flight never swaps a collaborator underneath it.
+        seo_service = SeoService(
+            seo_repository,
+            seo_settings_repository,
+            llm_factory or resolved_llm_factory,
+            fetcher if fetcher is not None else HttpxSiteFetcher(search_client),
+            search_settings,
+            connections,
+            factory,
+        )
+        seo_service.recover()
     return Container(
         settings=settings,
         repository=repository,
@@ -136,6 +150,7 @@ def build_container(
         search_client=search_client,
         seo=seo_repository,
         seo_service=seo_service,
+        seo_settings=seo_settings_service,
     )
 
 
@@ -178,6 +193,10 @@ def get_seo_service(container: ContainerDep) -> SeoService:
     return container.seo_service
 
 
+def get_seo_settings_service(container: ContainerDep) -> SeoSettingsService:
+    return container.seo_settings
+
+
 ConnectionServiceDep = Annotated[ConnectionService, Depends(get_connection_service)]
 CheckServiceDep = Annotated[CheckService, Depends(get_check_service)]
 FormServiceDep = Annotated[FormService, Depends(get_form_service)]
@@ -186,3 +205,4 @@ SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
 SearchSettingsServiceDep = Annotated[SearchSettingsService, Depends(get_search_settings_service)]
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]
 SeoServiceDep = Annotated[SeoService, Depends(get_seo_service)]
+SeoSettingsServiceDep = Annotated[SeoSettingsService, Depends(get_seo_settings_service)]
