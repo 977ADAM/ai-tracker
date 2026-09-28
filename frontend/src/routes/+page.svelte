@@ -322,12 +322,48 @@
                                 {/each}
                             </select>
                             
-                            <button type="button" onclick={() => removeRegion(index)} aria-label={`Удалить регион ${index + 1}`} class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700">×</button></div>{/each}</div>
-                <button type="button" onclick={addRegion} disabled={regionRows.length >= MAX_REGIONS || !catalog.length} class="mt-4 inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">＋ Добавить регион</button>
-                {#if chosenRegions.length > 0}<p class="mt-3 text-xs text-muted"><span class="font-semibold text-ink" data-request-count>{requestCountLabel(yandexRequests)}</span> — по одному отложенному запросу на пару «вопрос × регион».</p>{/if}
+                            <button type="button" onclick={() => removeRegion(index)} aria-label={`Удалить регион ${index + 1}`} class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700">
+                                ×
+                            </button>
+                            
+                        </div>
+                    {/each}
+                </div>
+                
+                <button type="button" onclick={addRegion} disabled={regionRows.length >= MAX_REGIONS || !catalog.length} class="mt-4 inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">
+                    ＋ Добавить регион
+                </button>
+                
+                {#if chosenRegions.length > 0}
+                    <p class="mt-3 text-xs text-muted">
+                        <span class="font-semibold text-ink" data-request-count>
+                            {requestCountLabel(yandexRequests)}
+                        </span>
+                        — по одному отложенному запросу на пару «вопрос × регион».
+                    </p>
+                {/if}
             </fieldset>
-            {#if error}<p role="alert" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>{/if}
-            <div class="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6"><p class="max-w-xl text-xs leading-5 text-muted">Ответы и выдача отражают момент проверки. Прогон сохранится в истории.</p><button type="submit" disabled={loading || pendingRunId !== null || !data.form} class="inline-flex min-h-12 items-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white disabled:opacity-60">{loading ? 'Запускаем…' : pendingRunId ? 'Проверка выполняется' : 'Проверить бренд'}<span aria-hidden="true">↗</span></button></div>
+            
+            {#if error}
+                <p role="alert" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                    {error}
+                </p>
+            {/if}
+            
+            <div class="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
+                
+                <p class="max-w-xl text-xs leading-5 text-muted">
+                    Ответы и выдача отражают момент проверки. Прогон сохранится в истории.
+                </p>
+                <button type="submit" disabled={loading || pendingRunId !== null || !data.form} class="inline-flex min-h-12 items-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white disabled:opacity-60">
+                    {loading ? 'Запускаем…' : pendingRunId ? 'Проверка выполняется' : 'Проверить бренд'}
+                    <span aria-hidden="true">
+                        ↗
+                    </span>
+                    
+                </button>
+            
+            </div>
         </form>
     </section>
     {#if snapshot}<RunResults {snapshot} />{:else}<section class="mt-8 rounded-3xl border border-dashed border-line bg-white px-6 py-14 text-center shadow-sm"><h2 class="text-xl font-bold">Пока нет проверки</h2><p class="mt-2 text-sm text-muted">Запустите проверку или откройте сохранённый прогон из истории.</p></section>{/if}
