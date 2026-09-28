@@ -2,8 +2,9 @@
   import { onDestroy, onMount, untrack } from 'svelte';
   import RunResults from '$lib/components/RunResults.svelte';
   import RunHistory from '$lib/components/RunHistory.svelte';
-  import { MAX_REGIONS, requestCount, requestCountLabel, validateRun } from '$lib/search-form';
-  import type { FormConfig, PublicProvider, RunCreated, RunHistoryItem, RunHistoryPage, RunSnapshot, SearchRegion } from '$lib/types';
+  import { availableSearchEngines, enabledRegionTargets, MAX_REGIONS, requestCount, requestCountLabel, validateRun } from '$lib/search-form';
+  import type { SearchEngine } from '$lib/search-form';
+  import type { FormConfig, PublicProvider, RunCreated, RunHistoryItem, RunHistoryPage, RunSnapshot, SearchRegion, YandexSearchSettings } from '$lib/types';
 
   type Data = {
     providers: PublicProvider[];
@@ -11,10 +12,10 @@
     loadError: string;
     searchRegions?: SearchRegion[];
     searchRegionError?: string;
+    searchSettings: YandexSearchSettings | null;
+    searchSettingsError: string;
   };
   let { data }: { data: Data } = $props();
-
-  type SearchEngine = 'yandex';
 
   const POLL_INTERVAL_MS = 30_000;
   let selected = $state<string[]>(untrack(() => data.form?.default_provider_ids ?? []));
@@ -36,21 +37,18 @@
   let destroyed = false;
 
   const catalog = $derived(data.searchRegions ?? []);
-  const chosenRegions = $derived(regionRows.filter((value): value is number => typeof value === 'number'));
+  const availableEngines = $derived(availableSearchEngines(data.searchSettings));
+  const regionTargets = $derived(enabledRegionTargets(regionRows, regionEngines, availableEngines));
+  const chosenRegions = $derived(regionTargets.map((target) => target.region));
   const yandexRequests = $derived(requestCount(promptsText, chosenRegions));
-  const regionTargets = $derived(
-    regionRows
-      .map((region, index) => ({ region, engine: regionEngines[index] ?? 'yandex' }))
-      .filter((entry): entry is { region: number; engine: SearchEngine } => typeof entry.region === 'number')
-  );
 
   function toggleProvider(id: string) {
     selected = selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id];
   }
   function addRegion() {
-    if (regionRows.length < MAX_REGIONS) {
+    if (availableEngines.length && regionRows.length < MAX_REGIONS) {
       regionRows = [...regionRows, ''];
-      regionEngines = [...regionEngines, 'yandex'];
+      regionEngines = [...regionEngines, availableEngines[0]];
     }
   }
   function removeRegion(index: number) {
@@ -305,6 +303,13 @@
                         {data.searchRegionError}. Проверка моделей работает без него.
                     </p>
                 {/if}
+                {#if !availableEngines.length}
+                    <p class="mb-4 text-sm text-muted">
+                        {data.searchSettings ? 'Поиск в Яндексе отключён в настройках.' : 'Не удалось загрузить доступность Яндекса.'}
+                        Проверка моделей доступна.
+                    </p>
+                {/if}
+                {#if availableEngines.length}
                 <div class="space-y-3">
                     {#each regionRows as value, index (index)}
                         <div class="flex items-center gap-3" data-region-row>
@@ -314,7 +319,9 @@
                                 class="min-h-12 w-36 max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent"
                                 bind:value={regionEngines[index]}
                             >
-                                <option value="yandex">Яндекс</option>
+                                {#each availableEngines as engine}
+                                    <option value={engine}>{engine === 'yandex' ? 'Яндекс' : engine}</option>
+                                {/each}
                             </select>
 
                             <select
@@ -342,11 +349,12 @@
                         </div>
                     {/each}
                 </div>
+                {/if}
 
                 <button
                     type="button"
                     onclick={addRegion}
-                    disabled={regionRows.length >= MAX_REGIONS || !catalog.length}
+                    disabled={regionRows.length >= MAX_REGIONS || !catalog.length || !availableEngines.length}
                     class="mt-4 inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
                 >
                     ＋ Добавить регион

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { invalidateAll } from '$app/navigation';
 import SearchSettingsPanel from './SearchSettingsPanel.svelte';
 import type { YandexSearchSettings } from '$lib/types';
 
@@ -22,7 +23,7 @@ function response(yandex: YandexSearchSettings = settings) {
   return { ok: true, json: async () => ({ yandex }) };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe('SearchSettingsPanel', () => {
   it('shows enabled state, effective folder ID and independent credential sources without displaying a key', () => {
@@ -43,6 +44,7 @@ describe('SearchSettingsPanel', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Сохранить настройки' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ enabled: false });
+    await waitFor(() => expect(invalidateAll).toHaveBeenCalledOnce());
   });
 
   it('saves changed nonempty credentials and clears the key input', async () => {
@@ -74,6 +76,7 @@ describe('SearchSettingsPanel', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     expect(fetch.mock.calls[0][0]).toBe('/api/search/settings/credentials');
     expect(fetch.mock.calls[0][1]).toEqual({ method: 'DELETE' });
+    await waitFor(() => expect(invalidateAll).toHaveBeenCalledOnce());
   });
 
   it('disables mutations on load errors and during a pending save, then reports failures safely', async () => {
