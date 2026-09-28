@@ -9,6 +9,7 @@ import httpx
 
 from app.core.errors import ConfigurationError, StorageError
 from app.db.search_settings import SearchSettingsRepository
+from app.domain.search import SearchGateway
 from app.domain.search_settings import SearchSettings
 from app.integrations.yandex_search import YandexSearchGateway
 from app.service.search import SearchService
@@ -20,12 +21,14 @@ class SearchSettingsService:
         repository: SearchSettingsRepository,
         search: SearchService,
         client: httpx.AsyncClient,
+        *,
+        gateway_override: SearchGateway | None = None,
     ) -> None:
         self.repository = repository
         self.search = search
         self.client = client
+        self.gateway_override = gateway_override
         self._lock = RLock()
-        self.available = False
         try:
             self._configure(repository.load())
         except (ConfigurationError, StorageError):
@@ -37,7 +40,6 @@ class SearchSettingsService:
             try:
                 settings = self.repository.load()
             except (ConfigurationError, StorageError):
-                self.available = False
                 self.search.configure(None, True)
                 raise
             self._configure(settings)
@@ -56,11 +58,10 @@ class SearchSettingsService:
             return self._public(settings)
 
     def _configure(self, settings: SearchSettings) -> None:
-        gateway = None
-        if settings.api_key and settings.folder_id:
+        gateway = self.gateway_override
+        if gateway is None and settings.api_key and settings.folder_id:
             gateway = YandexSearchGateway(settings.api_key, settings.folder_id, self.client)
         self.search.configure(gateway, settings.enabled)
-        self.available = True
 
     @staticmethod
     def _public(settings: SearchSettings) -> dict[str, object]:

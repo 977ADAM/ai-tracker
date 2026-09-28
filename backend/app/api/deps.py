@@ -81,9 +81,9 @@ def build_container(
     run_repository.recover_unfinished()
     checks = CheckService(connections, factory)
     search = SearchService(None)
-    search_settings = SearchSettingsService(search_settings_repository, search, search_client)
-    if search_gateway is not None and search_settings.available:
-        search.configure(search_gateway, search.enabled)
+    search_settings = SearchSettingsService(
+        search_settings_repository, search, search_client, gateway_override=search_gateway,
+    )
     return Container(
         settings=settings,
         repository=repository,

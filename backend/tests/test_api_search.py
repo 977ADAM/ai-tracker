@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+from app.api.deps import get_container
+from app.db.search_settings import SearchSettingsRepository
 from tests.fakes import FakeSearchGateway
 
 FOUND_REGION = 1
@@ -142,3 +144,49 @@ def test_disabled_yandex_rejects_direct_search_without_submission(make_client):
         assert response.status_code == 400
         assert "выключен" in response.json()["detail"]
     assert gateway.submitted == []
+
+
+def test_settings_get_preserves_injected_search_gateway(make_client, settings, secrets):
+    gateway = FakeSearchGateway(pending_polls=0)
+    repository = SearchSettingsRepository(
+        settings.config_dir, secrets, env_api_key="env-key",
+        env_folder_id="env-folder", service_name=settings.service_name,
+    )
+    with make_client(search_gateway=gateway, search_settings_repository=repository) as client:
+        assert client.get("/api/search/settings").status_code == 200
+        assert client.app.dependency_overrides[get_container]().search.gateway is gateway
+        created = client.post("/api/search", json=BODY)
+        assert created.status_code == 202
+        assert wait_for(client, created.json()["id"], completed=1)["status"] == "done"
+    assert gateway.submitted == [("цветы", FOUND_REGION)]
+
+
+def test_injected_gateway_returns_after_search_settings_recover(make_client, config_dir):
+    gateway = FakeSearchGateway(pending_polls=0)
+    path = config_dir / "search-settings.json"
+    path.write_text("{", encoding="utf-8")
+    with make_client(search_gateway=gateway) as client:
+        assert client.get("/api/search/settings").status_code == 503
+        assert client.post("/api/search", json=BODY).status_code == 400
+        assert gateway.submitted == []
+        path.write_text('{"enabled": true}', encoding="utf-8")
+        assert client.get("/api/search/settings").status_code == 200
+        created = client.post("/api/search", json=BODY)
+        assert created.status_code == 202
+        wait_for(client, created.json()["id"], completed=1)
+    assert gateway.submitted == [("цветы", FOUND_REGION)]
+
+
+def test_injected_gateway_respects_disabled_setting_and_reenable(make_client):
+    gateway = FakeSearchGateway(pending_polls=0)
+    with make_client(search_gateway=gateway) as client:
+        assert client.put("/api/search/settings", json={"enabled": False}).status_code == 200
+        disabled = client.post("/api/search", json=BODY)
+        assert disabled.status_code == 400
+        assert "выключен" in disabled.json()["detail"]
+        assert gateway.submitted == []
+        assert client.put("/api/search/settings", json={"enabled": True}).status_code == 200
+        created = client.post("/api/search", json=BODY)
+        assert created.status_code == 202
+        wait_for(client, created.json()["id"], completed=1)
+    assert gateway.submitted == [("цветы", FOUND_REGION)]
