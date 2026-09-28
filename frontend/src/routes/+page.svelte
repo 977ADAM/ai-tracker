@@ -14,12 +14,15 @@
   };
   let { data }: { data: Data } = $props();
 
+  type SearchEngine = 'yandex';
+
   const POLL_INTERVAL_MS = 30_000;
   let selected = $state<string[]>(untrack(() => data.form?.default_provider_ids ?? []));
   let brand = $state('');
   let domain = $state('');
   let promptsText = $state('');
   let regionRows = $state<(number | '')[]>([]);
+  let regionEngines = $state<SearchEngine[]>([]);
   let loading = $state(false);
   let error = $state(untrack(() => data.loadError));
   let historyError = $state('');
@@ -35,12 +38,25 @@
   const catalog = $derived(data.searchRegions ?? []);
   const chosenRegions = $derived(regionRows.filter((value): value is number => typeof value === 'number'));
   const yandexRequests = $derived(requestCount(promptsText, chosenRegions));
+  const regionTargets = $derived(
+    regionRows
+      .map((region, index) => ({ region, engine: regionEngines[index] ?? 'yandex' }))
+      .filter((entry): entry is { region: number; engine: SearchEngine } => typeof entry.region === 'number')
+  );
 
   function toggleProvider(id: string) {
     selected = selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id];
   }
-  function addRegion() { if (regionRows.length < MAX_REGIONS) regionRows = [...regionRows, '']; }
-  function removeRegion(index: number) { regionRows = regionRows.filter((_, position) => position !== index); }
+  function addRegion() {
+    if (regionRows.length < MAX_REGIONS) {
+      regionRows = [...regionRows, ''];
+      regionEngines = [...regionEngines, 'yandex'];
+    }
+  }
+  function removeRegion(index: number) {
+    regionRows = regionRows.filter((_, position) => position !== index);
+    regionEngines = regionEngines.filter((_, position) => position !== index);
+  }
   function regionTaken(id: number, index: number): boolean {
     return regionRows.some((value, position) => position !== index && value === id);
   }
@@ -156,7 +172,14 @@
     try {
       const response = await fetch('/api/runs', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ brand, domain, prompts_text: promptsText, provider_ids: selected, regions: chosenRegions })
+        body: JSON.stringify({
+          brand,
+          domain,
+          prompts_text: promptsText,
+          provider_ids: selected,
+          regions: chosenRegions,
+          region_targets: regionTargets,
+        })
       });
       const value: unknown = await response.json();
       if (!response.ok) throw new Error(detail(value, 'Не удалось запустить проверку'));
@@ -206,14 +229,9 @@
                 <div>
                     <label for="prompts" class="mb-2 block text-sm font-semibold text-ink">
                         Вопросы клиентов
-
-                        <span class="text-rose-600">
-                            *
-                        </span>
-
+                        <span class="text-rose-600">*</span>
                     </label>
                     <textarea id="prompts" class="block min-h-56 w-full resize-y rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm leading-6 text-ink outline-none focus:border-accent" bind:value={promptsText}></textarea>
-
                     <p class="mt-2 text-xs text-muted">
                         Каждый вопрос — с новой строки. До {data.form?.limits.max_prompts ?? 20} вопросов.
                     </p>
@@ -222,13 +240,9 @@
                 <div class="space-y-5">
                     <div>
                         <label for="brand" class="mb-2 block text-sm font-semibold text-ink">
-
                             Название бренда
-
                             <span class="font-normal text-muted">для проверки моделей</span>
-
                         </label>
-
                         <input
                             id="brand"
                             class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent"
@@ -237,14 +251,12 @@
                             bind:value={brand}
                         />
                         <p class="mt-2 text-xs text-muted">Ищем название в ответах моделей.</p>
-
                     </div>
 
                     <div>
                         <label for="domain" class="mb-2 block text-sm font-semibold text-ink">
                             Сайт
                         </label>
-
                         <input
                             id="domain"
                             class="block w-full rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent"
@@ -253,47 +265,37 @@
                             bind:value={domain}
                         />
                         <p class="mt-2 text-xs text-muted">Совпадение ищется по хосту и его поддоменам.</p>
-
                     </div>
                 </div>
             </div>
 
             <fieldset class="border-t border-line pt-6">
                 <legend class="mb-3 text-sm font-semibold text-ink">Модели для проверки</legend>
-
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {#each data.providers as provider (provider.id)}
-
-                    <label class:opacity-60={!provider.configured} class="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-white px-4 py-3 hover:border-accent/50">
-                        <input
-                            type="checkbox"
-                            class="mt-1 size-4 accent-accent"
-                            checked={selected.includes(provider.id)}
-                            disabled={!provider.configured}
-                            onchange={() => toggleProvider(provider.id)}
-                        />
-
-                        <span class="min-w-0">
-                            <span class="block font-semibold text-ink">
-                                {provider.name}
+                        <label class:opacity-60={!provider.configured} class="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-white px-4 py-3 hover:border-accent/50">
+                            <input
+                                type="checkbox"
+                                class="mt-1 size-4 accent-accent"
+                                checked={selected.includes(provider.id)}
+                                disabled={!provider.configured}
+                                onchange={() => toggleProvider(provider.id)}
+                            />
+                            <span class="min-w-0">
+                                <span class="block font-semibold text-ink">{provider.name}</span>
+                                <span class="mt-0.5 block truncate text-xs text-muted">
+                                    {provider.configured ? provider.model : provider.status_label}
+                                </span>
                             </span>
-                            <span class="mt-0.5 block truncate text-xs text-muted">
-                                {provider.configured ? provider.model : provider.status_label}
-                            </span>
-
-                        </span>
-
-                    </label>
+                        </label>
                     {/each}
                 </div>
-
             </fieldset>
 
             <fieldset class="border-t border-line pt-6" aria-labelledby="regions-legend">
                 <legend id="regions-legend" class="mb-3 text-sm font-semibold text-ink">
                     Регионы для поиска в Яндексе
                 </legend>
-
                 <p class="mb-4 max-w-3xl text-xs leading-5 text-muted">
                     Добавьте до пяти регионов. Поиск проверит первую десятку по каждому вопросу и может занять несколько часов.
                 </p>
@@ -306,15 +308,22 @@
                 <div class="space-y-3">
                     {#each regionRows as value, index (index)}
                         <div class="flex items-center gap-3" data-region-row>
+                            <select
+                                id={`engine-${index}`}
+                                aria-label={`Поисковая система для региона ${index + 1}`}
+                                class="min-h-12 w-36 max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent"
+                                bind:value={regionEngines[index]}
+                            >
+                                <option value="yandex">Яндекс</option>
+                            </select>
 
-                            <label class="sr-only" for={`region-${index}`}>
-                                Регион {index + 1}
-                            </label>
-
-                            <select id={`region-${index}`} class="min-h-12 w-full max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent" bind:value={regionRows[index]}>
-                                <option value="">
-                                    Выберите регион
-                                </option>
+                            <select
+                                id={`region-${index}`}
+                                aria-label={`Регион ${index + 1}`}
+                                class="min-h-12 w-48 max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent"
+                                bind:value={regionRows[index]}
+                            >
+                                <option value="">Выберите регион</option>
                                 {#each catalog as region (region.id)}
                                     <option value={region.id} disabled={regionTaken(region.id, index)}>
                                         {region.name}
@@ -322,15 +331,24 @@
                                 {/each}
                             </select>
 
-                            <button type="button" onclick={() => removeRegion(index)} aria-label={`Удалить регион ${index + 1}`} class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700">
+                            <button
+                                type="button"
+                                onclick={() => removeRegion(index)}
+                                aria-label={`Удалить регион ${index + 1}`}
+                                class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700"
+                            >
                                 ×
                             </button>
-
                         </div>
                     {/each}
                 </div>
 
-                <button type="button" onclick={addRegion} disabled={regionRows.length >= MAX_REGIONS || !catalog.length} class="mt-4 inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">
+                <button
+                    type="button"
+                    onclick={addRegion}
+                    disabled={regionRows.length >= MAX_REGIONS || !catalog.length}
+                    class="mt-4 inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
                     ＋ Добавить регион
                 </button>
 
@@ -351,34 +369,36 @@
             {/if}
 
             <div class="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
-
                 <p class="max-w-xl text-xs leading-5 text-muted">
                     Ответы и выдача отражают момент проверки. Прогон сохранится в истории.
                 </p>
-                <button type="submit" disabled={loading || pendingRunId !== null || !data.form} class="inline-flex min-h-12 items-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white disabled:opacity-60">
+                <button
+                    type="submit"
+                    disabled={loading || pendingRunId !== null || !data.form}
+                    class="inline-flex min-h-12 items-center gap-3 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white disabled:opacity-60"
+                >
                     {loading ? 'Запускаем…' : pendingRunId ? 'Проверка выполняется' : 'Проверить бренд'}
-                    <span aria-hidden="true">
-                        ↗
-                    </span>
-
+                    <span aria-hidden="true">↗</span>
                 </button>
-
             </div>
         </form>
     </section>
+
     {#if snapshot}
         <RunResults {snapshot} />
-        {:else}
+    {:else}
         <section class="mt-8 rounded-3xl border border-dashed border-line bg-white px-6 py-14 text-center shadow-sm">
             <h2 class="text-xl font-bold">Пока нет проверки</h2>
             <p class="mt-2 text-sm text-muted">Запустите проверку или откройте сохранённый прогон из истории.</p>
         </section>
     {/if}
+
     {#if historyError}
         <p role="alert" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             {historyError}
         </p>
     {/if}
+
     <RunHistory items={history} {nextCursor} onView={(id) => void loadRun(id)} onDelete={(id) => void deleteRun(id)} onMore={() => void loadMore()} loading={historyLoading} />
 
     <aside class="mt-8 rounded-2xl border border-line bg-accent-soft px-6 py-5 text-sm leading-6 text-ink">
