@@ -113,6 +113,7 @@ def test_openapi_documents_every_operation(client):
         "/api/form", "/api/providers", "/api/providers/{connection_id}", "/api/check",
         "/api/providers/settings", "/api/providers/settings/file", "/api/providers/settings/{group_id}",
         "/api/search", "/api/search/regions", "/api/search/{job_id}",
+        "/api/search/settings", "/api/search/settings/credentials",
         "/api/runs", "/api/runs/{run_id}", "/api/runs/{run_id}/export.csv",
     }
     for path, operations in spec["paths"].items():
@@ -127,5 +128,6 @@ def test_openapi_documents_every_operation(client):
             assert "422" not in operation["responses"], (method, path)
 
     for name in ("CheckRequest", "CheckResponse", "ProviderWriteRequest", "ProviderResponse", "FormResponse", "ErrorResponse",
-                 "RunRequest", "RunCreatedResponse", "RunSnapshotResponse", "RunHistoryPage"):
+                 "RunRequest", "RunCreatedResponse", "RunSnapshotResponse", "RunHistoryPage",
+                 "SearchSettingsWriteRequest", "SearchSettingsResponse", "YandexSettingsResponse"):
         assert name in spec["components"]["schemas"]

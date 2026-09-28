@@ -1,11 +1,127 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   loadPageData, proxyJson, publicConfigurationFile, publicSearchRegions, publicSearchSnapshot,
-  publicSettingsProvider, searchPath, settingsProviderPath
+  publicSettingsProvider, publicSearchSettings, searchPath, settingsProviderPath
   , publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv
 } from './python-api';
 
 afterEach(() => vi.unstubAllGlobals());
+
+const publicSearchState = {
+  yandex: { enabled: true, folder_id: 'folder-1', has_api_key: true,
+    api_key_source: 'ui', folder_id_source: 'env' }
+};
+
+describe('search settings BFF', () => {
+  it('projects exactly the public settings fields and drops a returned key', () => {
+    expect(publicSearchSettings({ yandex: { ...publicSearchState.yandex, api_key: 'secret', extra: 'private' }, extra: 'private' }))
+      .toEqual(publicSearchState);
+  });
+
+  it('rejects malformed public settings rather than inventing defaults', () => {
+    for (const value of [
+      {}, { yandex: { ...publicSearchState.yandex, enabled: 'true' } },
+      { yandex: { ...publicSearchState.yandex, folder_id: 1 } },
+      { yandex: { ...publicSearchState.yandex, has_api_key: 'yes' } },
+      { yandex: { ...publicSearchState.yandex, api_key_source: 'other' } },
+      { yandex: { ...publicSearchState.yandex, folder_id_source: null } }
+    ]) expect(() => publicSearchSettings(value)).toThrow();
+  });
+
+  it('proxies GET and PUT with an exact safe response and an unchanged write body', async () => {
+    const fetchSpy = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      yandex: { ...publicSearchState.yandex, api_key: 'secret' }
+    }), { headers: { 'content-type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchSpy);
+    const get = await proxyJson(new Request('http://127.0.0.1:5173/api/search/settings'), '/api/search/settings', 'GET');
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual(publicSearchState);
+    const put = await proxyJson(new Request('http://127.0.0.1:5173/api/search/settings', {
+      method: 'PUT', headers: { origin: 'http://127.0.0.1:5173', 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false, api_key: 'new-key' })
+    }), '/api/search/settings', 'PUT');
+    expect(await put.json()).toEqual(publicSearchState);
+    expect(fetchSpy).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/search/settings',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false, api_key: 'new-key' }) }));
+  });
+
+  it('proxies credentials DELETE without a request body and projects its 200 response', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify(publicSearchState),
+      { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const response = await proxyJson(new Request('http://127.0.0.1:5173/api/search/settings/credentials',
+      { method: 'DELETE' }), '/api/search/settings/credentials', 'DELETE');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(publicSearchState);
+    expect(fetchSpy).toHaveBeenCalledWith('http://127.0.0.1:8000/api/search/settings/credentials',
+      expect.objectContaining({ method: 'DELETE', body: undefined }));
+  });
+
+  it('blocks cross-origin writes and unsupported settings methods', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const forged = new Request('http://127.0.0.1:5173/api/search/settings', {
+      method: 'PUT', headers: { origin: 'https://other.example', 'content-type': 'application/json' }, body: '{}'
+    });
+    expect((await proxyJson(forged, '/api/search/settings', 'PUT')).status).toBe(403);
+    const forgedDelete = new Request('http://127.0.0.1:5173/api/search/settings/credentials', {
+      method: 'DELETE', headers: { origin: 'https://other.example' }
+    });
+    expect((await proxyJson(forgedDelete, '/api/search/settings/credentials', 'DELETE')).status).toBe(403);
+    expect((await proxyJson(new Request('http://127.0.0.1:5173/api/search/settings'),
+      '/api/search/settings', 'DELETE')).status).toBe(405);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns a safe error when Python sends malformed settings or a secret in an error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ yandex: { enabled: true, api_key: 'secret' } }),
+      { headers: { 'content-type': 'application/json' } })).mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'secret-key' }),
+      { status: 500, headers: { 'content-type': 'application/json' } })));
+    const request = new Request('http://127.0.0.1:5173/api/search/settings');
+    const malformed = await proxyJson(request, '/api/search/settings', 'GET');
+    expect(malformed.status).toBe(502);
+    expect(await malformed.text()).not.toContain('secret');
+    const failed = await proxyJson(request, '/api/search/settings', 'GET');
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain('secret-key');
+  });
+
+  it('loads search settings independently from model configuration', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).endsWith('/api/search/settings')) return Promise.resolve(new Response('nope', { status: 500 }));
+      if (String(url).endsWith('/api/search/regions')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/providers/settings')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/form')) return Promise.resolve(new Response(JSON.stringify({
+        limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 100, max_domain_length: 253 },
+        new_provider_fields: [], default_provider_ids: [], scope_options: []
+      }), { headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(new Response(JSON.stringify([
+        { id: 'p1', name: 'Demo', kind: 'openai', endpoint: 'https://api.example.com/chat/completions', model: 'm', configured: true }
+      ]), { headers: { 'content-type': 'application/json' } }));
+    }));
+    const data = await loadPageData();
+    expect(data.providers.map((provider) => provider.id)).toEqual(['p1']);
+    expect(data.form).not.toBeNull();
+    expect(data.loadError).toBe('');
+    expect(data.searchSettings).toBeNull();
+    expect(data.searchSettingsError).toBe('Настройки поисковых систем недоступны');
+  });
+
+  it('loads and projects valid search settings even when model configuration fails', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).endsWith('/api/search/settings')) return Promise.resolve(new Response(JSON.stringify({
+        yandex: { ...publicSearchState.yandex, api_key: 'secret' }
+      }), { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/search/regions')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(new Response('nope', { status: 500 }));
+    }));
+    const data = await loadPageData();
+    expect(data.searchSettings).toEqual(publicSearchState.yandex);
+    expect(data.searchSettings).not.toHaveProperty('api_key');
+    expect(data.searchSettingsError).toBe('');
+    expect(data.loadError).not.toBe('');
+  });
+});
 
 describe('provider settings BFF', () => {
   it('removes secrets from provider groups and model rows', () => {

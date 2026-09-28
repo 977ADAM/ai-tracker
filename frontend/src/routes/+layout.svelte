@@ -3,6 +3,7 @@
   import '../app.css';
   import ConfigsPanel from '$lib/components/ConfigsPanel.svelte';
   import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+  import SearchSettingsPanel from '$lib/components/SearchSettingsPanel.svelte';
 
   let { children, data } = $props();
 
@@ -14,6 +15,9 @@
   let configButton = $state<HTMLButtonElement | null>(null);
   let configPanel = $state<HTMLDivElement | null>(null);
   let configWindow = $state(false);
+  let activeTab = $state<'models' | 'search'>('models');
+  let modelTab = $state<HTMLButtonElement | null>(null);
+  let searchTab = $state<HTMLButtonElement | null>(null);
 
   function resetConfig() {
     configWindow = false;
@@ -21,7 +25,15 @@
 
   function open() {
     resetConfig();
+    activeTab = 'models';
     settingsOpen = true;
+  }
+
+  function onTabKeydown(event: KeyboardEvent) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    activeTab = event.key === 'Home' ? 'models' : event.key === 'End' ? 'search' : activeTab === 'models' ? 'search' : 'models';
+    (activeTab === 'models' ? modelTab : searchTab)?.focus();
   }
 
   function close() {
@@ -157,20 +169,46 @@
         </div>
 
         <div class="flex min-h-0 min-w-0 flex-1 flex-col sm:flex-row">
-          <nav aria-label="Разделы настроек" class="shrink-0 px-4 pb-2 sm:w-52 sm:pb-4 lg:w-56">
-            <span
-              aria-current="page"
-              class="inline-flex items-center gap-2.5 rounded-lg bg-shell-active px-3.5 py-2.5 text-sm font-semibold text-shell-ink sm:w-full"
+          <div role="tablist" aria-label="Разделы настроек" tabindex="-1" class="flex shrink-0 gap-1 px-4 pb-2 sm:w-52 sm:flex-col sm:pb-4 lg:w-56" onkeydown={onTabKeydown}>
+            <button
+              type="button"
+              id="settings-models-tab"
+              role="tab"
+              aria-controls="settings-models-panel"
+              aria-selected={activeTab === 'models'}
+              tabindex={activeTab === 'models' ? 0 : -1}
+              bind:this={modelTab}
+              onclick={() => (activeTab = 'models')}
+              class={`inline-flex min-h-11 items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-left text-sm font-semibold text-shell-ink transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent sm:w-full ${activeTab === 'models' ? 'bg-shell-active' : ''}`}
             >
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4 shrink-0" aria-hidden="true">
                 <path d="M4 5.5h12M4 10h12M4 14.5h7" stroke-linecap="round" />
               </svg>
               Модели
-            </span>
-          </nav>
+            </button>
+            <button
+              type="button"
+              id="settings-search-tab"
+              role="tab"
+              aria-controls="settings-search-panel"
+              aria-selected={activeTab === 'search'}
+              tabindex={activeTab === 'search' ? 0 : -1}
+              bind:this={searchTab}
+              onclick={() => (activeTab = 'search')}
+              class={`inline-flex min-h-11 items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-left text-sm font-semibold text-shell-ink transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent sm:w-full ${activeTab === 'search' ? 'bg-shell-active' : ''}`}
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4 shrink-0" aria-hidden="true">
+                <circle cx="8.5" cy="8.5" r="5" /><path d="m12.2 12.2 4.2 4.2" stroke-linecap="round" />
+              </svg>
+              Поисковые системы
+            </button>
+          </div>
 
-          <div class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
+          <div id="settings-models-panel" role="tabpanel" aria-labelledby="settings-models-tab" tabindex="0" hidden={activeTab !== 'models'} class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
             <SettingsPanel data={data} />
+          </div>
+          <div id="settings-search-panel" role="tabpanel" aria-labelledby="settings-search-tab" tabindex="0" hidden={activeTab !== 'search'} class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
+            <SearchSettingsPanel settings={data.searchSettings} loadError={data.searchSettingsError} />
           </div>
         </div>
       </div>

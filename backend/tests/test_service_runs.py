@@ -184,3 +184,41 @@ async def test_read_failure_cancels_pending_paid_search(tmp_path, repository, se
     assert len(gateway.submitted) == submitted
     await runs.close()
     await search.close()
+
+
+@pytest.mark.anyio
+async def test_search_storage_failure_cancels_waiting_submissions_before_yield(tmp_path, repository, settings):
+    release_waiters = asyncio.Event()
+
+    class GatedGateway(FakeGateway):
+        async def submit(self, prompt, region):
+            if region == 1:
+                await asyncio.sleep(0)
+            else:
+                await release_waiters.wait()
+            return await super().submit(prompt, region)
+
+    gateway = GatedGateway(polls_before_answer=0)
+    runs, _factory, search = make_runs(tmp_path, repository, settings, gateway)
+
+    def fail(*_args):
+        release_waiters.set()
+        raise StorageError("storage unavailable")
+
+    runs.repository.save_search = fail
+    created = await runs.start({
+        "brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
+        "provider_ids": [], "regions": [1, 213, 2, 54, 65],
+    })
+    for _ in range(100):
+        if runs.stopping.is_set():
+            break
+        await asyncio.sleep(0)
+    assert runs.stopping.is_set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert gateway.submitted == [("цветы", 1)]
+    with pytest.raises(StorageError):
+        runs.snapshot(created["id"])
+    await runs.close()
+    await search.close()

@@ -138,6 +138,7 @@ async def test_a_found_pair_reports_its_rank_and_link():
         "prompt": "цветы",
         "region_id": FOUND_REGION,
         "region_name": "Москва и Московская область",
+        "engine": "yandex",
         "status": "found",
         "position": 2,
         "url": "https://shop.example.ru/page",
@@ -425,4 +426,32 @@ async def test_expiry_notifies_for_unfinished_job():
     with pytest.raises(SearchJobNotFound):
         search.snapshot(job["id"])
     assert expired == [job["id"]]
+    await search.close()
+
+@pytest.mark.anyio
+async def test_disabled_engine_rejects_without_upstream_submission():
+    gateway = FakeGateway(polls_before_answer=0)
+    search = service(gateway)
+    search.configure(gateway, False)
+
+    with pytest.raises(ConfigurationError, match="выключен"):
+        await search.start(payload())
+
+    assert gateway.submitted == []
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_reconfiguration_only_affects_jobs_started_after_it():
+    original = FakeGateway(polls_before_answer=0)
+    replacement = FakeGateway(polls_before_answer=0)
+    search = service(original)
+    first = await search.start(payload())
+    search.configure(replacement, True)
+    second = await search.start(payload(prompts_text="новый вопрос"))
+
+    assert (await settle(search, first["id"]))["status"] == "done"
+    assert (await settle(search, second["id"]))["status"] == "done"
+    assert original.submitted == [("цветы", FOUND_REGION)]
+    assert replacement.submitted == [("новый вопрос", FOUND_REGION)]
     await search.close()

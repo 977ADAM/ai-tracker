@@ -51,6 +51,8 @@ INVALID_QUESTIONS = "Укажите от 1 до 20 вопросов"
 INVALID_QUESTION_LENGTH = f"Каждый вопрос для поиска Яндекса должен содержать от 1 до {MAX_SEARCH_PROMPT_LENGTH} символов"
 INVALID_QUESTION_WORDS = f"Каждый вопрос для поиска Яндекса должен содержать не более {MAX_SEARCH_PROMPT_WORDS} слов"
 INVALID_REGIONS = f"Выберите от 1 до {MAX_REGIONS} разных регионов"
+INVALID_REGION_TARGETS = "Выберите поддерживаемую поисковую систему для каждого региона"
+SEARCH_ENGINES = frozenset({"yandex"})
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,7 @@ class SearchInput:
     host: str
     prompts: tuple[str, ...]
     regions: tuple[int, ...]
+    engines: tuple[str, ...]
 
     @property
     def request_count(self) -> int:
@@ -132,12 +135,35 @@ def normalize_search_request(payload: object) -> SearchInput:
         raise ValidationError(INVALID_SITE)
     site = domain.strip()
 
+    regions = _normalize_regions(payload.get("regions"))
     return SearchInput(
         domain=site,
         host=normalize_search_host(site),
         prompts=_normalize_prompts(payload),
-        regions=_normalize_regions(payload.get("regions")),
+        regions=regions,
+        engines=_normalize_region_targets(payload.get("region_targets"), regions),
     )
+
+
+def _normalize_region_targets(value: object, regions: tuple[int, ...]) -> tuple[str, ...]:
+    """Validate the selected engine for every requested region, defaulting old clients to Yandex."""
+    if value is None:
+        return ("yandex",) * len(regions)
+    if not isinstance(value, list) or len(value) != len(regions):
+        raise ValidationError(INVALID_REGION_TARGETS)
+    targets: dict[int, str] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValidationError(INVALID_REGION_TARGETS)
+        region, engine = item.get("region"), item.get("engine")
+        if isinstance(region, bool) or not isinstance(region, int) or not isinstance(engine, str) or engine not in SEARCH_ENGINES:
+            raise ValidationError(INVALID_REGION_TARGETS)
+        if region in targets:
+            raise ValidationError(INVALID_REGION_TARGETS)
+        targets[region] = engine
+    if set(targets) != set(regions):
+        raise ValidationError(INVALID_REGION_TARGETS)
+    return tuple(targets[region] for region in regions)
 
 
 def _host(hostname: str) -> str:

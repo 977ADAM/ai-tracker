@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { requestCount, requestCountLabel, validateRun } from './search-form';
+import { availableSearchEngines, enabledRegionTargets, requestCount, requestCountLabel, validateRun } from './search-form';
 
 const base = { brand: 'Бренд', domain: 'example.ru', promptsText: 'цветы', providerIds: ['p1'], regions: [] as number[] };
 
@@ -58,5 +58,24 @@ describe('request count', () => {
     expect(requestCountLabel(2)).toBe('2 запроса к Яндексу');
     expect(requestCountLabel(5)).toBe('5 запросов к Яндексу');
     expect(requestCountLabel(100)).toBe('100 запросов к Яндексу');
+  });
+});
+
+describe('search availability', () => {
+  const settings = { enabled: true, folder_id: null, has_api_key: false, api_key_source: 'none' as const, folder_id_source: 'none' as const };
+
+  it('offers Yandex when settings use the enabled default', () => {
+    expect(availableSearchEngines(settings)).toEqual(['yandex']);
+    expect(enabledRegionTargets([1, '', 213], ['yandex', 'yandex', 'yandex'], ['yandex']))
+      .toEqual([{ region: 1, engine: 'yandex' }, { region: 213, engine: 'yandex' }]);
+  });
+
+  it('omits stale Yandex regions when disabled and keeps a model-only run valid', () => {
+    const engines = availableSearchEngines({ ...settings, enabled: false });
+    const targets = enabledRegionTargets([1, 213], ['yandex', 'yandex'], engines);
+    expect(engines).toEqual([]);
+    expect(targets).toEqual([]);
+    expect(requestCount('первый\nвторой', targets.map((target) => target.region))).toBe(0);
+    expect(validateRun({ ...base, regions: targets.map((target) => target.region) })).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ class RunRequest(BaseModel):
     prompts_text: str | None = None
     provider_ids: list[str] = []
     regions: list[int] = []
+    region_targets: list[dict[str, object]] | None = None
 
 
 class RunCreatedResponse(BaseModel):
@@ -39,6 +40,7 @@ class SearchRunRow(BaseModel):
     prompt: str
     region_id: int
     region_name: str
+    engine: str = "yandex"
     status: str
     position: int | None
     url: str | None

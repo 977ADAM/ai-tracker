@@ -62,9 +62,44 @@ def test_active_run_refuses_delete_and_export(make_client):
         assert client.get(f"/api/runs/{run_id}/export.csv").status_code == 409
 
 
+def test_run_saves_the_selected_engine_with_each_search_result(make_client):
+    gateway = FakeSearchGateway(pending_polls=0)
+    with make_client(search_gateway=gateway, provider_factory=ProviderFactorySpy()) as client:
+        request = {**BODY, "provider_ids": [], "regions": [1],
+                   "region_targets": [{"region": 1, "engine": "yandex"}]}
+        created = client.post("/api/runs", json=request)
+        assert created.status_code == 202
+        snapshot = wait_done(client, created.json()["id"])
+        assert [row["engine"] for row in snapshot["search"]] == ["yandex", "yandex"]
+        assert [row["source"] for row in snapshot["summary_rows"]] == ["Яндекс", "Яндекс"]
+
+
+def test_run_rejects_an_unsupported_search_engine(make_client):
+    with make_client(search_gateway=FakeSearchGateway()) as client:
+        request = {**BODY, "provider_ids": [], "regions": [1],
+                   "region_targets": [{"region": 1, "engine": "google"}]}
+        response = client.post("/api/runs", json=request)
+        assert response.status_code == 400
+
+
 def test_invalid_run_and_cursor_errors(make_client):
     with make_client(search_gateway=FakeSearchGateway()) as client:
         assert client.post("/api/runs", json={**BODY, "provider_ids": [], "regions": []}).status_code == 400
         assert client.get("/api/runs?cursor=!!!").status_code == 400
         assert client.get("/api/runs/missing").status_code == 404
         assert client.delete("/api/runs/missing").status_code == 404
+
+
+def test_disabled_yandex_skips_search_but_combined_run_finishes_models(make_client):
+    gateway = FakeSearchGateway(pending_polls=0)
+    with make_client(search_gateway=gateway, provider_factory=ProviderFactorySpy()) as client:
+        response = client.put("/api/search/settings", json={"enabled": False})
+        assert response.status_code == 200
+        created = client.post("/api/runs", json=BODY)
+        assert created.status_code == 202
+        snapshot = wait_done(client, created.json()["id"])
+        assert gateway.submitted == []
+        assert snapshot["status"] == "done"
+        assert len(snapshot["models"]) == 2
+        assert all(row["status"] == "error" for row in snapshot["search"])
+        assert all("выключен" in row["error"] for row in snapshot["search"])
