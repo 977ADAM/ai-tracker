@@ -22,15 +22,21 @@ describe('settings dialog navigation', () => {
     expect(models.getAttribute('aria-selected')).toBe('true');
     expect(search.getAttribute('aria-selected')).toBe('false');
     expect(screen.getByRole('tabpanel', { name: 'Модели' })).toBeTruthy();
+    expect(document.getElementById(models.getAttribute('aria-controls')!)).toBeTruthy();
+    expect(document.getElementById(search.getAttribute('aria-controls')!)).toBeTruthy();
+    expect(document.getElementById(search.getAttribute('aria-controls')!)?.hidden).toBe(true);
 
     await fireEvent.click(search);
     expect(search.getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tabpanel', { name: 'Поисковые системы' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Яндекс' })).toBeTruthy();
+    expect(document.getElementById(models.getAttribute('aria-controls')!)?.hidden).toBe(true);
+    expect(document.getElementById(search.getAttribute('aria-controls')!)?.hidden).toBe(false);
 
     search.focus();
     await fireEvent.keyDown(search, { key: 'ArrowLeft' });
     expect(models.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(models);
+    expect(document.getElementById(models.getAttribute('aria-controls')!)?.hidden).toBe(false);
   });
 });

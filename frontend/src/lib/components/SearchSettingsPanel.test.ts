@@ -86,11 +86,13 @@ describe('SearchSettingsPanel', () => {
     const fetch = vi.fn().mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
     vi.stubGlobal('fetch', fetch);
     show();
+    await fireEvent.input(screen.getByLabelText('Новый API-ключ'), { target: { value: 'retry-secret' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Сохранить настройки' }));
     expect((screen.getByRole('button', { name: 'Сохраняем…' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Сбросить учётные данные' }) as HTMLButtonElement).disabled).toBe(true);
     reject(new Error('secret-key-leak'));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Не удалось сохранить настройки'));
     expect(screen.getByRole('alert').textContent).not.toContain('secret-key-leak');
+    expect((screen.getByLabelText('Новый API-ключ') as HTMLInputElement).value).toBe('retry-secret');
   });
 });

@@ -42,7 +42,6 @@
     const newFolder = folderId.trim();
     if (newKey) body.api_key = newKey;
     if (newFolder && newFolder !== (current.folder_id ?? '')) body.folder_id = newFolder;
-    apiKey = '';
     busy = true;
     feedback = null;
     try {
@@ -54,6 +53,7 @@
       current = await publicState(response);
       enabled = current.enabled;
       folderId = current.folder_id ?? '';
+      apiKey = '';
       await invalidateAll();
       feedback = { kind: 'notice', text: 'Настройки Яндекса сохранены' };
     } catch {

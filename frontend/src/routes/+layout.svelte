@@ -204,12 +204,11 @@
             </button>
           </div>
 
-          <div id={activeTab === 'models' ? 'settings-models-panel' : 'settings-search-panel'} role="tabpanel" aria-labelledby={activeTab === 'models' ? 'settings-models-tab' : 'settings-search-tab'} tabindex="0" class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
-            {#if activeTab === 'models'}
-              <SettingsPanel data={data} />
-            {:else}
-              <SearchSettingsPanel settings={data.searchSettings} loadError={data.searchSettingsError} />
-            {/if}
+          <div id="settings-models-panel" role="tabpanel" aria-labelledby="settings-models-tab" tabindex="0" hidden={activeTab !== 'models'} class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
+            <SettingsPanel data={data} />
+          </div>
+          <div id="settings-search-panel" role="tabpanel" aria-labelledby="settings-search-tab" tabindex="0" hidden={activeTab !== 'search'} class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
+            <SearchSettingsPanel settings={data.searchSettings} loadError={data.searchSettingsError} />
           </div>
         </div>
       </div>
