@@ -53,7 +53,11 @@ def decode_raw_data(value: object) -> bytes:
 
 
 def parse_documents(raw: bytes) -> tuple[SearchDocument, ...]:
-    """Extract the first-page documents in order; an error document is a failure."""
+    """Extract the first-page documents in order; an error document is a failure.
+
+    Each document keeps its ``<url>`` and its ``<title>``; a document without a
+    title element stores an empty string instead of a hostname or a guess.
+    """
     try:
         root = ET.fromstring(raw)
     except ET.ParseError as exc:
@@ -65,7 +69,10 @@ def parse_documents(raw: bytes) -> tuple[SearchDocument, ...]:
         url = element.findtext("url")
         if not isinstance(url, str) or not url.strip():
             raise ProviderError(RESULT_FAILED)
-        documents.append(SearchDocument(url=url.strip()))
+        title = element.findtext("title")
+        documents.append(
+            SearchDocument(url=url.strip(), title=title.strip() if isinstance(title, str) else "")
+        )
     return tuple(documents[:TOP_RESULTS])
 
 

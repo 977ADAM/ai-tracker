@@ -73,9 +73,15 @@ class SearchInput:
 
 @dataclass(frozen=True)
 class SearchDocument:
-    """One result document of a search response. Only its URL is needed."""
+    """One result document of a search response.
+
+    The old brand-check flow matches on ``url`` alone; the SEO report also keeps
+    the SERP ``title`` as evidence and stores an empty string when the response
+    has no title element.
+    """
 
     url: str
+    title: str = ""
 
 
 class SearchGateway(Protocol):

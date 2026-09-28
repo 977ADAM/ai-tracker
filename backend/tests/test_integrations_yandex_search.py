@@ -23,6 +23,16 @@ def raw_data(documents: int) -> str:
     return base64.b64encode(xml.encode("utf-8")).decode("ascii")
 
 
+def titled_raw_data(documents: list[tuple[str, str | None]]) -> str:
+    """Base64 XML where every document may carry a `<title>` element."""
+    docs = "".join(
+        f"<doc><url>{url}</url>{f'<title>{title}</title>' if title is not None else ''}</doc>"
+        for url, title in documents
+    )
+    xml = f"<yandexsearch><response><results><grouping>{docs}</grouping></results></response></yandexsearch>"
+    return base64.b64encode(xml.encode("utf-8")).decode("ascii")
+
+
 @asynccontextmanager
 async def gateway(handler, *, api_key: str = "test-key"):
     """A gateway over a mock transport, closed when the test leaves the block."""
@@ -84,6 +94,38 @@ async def test_keeps_only_the_first_ten_documents_in_order():
     assert len(documents) == 10
     assert documents[0].url == "https://site1.ru/page"
     assert documents[-1].url == "https://site10.ru/page"
+
+
+@pytest.mark.anyio
+async def test_reads_the_document_titles_in_order_and_defaults_to_empty():
+    def handler(request):
+        return httpx.Response(200, json={"done": True, "response": {"rawData": titled_raw_data([
+            ("https://site1.ru/page", "Первый результат"),
+            ("https://site2.ru/page", None),
+        ])}})
+
+    async with gateway(handler) as client_gateway:
+        documents = await client_gateway.result("operation-1")
+    assert [(document.url, document.title) for document in documents] == [
+        ("https://site1.ru/page", "Первый результат"),
+        ("https://site2.ru/page", ""),
+    ]
+
+
+def test_parse_documents_strips_titles_and_keeps_the_document_order():
+    raw = (
+        '<yandexsearch><doc><url>https://a.ru</url><title>  Заголовок  </title></doc>'
+        "<doc><url>https://b.ru</url><title></title></doc>"
+        "<doc><url>https://c.ru</url></doc></yandexsearch>"
+    ).encode()
+
+    documents = parse_documents(raw)
+
+    assert [(document.url, document.title) for document in documents] == [
+        ("https://a.ru", "Заголовок"),
+        ("https://b.ru", ""),
+        ("https://c.ru", ""),
+    ]
 
 
 def test_a_document_without_a_url_is_a_malformed_result():

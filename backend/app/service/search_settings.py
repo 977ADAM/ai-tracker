@@ -57,6 +57,21 @@ class SearchSettingsService:
             self._configure(settings)
             return self._public(settings)
 
+    def gateway_snapshot(self) -> SearchGateway | None:
+        """Return the gateway currently configured for new jobs, or None.
+
+        The orchestrator captures this value once per run, so a settings change
+        made while a run is in flight never swaps the gateway underneath it. No
+        credential ever leaves this method: only the configured adapter.
+        """
+        with self._lock:
+            return self.search.gateway
+
+    def enabled(self) -> bool:
+        """Whether new Yandex jobs may be started at all."""
+        with self._lock:
+            return self.search.enabled
+
     def _configure(self, settings: SearchSettings) -> None:
         gateway = self.gateway_override
         if gateway is None and settings.api_key and settings.folder_id:

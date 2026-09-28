@@ -86,6 +86,7 @@ CHILD_TABLES = (
     "seo_search_rows",
     "seo_candidate_hits",
     "seo_model_rows",
+    "seo_seed_rows",
 )
 
 SCHEMA = """
@@ -177,6 +178,14 @@ CREATE TABLE IF NOT EXISTS seo_model_rows (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (analysis_id, connection_id, query_index)
 );
+CREATE TABLE IF NOT EXISTS seo_seed_rows (
+    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
+    seed_index INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    operation_id TEXT,
+    error TEXT,
+    PRIMARY KEY (analysis_id, seed_index)
+);
 """
 
 COUNTER_SELECT = (
@@ -193,10 +202,12 @@ class ResumePlan:
     """What a restarted process may still do for one unfinished analysis.
 
     ``submitted`` holds ``(query_index, operation_id)`` of deferred Yandex
-    operations to poll without submitting them again; ``unsubmitted_query_indexes``
-    holds rows that were never sent and must be marked interrupted;
-    ``has_unfinished_model_rows`` reports queued model calls that are never
-    replayed after a restart. ``report_ready`` means the report stage already
+    operations of generated queries to poll without submitting them again;
+    ``submitted_seeds`` holds ``(seed_index, operation_id)`` of the key-query
+    operations that were already paid for in stage 2. ``unsubmitted_query_indexes``
+    holds generated-query rows that were never sent and must be marked
+    interrupted; ``has_unfinished_model_rows`` reports queued model calls that are
+    never replayed after a restart. ``report_ready`` means the report stage already
     finished, so a resumed analysis may end up completed instead of interrupted.
     """
 
@@ -206,6 +217,7 @@ class ResumePlan:
     unsubmitted_query_indexes: tuple[int, ...]
     has_unfinished_model_rows: bool
     report_ready: bool
+    submitted_seeds: tuple[tuple[int, str], ...] = ()
 
 
 class SeoRepository:
@@ -458,6 +470,37 @@ class SeoRepository:
                 (analysis_id, query_index, status, operation, position, url, message, now),
             )
 
+    def save_seed_row(
+        self,
+        analysis_id: str,
+        seed_index: int,
+        *,
+        status: SeoRowOutcome,
+        operation_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Upsert one stage-2 key-query row.
+
+        As with a generated-query row, submitting the deferred operation stores
+        the pending status together with its ``operation_id``, and the later
+        outcome keeps that ID through ``COALESCE`` so a restart still knows which
+        key searches were already paid for and must only be polled again.
+        """
+        _require_index(seed_index)
+        _require_row_status(status)
+        operation = _optional_str(operation_id)
+        message = _optional_str(error)
+        with self._connection(write=True) as connection:
+            self._require_analysis(connection, analysis_id)
+            connection.execute(
+                "INSERT INTO seo_seed_rows (analysis_id, seed_index, status, operation_id, error) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(analysis_id, seed_index) DO UPDATE SET status=excluded.status, "
+                "operation_id=COALESCE(excluded.operation_id, seo_seed_rows.operation_id), "
+                "error=excluded.error",
+                (analysis_id, seed_index, status, operation, message),
+            )
+
     def save_candidate_hits(
         self, analysis_id: str, query_index: int, hits: Sequence[CandidateHit],
     ) -> None:
@@ -570,9 +613,24 @@ class SeoRepository:
                 (now, analysis_id),
             )
             connection.execute(
+                f"UPDATE seo_seed_rows SET status='cancelled' "
+                f"WHERE analysis_id=? AND status IN {PENDING_SQL}",
+                (analysis_id,),
+            )
+            connection.execute(
                 f"UPDATE seo_model_rows SET status='cancelled', updated_at=? "
                 f"WHERE analysis_id=? AND status IN {PENDING_SQL}",
                 (now, analysis_id),
+            )
+
+    def running_analysis_ids(self) -> tuple[str, ...]:
+        """Return the IDs of analyses a restarted process may still resume."""
+        with self._connection() as connection:
+            return tuple(
+                row["id"]
+                for row in connection.execute(
+                    "SELECT id FROM seo_analyses WHERE status='running' ORDER BY created_at, id"
+                )
             )
 
     def mark_interrupted(self, analysis_id: str) -> None:
@@ -610,6 +668,11 @@ class SeoRepository:
             f"UPDATE seo_search_rows SET status='interrupted', updated_at=? "
             f"WHERE analysis_id=? {guard}AND status IN {PENDING_SQL}",
             (now, analysis_id),
+        )
+        connection.execute(
+            f"UPDATE seo_seed_rows SET status='interrupted' "
+            f"WHERE analysis_id=? {guard}AND status IN {PENDING_SQL}",
+            (analysis_id,),
         )
         connection.execute(
             f"UPDATE seo_model_rows SET status='interrupted', updated_at=? "
@@ -793,6 +856,14 @@ class SeoRepository:
                     (analysis_id,),
                 )
             )
+            submitted_seeds = tuple(
+                (item["seed_index"], item["operation_id"])
+                for item in connection.execute(
+                    "SELECT seed_index, operation_id FROM seo_seed_rows WHERE analysis_id=? "
+                    f"AND operation_id IS NOT NULL AND status IN {PENDING_SQL} ORDER BY seed_index",
+                    (analysis_id,),
+                )
+            )
             unfinished_models = connection.execute(
                 f"SELECT count(*) FROM seo_model_rows WHERE analysis_id=? AND status IN {PENDING_SQL}",
                 (analysis_id,),
@@ -804,6 +875,7 @@ class SeoRepository:
                 unsubmitted_query_indexes=unsubmitted,
                 has_unfinished_model_rows=unfinished_models > 0,
                 report_ready=self._report_ready(connection, analysis_id, row["status"]),
+                submitted_seeds=submitted_seeds,
             )
 
     @staticmethod

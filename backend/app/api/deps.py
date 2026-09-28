@@ -15,9 +15,12 @@ from app.db.runs import RunRepository
 from app.db.search_settings import SearchSettingsRepository
 from app.db.secrets import KeyringSecrets, SecretStore
 from app.db.seo import SeoRepository
+from app.db.seo_settings import SeoSettingsRepository
 from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
 from app.integrations.factory import build_provider
+from app.integrations.seo_llm import SeoLlmClient
+from app.integrations.site_fetcher import HttpxSiteFetcher
 from app.service.checks import CheckService
 from app.service.connections import ConnectionService
 from app.service.form import FormService
@@ -25,6 +28,7 @@ from app.service.provider_settings import ProviderSettingsService
 from app.service.runs import RunService
 from app.service.search import SearchService
 from app.service.search_settings import SearchSettingsService
+from app.service.seo import SeoService
 
 CONNECT_TIMEOUT = 20
 READ_TIMEOUT = 60
@@ -45,6 +49,7 @@ class Container:
     search_settings: SearchSettingsService
     search_client: httpx.AsyncClient
     seo: SeoRepository
+    seo_service: SeoService
 
 
 def build_container(
@@ -90,6 +95,34 @@ def build_container(
     search_settings = SearchSettingsService(
         search_settings_repository, search, search_client, gateway_override=search_gateway,
     )
+    # The SEO service owns the six-stage orchestrator. It captures the gateway
+    # and the service-LLM client once per run, so a settings change made while a
+    # run is in flight never swaps a collaborator underneath it.
+    seo_settings_repository = SeoSettingsRepository(
+        Path(settings.config_dir),
+        secret_store,
+        env_endpoint=settings.seo_llm_endpoint,
+        env_model=settings.seo_llm_model,
+        env_api_key=settings.seo_llm_api_key,
+        service_name=settings.service_name,
+    )
+
+    def llm_factory() -> SeoLlmClient | None:
+        resolved = seo_settings_repository.load()
+        if not resolved.configured or resolved.api_key is None:
+            return None
+        return SeoLlmClient(resolved.endpoint, resolved.api_key, resolved.model, search_client)
+
+    seo_service = SeoService(
+        seo_repository,
+        seo_settings_repository,
+        llm_factory,
+        HttpxSiteFetcher(search_client),
+        search_settings,
+        connections,
+        factory,
+    )
+    seo_service.recover()
     return Container(
         settings=settings,
         repository=repository,
@@ -102,6 +135,7 @@ def build_container(
         search_settings=search_settings,
         search_client=search_client,
         seo=seo_repository,
+        seo_service=seo_service,
     )
 
 
@@ -140,6 +174,10 @@ def get_run_service(container: ContainerDep) -> RunService:
     return container.runs
 
 
+def get_seo_service(container: ContainerDep) -> SeoService:
+    return container.seo_service
+
+
 ConnectionServiceDep = Annotated[ConnectionService, Depends(get_connection_service)]
 CheckServiceDep = Annotated[CheckService, Depends(get_check_service)]
 FormServiceDep = Annotated[FormService, Depends(get_form_service)]
@@ -147,3 +185,4 @@ ProviderSettingsServiceDep = Annotated[ProviderSettingsService, Depends(get_prov
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
 SearchSettingsServiceDep = Annotated[SearchSettingsService, Depends(get_search_settings_service)]
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]
+SeoServiceDep = Annotated[SeoService, Depends(get_seo_service)]

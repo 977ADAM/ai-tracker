@@ -36,6 +36,7 @@ SEO_TABLES = {
     "seo_search_rows",
     "seo_candidate_hits",
     "seo_model_rows",
+    "seo_seed_rows",
 }
 LEGACY_SCHEMA = """
 CREATE TABLE runs (
@@ -168,6 +169,26 @@ def test_initialize_creates_seo_tables_and_reaches_version_three(tmp_path):
         assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     repository.initialize()
     assert user_version(tmp_path / DB_FILE) == 3
+
+
+def test_initialize_adds_the_seed_table_to_an_existing_version_three_file(tmp_path):
+    path = tmp_path / DB_FILE
+    seo_repo(tmp_path)
+    raw = sqlite3.connect(path)
+    try:
+        raw.execute("DROP TABLE seo_seed_rows")
+        raw.execute("PRAGMA user_version=3")
+        raw.commit()
+    finally:
+        raw.close()
+
+    repository = seo_repo(tmp_path)
+
+    assert "seo_seed_rows" in table_names(path)
+    assert user_version(path) == 3
+    analysis_id = create(repository)
+    repository.save_seed_row(analysis_id, 0, status="waiting", operation_id="op-0")
+    assert repository.resume_plan(analysis_id).submitted_seeds == ((0, "op-0"),)
 
 
 def test_migration_from_populated_version_two_keeps_runs_and_adds_seo(tmp_path):
@@ -363,6 +384,21 @@ def scalar(path: Path, sql: str, params: tuple = ()) -> object:
     try:
         row = connection.execute(sql, params).fetchone()
         return row[0] if row is not None else None
+    finally:
+        connection.close()
+
+
+def seed_states(path: Path, analysis_id: str) -> dict[int, tuple[str, str | None]]:
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            row[0]: (row[1], row[2])
+            for row in connection.execute(
+                "SELECT seed_index, status, operation_id FROM seo_seed_rows "
+                "WHERE analysis_id=? ORDER BY seed_index",
+                (analysis_id,),
+            )
+        }
     finally:
         connection.close()
 
@@ -609,6 +645,77 @@ def test_interrupt_unsubmitted_rows_keeps_submitted_operations(tmp_path):
     assert repository.snapshot(analysis_id)["status"] == "running"
     with pytest.raises(RunNotFound):
         repository.interrupt_unsubmitted_rows("нет такого")
+
+
+def test_seed_rows_keep_their_operation_id_and_join_the_resume_plan(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+    path = tmp_path / DB_FILE
+
+    repository.save_seed_row(analysis_id, 0, status="submitting", operation_id="seed-op-0")
+    repository.save_seed_row(analysis_id, 1, status="waiting", operation_id="seed-op-1")
+    repository.save_seed_row(analysis_id, 2, status="submitting")
+    repository.save_seed_row(analysis_id, 0, status="found")
+    repository.save_seed_row(analysis_id, 2, status="error", error="Сбой поиска")
+
+    plan = repository.resume_plan(analysis_id)
+    assert plan.submitted_seeds == ((1, "seed-op-1"),)
+    assert seed_states(path, analysis_id) == {
+        0: ("found", "seed-op-0"),
+        1: ("waiting", "seed-op-1"),
+        2: ("error", None),
+    }
+    with pytest.raises(ValidationError):
+        repository.save_seed_row(analysis_id, 0, status="unknown")
+    with pytest.raises(ValidationError):
+        repository.save_seed_row(analysis_id, -1, status="found")
+    with pytest.raises(RunNotFound):
+        repository.save_seed_row("нет такого", 0, status="found")
+
+
+def test_interrupt_and_cancel_cover_pending_seed_rows(tmp_path):
+    repository = seo_repo(tmp_path)
+    path = tmp_path / DB_FILE
+
+    resumable = create(repository)
+    repository.save_seed_row(resumable, 0, status="waiting", operation_id="seed-op-0")
+    repository.save_seed_row(resumable, 1, status="pending")
+    repository.interrupt_unsubmitted_rows(resumable)
+
+    assert seed_states(path, resumable) == {
+        0: ("waiting", "seed-op-0"),
+        1: ("interrupted", None),
+    }
+    assert repository.resume_plan(resumable).submitted_seeds == ((0, "seed-op-0"),)
+
+    stopped = create(repository)
+    repository.save_seed_row(stopped, 0, status="waiting", operation_id="seed-op-1")
+    repository.mark_interrupted(stopped)
+
+    assert seed_states(path, stopped) == {0: ("interrupted", "seed-op-1")}
+
+    cancelled = create(repository)
+    repository.save_seed_row(cancelled, 0, status="waiting", operation_id="seed-op-2")
+    repository.save_seed_row(cancelled, 1, status="found")
+    repository.cancel(cancelled)
+
+    assert seed_states(path, cancelled) == {
+        0: ("cancelled", "seed-op-2"),
+        1: ("found", None),
+    }
+
+
+def test_running_analysis_ids_lists_only_running_analyses(tmp_path):
+    repository = seo_repo(tmp_path)
+
+    first = create(repository)
+    second = create(repository)
+    third = create(repository)
+    repository.finish_analysis(second)
+    repository.fail_analysis(third)
+
+    assert set(repository.running_analysis_ids()) == {first}
+    assert seo_repo(tmp_path).running_analysis_ids() == (first,)
 
 
 def test_cancel_only_running_analyses_and_keeps_finished_rows(tmp_path):

@@ -10,7 +10,7 @@ from app.service.search_settings import SearchSettingsService
 from tests.fakes import MemorySecrets
 
 
-def make_service(tmp_path, *, env_api_key=None, env_folder_id=None):
+def make_service(tmp_path, *, env_api_key=None, env_folder_id=None, gateway_override=None):
     secrets = MemorySecrets()
     repository = SearchSettingsRepository(
         tmp_path, secrets, env_api_key=env_api_key,
@@ -18,7 +18,9 @@ def make_service(tmp_path, *, env_api_key=None, env_folder_id=None):
     )
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(500)))
     search = SearchService(None)
-    settings = SearchSettingsService(repository, search, client)
+    settings = SearchSettingsService(
+        repository, search, client, gateway_override=gateway_override,
+    )
     return settings, search, client
 
 
@@ -61,3 +63,31 @@ def test_reset_noop_and_no_environment_sources(tmp_path):
     assert settings.public() == expected
     assert settings.reset_credentials() == expected
     assert search.gateway is None
+
+
+def test_gateway_snapshot_tracks_the_configured_gateway_without_credentials(tmp_path):
+    settings, search, _client = make_service(tmp_path)
+
+    assert settings.gateway_snapshot() is None
+    assert settings.enabled() is True
+
+    settings.update({"api_key": "ui-secret", "folder_id": "folder"})
+    captured = settings.gateway_snapshot()
+    assert captured is search.gateway
+    assert captured is not None
+
+    # A job that started earlier keeps polling the gateway it captured.
+    settings.reset_credentials()
+    assert settings.gateway_snapshot() is None
+    assert captured is not None
+
+
+def test_gateway_snapshot_and_enabled_see_disabled_and_override_state(tmp_path):
+    override = object()
+    settings, search, _client = make_service(tmp_path, gateway_override=override)
+
+    assert settings.gateway_snapshot() is override
+    settings.update({"enabled": False})
+    assert settings.enabled() is False
+    assert search.enabled is False
+    assert settings.gateway_snapshot() is override
