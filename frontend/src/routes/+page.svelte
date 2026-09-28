@@ -243,8 +243,6 @@
                     <div>
                         <label for="domain" class="mb-2 block text-sm font-semibold text-ink">
                             Сайт
-                            <span class="font-normal text-muted">для поиска в Яндексе</span>
-
                         </label>
 
                         <input
@@ -291,9 +289,40 @@
 
             </fieldset>
 
-            <fieldset class="border-t border-line pt-6" aria-labelledby="regions-legend"><legend id="regions-legend" class="mb-3 text-sm font-semibold text-ink">Регионы для поиска в Яндексе</legend><p class="mb-4 max-w-3xl text-xs leading-5 text-muted">Добавьте до пяти регионов. Поиск проверит первую десятку по каждому вопросу и может занять несколько часов.</p>
-                {#if data.searchRegionError}<p role="alert" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{data.searchRegionError}. Проверка моделей работает без него.</p>{/if}
-                <div class="space-y-3">{#each regionRows as value, index (index)}<div class="flex items-center gap-3" data-region-row><label class="sr-only" for={`region-${index}`}>Регион {index + 1}</label><select id={`region-${index}`} class="min-h-12 w-full max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent" bind:value={regionRows[index]}><option value="">Выберите регион</option>{#each catalog as region (region.id)}<option value={region.id} disabled={regionTaken(region.id, index)}>{region.name}</option>{/each}</select><button type="button" onclick={() => removeRegion(index)} aria-label={`Удалить регион ${index + 1}`} class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700">×</button></div>{/each}</div>
+            <fieldset class="border-t border-line pt-6" aria-labelledby="regions-legend">
+                <legend id="regions-legend" class="mb-3 text-sm font-semibold text-ink">
+                    Регионы для поиска в Яндексе
+                </legend>
+
+                <p class="mb-4 max-w-3xl text-xs leading-5 text-muted">
+                    Добавьте до пяти регионов. Поиск проверит первую десятку по каждому вопросу и может занять несколько часов.
+                </p>
+                
+                {#if data.searchRegionError}
+                    <p role="alert" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        {data.searchRegionError}. Проверка моделей работает без него.
+                    </p>
+                {/if}
+                <div class="space-y-3">
+                    {#each regionRows as value, index (index)}
+                        <div class="flex items-center gap-3" data-region-row>
+                            
+                            <label class="sr-only" for={`region-${index}`}>
+                                Регион {index + 1}
+                            </label>
+                            
+                            <select id={`region-${index}`} class="min-h-12 w-full max-w-sm rounded-xl border border-line bg-canvas/50 px-4 py-3 text-sm text-ink outline-none focus:border-accent" bind:value={regionRows[index]}>
+                                <option value="">
+                                    Выберите регион
+                                </option>
+                                {#each catalog as region (region.id)}
+                                    <option value={region.id} disabled={regionTaken(region.id, index)}>
+                                        {region.name}
+                                    </option>
+                                {/each}
+                            </select>
+                            
+                            <button type="button" onclick={() => removeRegion(index)} aria-label={`Удалить регион ${index + 1}`} class="grid size-12 shrink-0 place-items-center rounded-xl border border-line bg-white text-lg text-muted hover:text-rose-700">×</button></div>{/each}</div>
                 <button type="button" onclick={addRegion} disabled={regionRows.length >= MAX_REGIONS || !catalog.length} class="mt-4 inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">＋ Добавить регион</button>
                 {#if chosenRegions.length > 0}<p class="mt-3 text-xs text-muted"><span class="font-semibold text-ink" data-request-count>{requestCountLabel(yandexRequests)}</span> — по одному отложенному запросу на пару «вопрос × регион».</p>{/if}
             </fieldset>
