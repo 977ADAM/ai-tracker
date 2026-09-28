@@ -1,12 +1,21 @@
 import type {
   ApiPath, FormConfig, PublicProvider, SearchCreated, SearchRegion, SearchRow, SearchRowStatus,
   SearchSnapshot, SettingsProvider, RunCreated, RunHistoryPage, RunSnapshot, RunSummaryRow,
-  RunModelRow, RunSearchRow, YandexSearchSettings
+  RunModelRow, RunSearchRow, YandexSearchSettings,
+  SeoAggregates, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoAnalysisStatus, SeoCategoryAggregates,
+  SeoCandidate, SeoCompetitorAggregates, SeoCounts, SeoEstimate, SeoHistoryPage, SeoMetric,
+  SeoModelRow, SeoQuery, SeoQueryFlags, SeoReadiness, SeoRow, SeoRowsKind, SeoRowsPage, SeoRowStatus,
+  SeoSearchMetrics, SeoSearchRow, SeoSettings, SeoSettingsTest, SeoSiteAggregates, SeoSiteAiBlock,
+  SeoSiteAiMetrics, SeoSource, SeoStage, SeoStageStatus
 } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
+/** The shared request budget; a real LLM call does not fit into it. */
+export const DEFAULT_TIMEOUT_MS = 10_000;
+/** `POST /api/seo/settings/test` waits for one real chat completion. */
+export const SEO_SETTINGS_TEST_TIMEOUT_MS = 120_000;
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -58,6 +67,32 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
   return value as T;
 }
 
+function requiredBoolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('Invalid API response');
+  return value;
+}
+
+function optionalBoolean(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  return requiredBoolean(value);
+}
+
+function optionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Invalid API response');
+  return value;
+}
+
+function requiredNumber(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Invalid API response');
+  return value;
+}
+
+function integerRecord(value: unknown): Record<string, number> {
+  const item = record(value);
+  return Object.fromEntries(Object.entries(item).map(([key, entry]) => [key, requiredInteger(entry)]));
+}
+
 function apiOrigin(): string {
   const url = new URL(process.env.AI_TRACKER_API_URL || DEFAULT_API_ORIGIN);
   if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname) ||
@@ -97,6 +132,33 @@ export function runListPath(cursor: string | null): ApiPath {
   return `/api/runs?cursor=${cursor}`;
 }
 
+function seoCursor(cursor: string): string {
+  if (!/^[A-Za-z0-9_-]{1,256}$/.test(cursor)) throw new Error('Invalid cursor');
+  return cursor;
+}
+
+export function seoAnalysisPath(id: string): ApiPath {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid SEO analysis ID');
+  return `/api/seo/analyses/${encodeURIComponent(id)}`;
+}
+
+export function seoAnalysisCancelPath(id: string): ApiPath {
+  return `${seoAnalysisPath(id)}/cancel` as ApiPath;
+}
+
+export function seoAnalysisRowsPath(id: string, kind: SeoRowsKind, cursor: string | null): ApiPath {
+  if (kind !== 'model' && kind !== 'search') throw new Error('Invalid rows kind');
+  const query = cursor === null ? `kind=${kind}` : `kind=${kind}&cursor=${seoCursor(cursor)}`;
+  return `${seoAnalysisPath(id)}/rows?${query}` as ApiPath;
+}
+
+export function seoAnalysisListPath(cursor: string | null): ApiPath {
+  if (cursor === null) return '/api/seo/analyses';
+  return `/api/seo/analyses?cursor=${seoCursor(cursor)}`;
+}
+
+const SEO_ROWS_SUFFIX = /^([^/]+)\/rows\?kind=(model|search)(?:&cursor=([A-Za-z0-9_-]{1,256}))?$/;
+
 function validPath(path: ApiPath): boolean {
   if (path === '/api/runs') return true;
   if (path.startsWith('/api/runs?cursor=')) {
@@ -110,6 +172,27 @@ function validPath(path: ApiPath): boolean {
       catch { return false; }
     }
     try { return runPath(suffix) === path; }
+    catch { return false; }
+  }
+  // The static SEO settings paths come before the dynamic analysis route.
+  if (path === '/api/seo/settings' || path === '/api/seo/settings/credentials' || path === '/api/seo/settings/test') return true;
+  if (path === '/api/seo/analyses') return true;
+  if (path.startsWith('/api/seo/analyses?cursor=')) {
+    try { return seoAnalysisListPath(path.slice('/api/seo/analyses?cursor='.length)) === path; }
+    catch { return false; }
+  }
+  if (path.startsWith('/api/seo/analyses/')) {
+    const suffix = path.slice('/api/seo/analyses/'.length);
+    if (suffix.endsWith('/cancel')) {
+      try { return seoAnalysisCancelPath(suffix.slice(0, -'/cancel'.length)) === path; }
+      catch { return false; }
+    }
+    const rows = SEO_ROWS_SUFFIX.exec(suffix);
+    if (rows) {
+      try { return seoAnalysisRowsPath(decodeURIComponent(rows[1]), rows[2] as SeoRowsKind, rows[3] ?? null) === path; }
+      catch { return false; }
+    }
+    try { return seoAnalysisPath(suffix) === path; }
     catch { return false; }
   }
   if (path === '/api/providers' || path === '/api/check' || path === '/api/form' || path === '/api/providers/settings') return true;
@@ -328,6 +411,304 @@ export function publicSearchSnapshot(value: unknown): SearchSnapshot {
   };
 }
 
+const SEO_SOURCES: readonly SeoSource[] = ['ui', 'env', 'none'];
+const SEO_ANALYSIS_STATUSES: readonly SeoAnalysisStatus[] =
+  ['running', 'completed', 'failed', 'interrupted', 'cancelled'];
+const SEO_STAGE_STATUSES: readonly SeoStageStatus[] = ['pending', 'running', 'done', 'error', 'skipped'];
+const SEO_ROW_STATUSES: readonly SeoRowStatus[] =
+  ['pending', 'submitting', 'waiting', 'found', 'absent', 'error', 'interrupted', 'cancelled'];
+
+/**
+ * Project the public service-LLM settings.
+ *
+ * Only the six public fields are copied: a returned `api_key`, an upstream
+ * echo, or any future backend field is dropped instead of being forwarded.
+ */
+export function publicSeoSettings(value: unknown): SeoSettings {
+  const item = record(value);
+  return {
+    endpoint: optionalString(item.endpoint),
+    model: optionalString(item.model),
+    has_api_key: requiredBoolean(item.has_api_key),
+    endpoint_source: oneOf(item.endpoint_source, SEO_SOURCES),
+    model_source: oneOf(item.model_source, SEO_SOURCES),
+    api_key_source: oneOf(item.api_key_source, SEO_SOURCES)
+  };
+}
+
+/** The availability probe answers with a safe result and never with a key. */
+export function publicSeoSettingsTest(value: unknown): SeoSettingsTest {
+  const item = record(value);
+  return {
+    ok: requiredBoolean(item.ok),
+    model: optionalString(item.model),
+    error: optionalString(item.error)
+  };
+}
+
+export function publicSeoAnalysisCreated(value: unknown): SeoAnalysisCreated {
+  const item = record(value);
+  const id = requiredString(item.id);
+  seoAnalysisPath(id);
+  return { id, status: oneOf(item.status, ['running'] as const), estimate: seoEstimate(item.estimate) };
+}
+
+function seoEstimate(value: unknown): SeoEstimate {
+  const item = record(value);
+  return {
+    search_upper: requiredInteger(item.search_upper),
+    model_upper: requiredInteger(item.model_upper),
+    generated_limit: requiredInteger(item.generated_limit),
+    connections: requiredInteger(item.connections)
+  };
+}
+
+function seoCounts(value: unknown): SeoCounts {
+  const item = record(value);
+  return {
+    queries: requiredInteger(item.queries),
+    search_rows: requiredInteger(item.search_rows),
+    model_rows: requiredInteger(item.model_rows),
+    search_errors: requiredInteger(item.search_errors),
+    model_errors: requiredInteger(item.model_errors)
+  };
+}
+
+function seoMetric(value: unknown): SeoMetric {
+  const item = record(value);
+  return {
+    denominator: requiredInteger(item.denominator),
+    successes: requiredInteger(item.successes),
+    share: optionalNumber(item.share),
+    average_position: optionalNumber(item.average_position)
+  };
+}
+
+function seoSearchMetrics(value: unknown): SeoSearchMetrics {
+  const item = record(value);
+  return { overall: seoMetric(item.overall), branded: seoMetric(item.branded), unbranded: seoMetric(item.unbranded) };
+}
+
+function seoSiteAiMetrics(value: unknown): SeoSiteAiMetrics {
+  const item = record(value);
+  return { name: seoMetric(item.name), host: seoMetric(item.host), combined: seoMetric(item.combined) };
+}
+
+function seoSiteAiBlock(value: unknown): SeoSiteAiBlock {
+  const item = record(value);
+  return {
+    ...seoSiteAiMetrics(item),
+    branded: seoSiteAiMetrics(item.branded),
+    unbranded: seoSiteAiMetrics(item.unbranded)
+  };
+}
+
+function seoMetricRecord(value: unknown): Record<string, SeoMetric> {
+  return Object.fromEntries(Object.entries(record(value)).map(([key, entry]) => [key, seoMetric(entry)]));
+}
+
+function seoNestedMetricRecord(value: unknown): Record<string, Record<string, SeoMetric>> {
+  return Object.fromEntries(Object.entries(record(value)).map(([key, entry]) => [key, seoMetricRecord(entry)]));
+}
+
+function seoAggregates(value: unknown): SeoAggregates {
+  const item = record(value);
+  if (!Array.isArray(item.competitors)) throw new Error('Invalid SEO aggregates');
+  const siteRaw = record(item.site);
+  const site: SeoSiteAggregates = {
+    search: seoSearchMetrics(siteRaw.search),
+    ai: Object.fromEntries(Object.entries(record(siteRaw.ai)).map(([key, entry]) => [key, seoSiteAiBlock(entry)]))
+  };
+  const competitors: SeoCompetitorAggregates[] = item.competitors.map((raw) => {
+    const competitor = record(raw);
+    return {
+      host: requiredString(competitor.host),
+      title: stringValue(competitor.title),
+      occurrences: requiredInteger(competitor.occurrences),
+      average_position: requiredNumber(competitor.average_position),
+      seed_indexes: integers(competitor.seed_indexes),
+      search: seoSearchMetrics(competitor.search),
+      ai: seoNestedMetricRecord(competitor.ai)
+    };
+  });
+  const groups = (raw: unknown): Record<string, SeoCategoryAggregates> =>
+    Object.fromEntries(Object.entries(record(raw)).map(([key, entry]) => {
+      const group = record(entry);
+      return [key, { search: seoMetric(group.search), ai: seoMetricRecord(group.ai) }];
+    }));
+  return {
+    site,
+    competitors,
+    categories: groups(item.categories),
+    services: groups(item.services),
+    counts: seoCounts(item.counts)
+  };
+}
+
+function seoStage(value: unknown): SeoStage {
+  const item = record(value);
+  return {
+    stage: requiredInteger(item.stage),
+    status: oneOf(item.status, SEO_STAGE_STATUSES),
+    error: optionalString(item.error),
+    counters: integerRecord(item.counters),
+    updated_at: requiredString(item.updated_at)
+  };
+}
+
+function seoCandidate(value: unknown): SeoCandidate {
+  const item = record(value);
+  return {
+    host: requiredString(item.host),
+    title: stringValue(item.title),
+    occurrences: requiredInteger(item.occurrences),
+    average_position: requiredNumber(item.average_position),
+    seed_indexes: integers(item.seed_indexes),
+    recurring: requiredBoolean(item.recurring)
+  };
+}
+
+function seoQueryFlags(value: unknown): SeoQueryFlags {
+  const item = record(value);
+  return {
+    mentions_company_name: requiredBoolean(item.mentions_company_name),
+    mentions_company_host: requiredBoolean(item.mentions_company_host),
+    mentions_candidate_host: requiredBoolean(item.mentions_candidate_host),
+    branded: requiredBoolean(item.branded)
+  };
+}
+
+function seoQuery(value: unknown): SeoQuery {
+  const item = record(value);
+  return {
+    index: requiredInteger(item.index),
+    text: requiredString(item.text),
+    category: requiredString(item.category),
+    service: optionalString(item.service),
+    flags: seoQueryFlags(item.flags)
+  };
+}
+
+function seoReadiness(value: unknown): SeoReadiness {
+  const item = record(value);
+  return {
+    report_ready: requiredBoolean(item.report_ready),
+    summary_ready: requiredBoolean(item.summary_ready),
+    queries_ready: requiredBoolean(item.queries_ready),
+    has_submitted_search_rows: requiredBoolean(item.has_submitted_search_rows),
+    has_unsubmitted_search_rows: requiredBoolean(item.has_unsubmitted_search_rows),
+    has_unfinished_model_rows: requiredBoolean(item.has_unfinished_model_rows),
+    search_rows: requiredInteger(item.search_rows),
+    model_rows: requiredInteger(item.model_rows)
+  };
+}
+
+/** Project the saved analysis; model answers and operation IDs never appear here. */
+export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
+  const item = record(value);
+  const id = requiredString(item.id);
+  seoAnalysisPath(id);
+  const input = record(item.input);
+  if (!Array.isArray(item.services) || !Array.isArray(item.pages) || !Array.isArray(item.stages) ||
+      !Array.isArray(item.candidates) || !Array.isArray(item.queries))
+    throw new Error('Invalid SEO snapshot');
+  return {
+    id,
+    status: oneOf(item.status, SEO_ANALYSIS_STATUSES),
+    created_at: requiredString(item.created_at),
+    updated_at: requiredString(item.updated_at),
+    finished_at: optionalString(item.finished_at),
+    input: {
+      url: requiredString(input.url),
+      host: requiredString(input.host),
+      sphere: stringValue(input.sphere),
+      seeds: strings(input.seeds),
+      services: strings(input.services),
+      connection_ids: strings(input.connection_ids)
+    },
+    estimate: seoEstimate(item.estimate),
+    company_name: stringValue(item.company_name),
+    services: strings(item.services),
+    pages: item.pages.map((raw) => {
+      const page = record(raw);
+      return { url: requiredString(page.url), title: stringValue(page.title) };
+    }),
+    stages: item.stages.map(seoStage),
+    candidates: item.candidates.map(seoCandidate),
+    queries: item.queries.map(seoQuery),
+    summary: optionalString(item.summary),
+    counters: seoCounts(item.counters),
+    readiness: seoReadiness(item.readiness),
+    aggregates: seoAggregates(item.aggregates)
+  };
+}
+
+export function publicSeoHistory(value: unknown): SeoHistoryPage {
+  const page = record(value);
+  if (!Array.isArray(page.items)) throw new Error('Invalid SEO history');
+  const next_cursor = optionalString(page.next_cursor);
+  if (next_cursor !== null) seoCursor(next_cursor);
+  return {
+    items: page.items.map((raw) => {
+      const item = record(raw);
+      const id = requiredString(item.id);
+      seoAnalysisPath(id);
+      return {
+        id,
+        created_at: requiredString(item.created_at),
+        finished_at: optionalString(item.finished_at),
+        status: oneOf(item.status, SEO_ANALYSIS_STATUSES),
+        sphere: stringValue(item.sphere),
+        host: requiredString(item.host),
+        company_name: stringValue(item.company_name),
+        counters: seoCounts(item.counters)
+      };
+    }),
+    next_cursor
+  };
+}
+
+function seoSearchRow(value: unknown): SeoSearchRow {
+  const item = record(value);
+  return {
+    query_index: requiredInteger(item.query_index),
+    query: optionalString(item.query),
+    category: optionalString(item.category),
+    service: optionalString(item.service),
+    status: oneOf(item.status, SEO_ROW_STATUSES),
+    site_position: optionalInteger(item.site_position),
+    site_url: optionalString(item.site_url),
+    error: optionalString(item.error)
+  };
+}
+
+function seoModelRow(value: unknown): SeoModelRow {
+  const item = record(value);
+  return {
+    query_index: requiredInteger(item.query_index),
+    connection_id: requiredString(item.connection_id),
+    provider_name: requiredString(item.provider_name),
+    status: oneOf(item.status, SEO_ROW_STATUSES),
+    answer: optionalString(item.answer),
+    name_mentioned: optionalBoolean(item.name_mentioned),
+    host_mentioned: optionalBoolean(item.host_mentioned),
+    error: optionalString(item.error),
+    query: optionalString(item.query),
+    category: optionalString(item.category),
+    service: optionalString(item.service)
+  };
+}
+
+/** Project one page of the detail resource; the shape depends on the row kind. */
+export function publicSeoRows(value: unknown, kind: SeoRowsKind): SeoRowsPage {
+  const page = record(value);
+  if (!Array.isArray(page.items)) throw new Error('Invalid SEO rows');
+  const next_cursor = optionalString(page.next_cursor);
+  if (next_cursor !== null) seoCursor(next_cursor);
+  const project = (raw: unknown): SeoRow => (kind === 'model' ? seoModelRow(raw) : seoSearchRow(raw));
+  return { items: page.items.map(project), next_cursor };
+}
+
 export function publicForm(value: unknown): Record<string, unknown> {  const item = record(value);
   const limits = record(item.limits);
   if (!Array.isArray(item.scope_options) || !Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids)) throw new Error('Invalid form');
@@ -339,17 +720,33 @@ export function publicForm(value: unknown): Record<string, unknown> {  const ite
     }) };
 }
 
+/**
+ * The request budget for one upstream path.
+ *
+ * `/api/check` is streamed without a shared deadline, the SEO connection test
+ * waits for a real LLM completion, and every other call keeps the short budget.
+ */
+export function apiTimeoutMs(path: ApiPath): number | undefined {
+  if (path === '/api/check') return undefined;
+  if (path === '/api/seo/settings/test') return SEO_SETTINGS_TEST_TIMEOUT_MS;
+  return DEFAULT_TIMEOUT_MS;
+}
+
 export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<Response> {
   if (!validPath(path)) throw new Error('Invalid Python API path');
-  const signal = init.signal ?? (path === '/api/check' ? undefined : AbortSignal.timeout(10_000));
+  const timeout = apiTimeoutMs(path);
+  const signal = init.signal ?? (timeout === undefined ? undefined : AbortSignal.timeout(timeout));
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
 }
 
-export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; searchSettings: YandexSearchSettings | null; searchSettingsError: string; loadError: string }> {
+export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; searchSettings: YandexSearchSettings | null; searchSettingsError: string; seoSettings: SeoSettings | null; seoSettingsError: string; loadError: string }> {
   // The region catalog is an independent request: a failure there must not stop
   // the model list, and vice versa.
   const { regions: searchRegions, error: searchRegionError } = await loadSearchRegions();
   const { settings: searchSettings, error: searchSettingsError } = await loadSearchSettings();
+  // The SEO service-LLM settings are independent as well: an unavailable SEO
+  // resource must never take the model configuration down with it.
+  const { settings: seoSettings, error: seoSettingsError } = await loadSeoSettings();
   try {
     const [providerResponse, formResponse, settingsResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form'), pythonApi('/api/providers/settings')]);
     if (!providerResponse.ok || !formResponse.ok || !settingsResponse.ok ||
@@ -359,9 +756,20 @@ export async function loadPageData(): Promise<{ providers: PublicProvider[]; set
     const providers: unknown = await providerResponse.json();
     const settingsProviders: unknown = await settingsResponse.json();
     if (!Array.isArray(providers) || !Array.isArray(settingsProviders)) throw new Error('Invalid providers');
-    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, searchSettings, searchSettingsError, loadError: '' };
+    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, loadError: '' };
   } catch {
-    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, searchSettings, searchSettingsError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+  }
+}
+
+async function loadSeoSettings(): Promise<{ settings: SeoSettings | null; error: string }> {
+  try {
+    const response = await pythonApi('/api/seo/settings');
+    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || ''))
+      throw new Error('Invalid SEO settings');
+    return { settings: publicSeoSettings(await response.json()), error: '' };
+  } catch {
+    return { settings: null, error: 'Настройки служебной LLM недоступны' };
   }
 }
 
@@ -392,6 +800,17 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
   const searchSettingsPath = path === '/api/search/settings' || path === '/api/search/settings/credentials';
   if (searchSettingsPath && !(path === '/api/search/settings' ? ['GET', 'PUT'].includes(method) : method === 'DELETE'))
     return json({ detail: 'Недопустимый метод' }, 405);
+  const seoSettingsPath = path === '/api/seo/settings' || path === '/api/seo/settings/credentials' ||
+    path === '/api/seo/settings/test';
+  if (seoSettingsPath) {
+    const allowed = path === '/api/seo/settings' ? ['GET', 'PUT']
+      : path === '/api/seo/settings/credentials' ? ['DELETE'] : ['POST'];
+    if (!allowed.includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
+  }
+  // The connection probe and the cancel action are bodyless POSTs: neither
+  // carries a payload, and the probe triggers one upstream chat call.
+  const bodylessPost = path === '/api/seo/settings/test' ||
+    (path.startsWith('/api/seo/analyses/') && path.endsWith('/cancel'));
   let body: string | undefined;
   if (method !== 'GET') {
     const origin = request.headers.get('origin');
@@ -400,7 +819,7 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
     if (declared && Number(declared) > MAX_BODY_BYTES) return json({ detail: 'Запрос слишком большой' }, 413);
     if (method === 'DELETE') {
       if (await request.text()) return json({ detail: 'Удаление не принимает тело запроса' }, 400);
-    } else {
+    } else if (!bodylessPost) {
       if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) return json({ detail: 'Ожидается JSON' }, 415);
       body = await request.text();
       if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) return json({ detail: 'Запрос слишком большой' }, 413);
@@ -414,18 +833,29 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
   } catch {
     return json({ detail: 'Python API недоступен' }, 502);
   }
-  if (method === 'DELETE' && upstream.status === 204 && !searchSettingsPath) return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+  if (method === 'DELETE' && upstream.status === 204 && !searchSettingsPath && !seoSettingsPath) return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
   if (!/^application\/json(?:\s*;|$)/i.test(upstream.headers.get('content-type') || '')) return json({ detail: 'Некорректный ответ Python API' }, 502);
   try {
     const value: unknown = await upstream.json();
     if (!upstream.ok) {
       if (searchSettingsPath) return json({ detail: 'Ошибка настроек поисковой системы' }, upstream.status);
+      if (seoSettingsPath) return json({ detail: 'Ошибка настроек служебной LLM' }, upstream.status);
       const detail = record(value).detail;
       return json({ detail: typeof detail === 'string' ? detail : 'Ошибка Python API' }, upstream.status);
     }
     if (path === '/api/runs' && method === 'POST') return json(publicRunCreated(value), upstream.status);
     if ((path === '/api/runs' || path.startsWith('/api/runs?cursor=')) && method === 'GET') return json(publicRunList(value), upstream.status);
     if (path.startsWith('/api/runs/') && method === 'GET') return json(publicRunSnapshot(value), upstream.status);
+    if (path === '/api/seo/settings' || path === '/api/seo/settings/credentials')
+      return json(publicSeoSettings(value), upstream.status);
+    if (path === '/api/seo/settings/test') return json(publicSeoSettingsTest(value), upstream.status);
+    if (path === '/api/seo/analyses' && method === 'POST') return json(publicSeoAnalysisCreated(value), upstream.status);
+    if ((path === '/api/seo/analyses' || path.startsWith('/api/seo/analyses?cursor=')) && method === 'GET')
+      return json(publicSeoHistory(value), upstream.status);
+    const seoRows = /^\/api\/seo\/analyses\/[^/]+\/rows\?kind=(model|search)/.exec(path);
+    if (seoRows && method === 'GET') return json(publicSeoRows(value, seoRows[1] as SeoRowsKind), upstream.status);
+    if (path.startsWith('/api/seo/analyses/') && method === 'GET') return json(publicSeoSnapshot(value), upstream.status);
+    if (path.endsWith('/cancel') && method === 'POST') return json(publicSeoSnapshot(value), upstream.status);
     if (path === '/api/search' && method === 'POST') return json(publicSearchCreated(value), upstream.status);
     if (path === '/api/search/regions' && method === 'GET') return json(publicSearchRegions(value), upstream.status);
     if (searchSettingsPath) return json(publicSearchSettings(value), upstream.status);

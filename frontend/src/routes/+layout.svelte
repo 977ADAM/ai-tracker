@@ -4,10 +4,13 @@
   import ConfigsPanel from '$lib/components/ConfigsPanel.svelte';
   import SettingsPanel from '$lib/components/SettingsPanel.svelte';
   import SearchSettingsPanel from '$lib/components/SearchSettingsPanel.svelte';
+  import SeoSettingsPanel from '$lib/components/SeoSettingsPanel.svelte';
 
   let { children, data } = $props();
 
   const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  type SettingsTab = 'models' | 'search' | 'seo';
+  const SETTINGS_TABS: readonly SettingsTab[] = ['models', 'search', 'seo'];
 
   let settingsOpen = $state(false);
   let opener = $state<HTMLButtonElement | null>(null);
@@ -15,9 +18,10 @@
   let configButton = $state<HTMLButtonElement | null>(null);
   let configPanel = $state<HTMLDivElement | null>(null);
   let configWindow = $state(false);
-  let activeTab = $state<'models' | 'search'>('models');
+  let activeTab = $state<SettingsTab>('models');
   let modelTab = $state<HTMLButtonElement | null>(null);
   let searchTab = $state<HTMLButtonElement | null>(null);
+  let seoTab = $state<HTMLButtonElement | null>(null);
 
   function resetConfig() {
     configWindow = false;
@@ -29,11 +33,22 @@
     settingsOpen = true;
   }
 
+  function tabElement(tab: SettingsTab): HTMLButtonElement | null {
+    if (tab === 'models') return modelTab;
+    return tab === 'search' ? searchTab : seoTab;
+  }
+
   function onTabKeydown(event: KeyboardEvent) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    activeTab = event.key === 'Home' ? 'models' : event.key === 'End' ? 'search' : activeTab === 'models' ? 'search' : 'models';
-    (activeTab === 'models' ? modelTab : searchTab)?.focus();
+    if (event.key === 'Home') activeTab = SETTINGS_TABS[0];
+    else if (event.key === 'End') activeTab = SETTINGS_TABS[SETTINGS_TABS.length - 1];
+    else {
+      const step = event.key === 'ArrowRight' ? 1 : -1;
+      const index = SETTINGS_TABS.indexOf(activeTab);
+      activeTab = SETTINGS_TABS[(index + step + SETTINGS_TABS.length) % SETTINGS_TABS.length];
+    }
+    tabElement(activeTab)?.focus();
   }
 
   function close() {
@@ -202,6 +217,22 @@
               </svg>
               Поисковые системы
             </button>
+            <button
+              type="button"
+              id="settings-seo-tab"
+              role="tab"
+              aria-controls="settings-seo-panel"
+              aria-selected={activeTab === 'seo'}
+              tabindex={activeTab === 'seo' ? 0 : -1}
+              bind:this={seoTab}
+              onclick={() => (activeTab = 'seo')}
+              class={`inline-flex min-h-11 items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-left text-sm font-semibold text-shell-ink transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent sm:w-full ${activeTab === 'seo' ? 'bg-shell-active' : ''}`}
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4 shrink-0" aria-hidden="true">
+                <path d="M4 15.5V11m4 4.5V6m4 9.5V8.5m4 7V4.5" stroke-linecap="round" />
+              </svg>
+              SEO-анализ
+            </button>
           </div>
 
           <div id="settings-models-panel" role="tabpanel" aria-labelledby="settings-models-tab" tabindex="0" hidden={activeTab !== 'models'} class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
@@ -209,6 +240,9 @@
           </div>
           <div id="settings-search-panel" role="tabpanel" aria-labelledby="settings-search-tab" tabindex="0" hidden={activeTab !== 'search'} class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
             <SearchSettingsPanel settings={data.searchSettings} loadError={data.searchSettingsError} />
+          </div>
+          <div id="settings-seo-panel" role="tabpanel" aria-labelledby="settings-seo-tab" tabindex="0" hidden={activeTab !== 'seo'} class="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-1 pb-6 sm:px-6 sm:pb-8 lg:px-8">
+            <SeoSettingsPanel settings={data.seoSettings} loadError={data.seoSettingsError} />
           </div>
         </div>
       </div>

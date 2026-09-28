@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  loadPageData, proxyJson, publicConfigurationFile, publicSearchRegions, publicSearchSnapshot,
-  publicSettingsProvider, publicSearchSettings, searchPath, settingsProviderPath
-  , publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv
+  apiTimeoutMs, DEFAULT_TIMEOUT_MS, loadPageData, proxyJson, publicConfigurationFile, publicSearchRegions,
+  publicSearchSnapshot, publicSettingsProvider, publicSearchSettings, searchPath, settingsProviderPath,
+  publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv,
+  publicSeoAnalysisCreated, publicSeoHistory, publicSeoRows, publicSeoSettings, publicSeoSettingsTest,
+  publicSeoSnapshot, seoAnalysisCancelPath, seoAnalysisListPath, seoAnalysisPath, seoAnalysisRowsPath,
+  SEO_SETTINGS_TEST_TIMEOUT_MS
 } from './python-api';
+import type { ApiPath } from '$lib/types';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -393,5 +397,329 @@ describe('search BFF', () => {
     expect(data.providers.map((provider) => provider.id)).toEqual(['p1']);
     expect(data.searchRegions).toEqual([]);
     expect(data.searchRegionError).toBe('Справочник регионов недоступен');
+  });
+});
+
+describe('SEO BFF', () => {
+  const metric = { denominator: 4, successes: 2, share: 0.5, average_position: 3.5 };
+  const searchMetrics = { overall: metric, branded: metric, unbranded: metric };
+  const siteAiMetrics = { name: metric, host: metric, combined: metric };
+  const siteAiBlock = { ...siteAiMetrics, branded: siteAiMetrics, unbranded: siteAiMetrics };
+  const publicSeoState = {
+    endpoint: 'https://llm.example.com/v1/chat/completions', model: 'seo-model',
+    has_api_key: true, endpoint_source: 'ui', model_source: 'env', api_key_source: 'env'
+  } as const;
+  const seoSnapshot = {
+    id: 'seo-1', status: 'completed', created_at: '2026-09-28T10:00:00Z', updated_at: '2026-09-28T10:20:00Z',
+    finished_at: '2026-09-28T10:20:00Z',
+    input: { url: 'https://example.ru/', host: 'example.ru', sphere: 'Цветы', seeds: ['a', 'b', 'c'],
+      services: ['Букеты'], connection_ids: ['p1'] },
+    estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 },
+    company_name: 'Ромашка', services: ['Букеты'],
+    pages: [{ url: 'https://example.ru/', title: 'Ромашка' }],
+    stages: [{ stage: 1, status: 'done', error: null, counters: { pages: 1 }, updated_at: '2026-09-28T10:01:00Z', api_key: 'secret' }],
+    candidates: [{ host: 'rival.ru', title: 'Rival', occurrences: 2, average_position: 3.5, seed_indexes: [0, 1], recurring: true }],
+    queries: [{ index: 0, text: 'букеты с доставкой', category: 'commercial', service: 'Букеты',
+      flags: { mentions_company_name: false, mentions_company_host: false, mentions_candidate_host: false, branded: false } }],
+    summary: 'Итог',
+    counters: { queries: 1, search_rows: 1, model_rows: 1, search_errors: 0, model_errors: 0 },
+    readiness: { report_ready: true, summary_ready: true, queries_ready: true, has_submitted_search_rows: false,
+      has_unsubmitted_search_rows: false, has_unfinished_model_rows: false, search_rows: 1, model_rows: 1 },
+    aggregates: {
+      site: { search: searchMetrics, ai: { p1: siteAiBlock } },
+      competitors: [{ host: 'rival.ru', title: 'Rival', occurrences: 2, average_position: 3.5, seed_indexes: [0, 1],
+        search: searchMetrics, ai: { p1: { host: metric } } }],
+      categories: { commercial: { search: metric, ai: { p1: metric } } },
+      services: { 'Букеты': { search: metric, ai: { p1: metric } } },
+      counts: { queries: 1, search_rows: 1, model_rows: 1, search_errors: 0, model_errors: 0 }
+    },
+    api_key: 'secret', operation_id: 'secret'
+  };
+
+  it('projects the SEO settings and drops any unexpected key, including a returned secret', () => {
+    expect(publicSeoSettings({ ...publicSeoState, api_key: 'secret', extra: 'private' })).toEqual(publicSeoState);
+    expect(publicSeoSettings(publicSeoState)).toEqual(publicSeoState);
+    expect(publicSeoSettings({ ...publicSeoState, endpoint: null, model: null })).toEqual({
+      ...publicSeoState, endpoint: null, model: null
+    });
+  });
+
+  it('rejects malformed SEO settings instead of inventing defaults', () => {
+    for (const value of [
+      {}, { ...publicSeoState, has_api_key: 'yes' }, { ...publicSeoState, endpoint_source: 'other' },
+      { ...publicSeoState, model_source: null }, { ...publicSeoState, endpoint: 7 }, 'nope'
+    ]) expect(() => publicSeoSettings(value)).toThrow();
+  });
+
+  it('projects the connection probe result without leaking an upstream secret', () => {
+    expect(publicSeoSettingsTest({ ok: true, model: 'seo-model' })).toEqual({ ok: true, model: 'seo-model', error: null });
+    expect(publicSeoSettingsTest({ ok: false, error: 'Модель недоступна', api_key: 'secret' }))
+      .toEqual({ ok: false, model: null, error: 'Модель недоступна' });
+    expect(() => publicSeoSettingsTest({ ok: 'yes' })).toThrow();
+  });
+
+  it('accepts only opaque analysis IDs, known row kinds and validated cursors in SEO paths', () => {
+    expect(seoAnalysisPath('seo-1_X')).toBe('/api/seo/analyses/seo-1_X');
+    expect(seoAnalysisCancelPath('seo-1_X')).toBe('/api/seo/analyses/seo-1_X/cancel');
+    expect(seoAnalysisRowsPath('seo-1_X', 'model', null)).toBe('/api/seo/analyses/seo-1_X/rows?kind=model');
+    expect(seoAnalysisRowsPath('seo-1_X', 'search', 'cur_1')).toBe('/api/seo/analyses/seo-1_X/rows?kind=search&cursor=cur_1');
+    expect(seoAnalysisListPath(null)).toBe('/api/seo/analyses');
+    expect(seoAnalysisListPath('cur_1')).toBe('/api/seo/analyses?cursor=cur_1');
+    for (const id of ['../settings', 'a/b', 'a'.repeat(129), '']) expect(() => seoAnalysisPath(id)).toThrow();
+    expect(() => seoAnalysisRowsPath('seo-1', 'answers' as 'model', null)).toThrow();
+    expect(() => seoAnalysisRowsPath('seo-1', 'model', 'a/b')).toThrow();
+    expect(() => seoAnalysisListPath('x&limit=1000')).toThrow();
+  });
+
+  it('rejects unknown or forged SEO paths before reaching Python', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    for (const path of [
+      '/api/seo/settings/other', '/api/seo/analyses/', '/api/seo/analyses/a/b/rows?kind=model',
+      '/api/seo/analyses/seo-1/rows?kind=answers', '/api/seo/analyses/seo-1/rows', '/api/seo/analyses/../settings'
+    ] as const) {
+      expect((await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses'), path as ApiPath, 'GET')).status).toBe(400);
+    }
+    // A wrong method on a settings path is rejected by the shared method check.
+    expect((await proxyJson(new Request('http://127.0.0.1:5173/api/seo/settings'),
+      '/api/seo/settings', 'DELETE')).status).toBe(405);
+    expect((await proxyJson(new Request('http://127.0.0.1:5173/api/seo/settings/test'),
+      '/api/seo/settings/test', 'GET')).status).toBe(405);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the SEO connection test out of the shared short timeout', () => {
+    expect(apiTimeoutMs('/api/seo/settings/test')).toBe(SEO_SETTINGS_TEST_TIMEOUT_MS);
+    expect(SEO_SETTINGS_TEST_TIMEOUT_MS).toBeGreaterThan(DEFAULT_TIMEOUT_MS);
+    expect(apiTimeoutMs('/api/runs')).toBe(DEFAULT_TIMEOUT_MS);
+    expect(apiTimeoutMs('/api/check')).toBeUndefined();
+  });
+
+  it('proxies settings GET, PUT and credentials DELETE with an exact safe response', async () => {
+    const fetchSpy = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      ...publicSeoState, api_key: 'secret'
+    }), { headers: { 'content-type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchSpy);
+    const get = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/settings'), '/api/seo/settings', 'GET');
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual(publicSeoState);
+    const put = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/settings', {
+      method: 'PUT', headers: { origin: 'http://127.0.0.1:5173', 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint: publicSeoState.endpoint, model: publicSeoState.model })
+    }), '/api/seo/settings', 'PUT');
+    expect(await put.json()).toEqual(publicSeoState);
+    expect(fetchSpy).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/seo/settings',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ endpoint: publicSeoState.endpoint, model: publicSeoState.model }) }));
+    const reset = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/settings/credentials',
+      { method: 'DELETE' }), '/api/seo/settings/credentials', 'DELETE');
+    expect(reset.status).toBe(200);
+    expect(await reset.json()).toEqual(publicSeoState);
+  });
+
+  it('proxies the bodyless connection probe and reports a safe failure', async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, model: 'seo-model' }),
+        { headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, error: 'Модель недоступна' }),
+        { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const request = new Request('http://127.0.0.1:5173/api/seo/settings/test', { method: 'POST' });
+    const ok = await proxyJson(request, '/api/seo/settings/test', 'POST');
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true, model: 'seo-model', error: null });
+    expect(fetchSpy).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/seo/settings/test',
+      expect.objectContaining({ method: 'POST', body: undefined }));
+    const failed = await proxyJson(request, '/api/seo/settings/test', 'POST');
+    expect(await failed.json()).toEqual({ ok: false, model: null, error: 'Модель недоступна' });
+  });
+
+  it('turns SEO settings failures into a fixed safe error without the upstream text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'secret-key' }),
+      { status: 500, headers: { 'content-type': 'application/json' } })));
+    const response = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/settings'), '/api/seo/settings', 'GET');
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ detail: 'Ошибка настроек служебной LLM' });
+  });
+
+  it('blocks cross-origin SEO writes before reaching Python', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const forged = new Request('http://127.0.0.1:5173/api/seo/settings', {
+      method: 'PUT', headers: { origin: 'https://other.example', 'content-type': 'application/json' }, body: '{}'
+    });
+    expect((await proxyJson(forged, '/api/seo/settings', 'PUT')).status).toBe(403);
+    const forgedCreate = new Request('http://127.0.0.1:5173/api/seo/analyses', {
+      method: 'POST', headers: { origin: 'https://other.example', 'content-type': 'application/json' }, body: '{}'
+    });
+    expect((await proxyJson(forgedCreate, '/api/seo/analyses', 'POST')).status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('projects the 202 analysis creation with its estimate and drops extra fields', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'seo-1_X', status: 'running', estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 },
+      api_key: 'secret', operation_id: 'secret'
+    }), { status: 202, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const response = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.ru/' })
+    }), '/api/seo/analyses', 'POST');
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      id: 'seo-1_X', status: 'running', estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 }
+    });
+    expect(publicSeoAnalysisCreated({ id: 'seo-1_X', status: 'running', estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 } }))
+      .toEqual({ id: 'seo-1_X', status: 'running', estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 } });
+    expect(() => publicSeoAnalysisCreated({ id: 'seo-1', status: 'completed', estimate: {} })).toThrow();
+  });
+
+  it('projects a snapshot without answers, secrets or operation IDs', () => {
+    const projected = publicSeoSnapshot(seoSnapshot);
+    expect(projected).not.toHaveProperty('api_key');
+    expect(projected).not.toHaveProperty('operation_id');
+    expect(projected.stages[0]).not.toHaveProperty('api_key');
+    expect(projected.stages[0]).toEqual({ stage: 1, status: 'done', error: null, counters: { pages: 1 },
+      updated_at: '2026-09-28T10:01:00Z' });
+    expect(projected.candidates[0]).toEqual({ host: 'rival.ru', title: 'Rival', occurrences: 2,
+      average_position: 3.5, seed_indexes: [0, 1], recurring: true });
+    expect(projected.aggregates.site.ai.p1.combined.share).toBe(0.5);
+    expect(projected.aggregates.competitors[0].ai.p1.host.average_position).toBe(3.5);
+    expect(projected.queries[0].flags.branded).toBe(false);
+    expect(projected.summary).toBe('Итог');
+  });
+
+  it('refuses a malformed snapshot instead of inventing values', () => {
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, status: 'later' })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, readiness: { ...seoSnapshot.readiness, report_ready: 'yes' } })).toThrow();
+    expect(() => publicSeoSnapshot({
+      ...seoSnapshot,
+      aggregates: { ...seoSnapshot.aggregates, site: { search: searchMetrics, ai: { p1: siteAiMetrics } } }
+    })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, stages: [{ stage: 1, status: 'thinking', error: null, counters: {}, updated_at: 'x' }] })).toThrow();
+  });
+
+  it('projects history items and pagination cursors', () => {
+    const page = publicSeoHistory({
+      items: [{ id: 'seo-1_X', created_at: '2026-09-28T10:00:00Z', finished_at: null, status: 'running',
+        sphere: 'Цветы', host: 'example.ru', company_name: 'Ромашка',
+        counters: { queries: 0, search_rows: 0, model_rows: 0, search_errors: 0, model_errors: 0 }, api_key: 'secret' }],
+      next_cursor: 'cur_1', api_key: 'secret'
+    });
+    expect(page.next_cursor).toBe('cur_1');
+    expect(page.items[0]).not.toHaveProperty('api_key');
+    expect(page.items[0].status).toBe('running');
+    expect(() => publicSeoHistory({ items: [], next_cursor: 'a/b' })).toThrow();
+    expect(() => publicSeoHistory({ items: [{ id: 'seo-1', status: 'later' }], next_cursor: null })).toThrow();
+  });
+
+  it('projects paginated model and search rows by kind and drops operation IDs', () => {
+    const model = publicSeoRows({
+      items: [{ query_index: 0, connection_id: 'p1', provider_name: 'Demo', status: 'found', answer: 'Ответ',
+        name_mentioned: true, host_mentioned: false, error: null, query: 'букеты', category: 'commercial',
+        service: 'Букеты', operation_id: 'secret', api_key: 'secret' }],
+      next_cursor: null
+    }, 'model');
+    expect(model.items[0]).not.toHaveProperty('operation_id');
+    expect(model.items[0]).not.toHaveProperty('api_key');
+    expect(model.items[0]).toEqual({ query_index: 0, connection_id: 'p1', provider_name: 'Demo', status: 'found',
+      answer: 'Ответ', name_mentioned: true, host_mentioned: false, error: null, query: 'букеты',
+      category: 'commercial', service: 'Букеты' });
+
+    const search = publicSeoRows({
+      items: [{ query_index: 0, query: 'букеты', category: 'commercial', service: 'Букеты', status: 'found',
+        site_position: 2, site_url: 'https://example.ru/', error: null, operation_id: 'secret' }],
+      next_cursor: 'cur_1'
+    }, 'search');
+    expect(search.next_cursor).toBe('cur_1');
+    expect(search.items[0]).toEqual({ query_index: 0, query: 'букеты', category: 'commercial', service: 'Букеты',
+      status: 'found', site_position: 2, site_url: 'https://example.ru/', error: null });
+
+    expect(() => publicSeoRows({ items: [{ query_index: 0, status: 'thinking' }], next_cursor: null }, 'search')).toThrow();
+    expect(() => publicSeoRows({ items: [{ query_index: 0, status: 'found' }], next_cursor: null }, 'model')).toThrow();
+    expect(() => publicSeoRows({ items: [], next_cursor: 'a b' }, 'search')).toThrow();
+  });
+
+  it('serves snapshots, rows, cancel and delete through their exact SEO paths', async () => {
+    const snapshotBody = JSON.stringify({ ...seoSnapshot, api_key: 'secret' });
+    const fetchSpy = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      if (init.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }));
+      if (String(url).includes('/rows?kind=')) return Promise.resolve(new Response(JSON.stringify({
+        items: [{ query_index: 0, query: 'букеты', category: 'commercial', service: 'Букеты', status: 'found',
+          site_position: 2, site_url: 'https://example.ru/', error: null, operation_id: 'secret' }],
+        next_cursor: null
+      }), { headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(new Response(snapshotBody, { headers: { 'content-type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const snapshot = await proxyJson(new Request(`http://127.0.0.1:5173${seoAnalysisPath('seo-1_X')}`),
+      seoAnalysisPath('seo-1_X'), 'GET');
+    expect(snapshot.status).toBe(200);
+    expect((await snapshot.json() as Record<string, unknown>)).not.toHaveProperty('api_key');
+
+    const rows = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses/seo-1_X/rows?kind=search'),
+      seoAnalysisRowsPath('seo-1_X', 'search', null), 'GET');
+    expect(await rows.json()).toEqual({ items: [{ query_index: 0, query: 'букеты', category: 'commercial',
+      service: 'Букеты', status: 'found', site_position: 2, site_url: 'https://example.ru/', error: null }], next_cursor: null });
+
+    const cancel = await proxyJson(new Request(`http://127.0.0.1:5173${seoAnalysisCancelPath('seo-1_X')}`, { method: 'POST' }),
+      seoAnalysisCancelPath('seo-1_X'), 'POST');
+    expect(cancel.status).toBe(200);
+    expect(fetchSpy).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/seo/analyses/seo-1_X/cancel',
+      expect.objectContaining({ method: 'POST' }));
+
+    const deleted = await proxyJson(new Request(`http://127.0.0.1:5173${seoAnalysisPath('seo-1_X')}`, { method: 'DELETE' }),
+      seoAnalysisPath('seo-1_X'), 'DELETE');
+    expect(deleted.status).toBe(204);
+    expect(await deleted.text()).toBe('');
+  });
+
+  it('passes a safe detail through for a failed analysis request', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Анализ не найден' }),
+      { status: 404, headers: { 'content-type': 'application/json' } })));
+    const response = await proxyJson(new Request(`http://127.0.0.1:5173${seoAnalysisPath('seo-1_X')}`),
+      seoAnalysisPath('seo-1_X'), 'GET');
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ detail: 'Анализ не найден' });
+  });
+
+  it('loads SEO settings independently from the model configuration', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).endsWith('/api/seo/settings')) return Promise.resolve(new Response(JSON.stringify({
+        ...publicSeoState, api_key: 'secret'
+      }), { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/search/settings')) return Promise.resolve(new Response('nope', { status: 500 }));
+      if (String(url).endsWith('/api/search/regions')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(new Response('nope', { status: 500 }));
+    }));
+    const data = await loadPageData();
+    expect(data.seoSettings).toEqual(publicSeoState);
+    expect(data.seoSettings).not.toHaveProperty('api_key');
+    expect(data.seoSettingsError).toBe('');
+    expect(data.loadError).not.toBe('');
+    expect(data.searchSettingsError).not.toBe('');
+  });
+
+  it('keeps the model configuration when the SEO settings resource fails', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).endsWith('/api/seo/settings')) return Promise.resolve(new Response('nope', { status: 500 }));
+      if (String(url).endsWith('/api/search/settings')) return Promise.resolve(new Response(JSON.stringify({
+        yandex: publicSearchState.yandex
+      }), { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/search/regions')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/providers/settings')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/form')) return Promise.resolve(new Response(JSON.stringify({
+        limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 100, max_domain_length: 253 },
+        new_provider_fields: [], default_provider_ids: [], scope_options: []
+      }), { headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(new Response(JSON.stringify([
+        { id: 'p1', name: 'Demo', kind: 'openai', endpoint: 'https://api.example.com/chat/completions', model: 'm', configured: true }
+      ]), { headers: { 'content-type': 'application/json' } }));
+    }));
+    const data = await loadPageData();
+    expect(data.seoSettings).toBeNull();
+    expect(data.seoSettingsError).toBe('Настройки служебной LLM недоступны');
+    expect(data.loadError).toBe('');
+    expect(data.providers.map((provider) => provider.id)).toEqual(['p1']);
+    expect(data.searchSettings).toEqual(publicSearchState.yandex);
   });
 });
