@@ -28,6 +28,9 @@ PENDING_MODEL = frozenset({"pending"})
 PENDING_SEARCH = frozenset({"submitting", "waiting"})
 CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 REGION_NAMES = dict(REGIONS)
+# Versions this repository can open: 3 is added by the SEO repository, which
+# owns every SEO table and never touches the run tables below.
+SUPPORTED_VERSIONS = (0, 1, 2, 3)
 
 
 class RunRepository:
@@ -48,7 +51,7 @@ class RunRepository:
             raise StorageError(STORAGE_FAILED) from exc
         with self._connection(write=True) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in SUPPORTED_VERSIONS:
                 raise StorageError(STORAGE_FAILED)
             connection.executescript("""
                 CREATE TABLE IF NOT EXISTS runs (

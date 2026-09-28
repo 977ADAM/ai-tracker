@@ -294,3 +294,47 @@ def test_export_and_delete_wait_for_last_row_commit(tmp_path):
         save_future.result(timeout=2)
         delete_future.result(timeout=2)
     assert delete_done.is_set()
+
+
+def test_version_three_database_from_the_seo_migration_stays_readable(tmp_path, run_input):
+    """The SEO repository raises `user_version` to 3; runs must still open."""
+    import sqlite3
+
+    repository = repo(tmp_path)
+    repository.create("run-1", run_input, {"p": "ChatGPT"}, "2026-09-25T14:00:00Z")
+    connection = sqlite3.connect(tmp_path / "runs.sqlite3")
+    connection.execute("PRAGMA user_version=3")
+    connection.commit()
+    connection.close()
+
+    reopened = repo(tmp_path)
+    reopened.recover_unfinished()
+    saved = reopened.get("run-1")
+    assert saved["status"] == "interrupted"
+    assert [row["status"] for row in saved["models"]] == ["interrupted", "interrupted"]
+    assert [row["status"] for row in saved["search"]] == ["interrupted", "interrupted"]
+    version = sqlite3.connect(tmp_path / "runs.sqlite3")
+    try:
+        assert version.execute("PRAGMA user_version").fetchone()[0] == 3
+    finally:
+        version.close()
+
+
+def test_a_newer_database_version_is_refused(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "runs.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA user_version=4")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(StorageError) as raised:
+        repo(tmp_path)
+    assert str(path) not in str(raised.value)
+
+    fresh = sqlite3.connect(path)
+    try:
+        assert fresh.execute("PRAGMA user_version").fetchone()[0] == 4
+    finally:
+        fresh.close()

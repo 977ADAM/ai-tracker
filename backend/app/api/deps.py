@@ -14,6 +14,7 @@ from app.db.connections import ConnectionRepository
 from app.db.runs import RunRepository
 from app.db.search_settings import SearchSettingsRepository
 from app.db.secrets import KeyringSecrets, SecretStore
+from app.db.seo import SeoRepository
 from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
 from app.integrations.factory import build_provider
@@ -43,6 +44,7 @@ class Container:
     runs: RunService
     search_settings: SearchSettingsService
     search_client: httpx.AsyncClient
+    seo: SeoRepository
 
 
 def build_container(
@@ -79,6 +81,10 @@ def build_container(
     run_repository = RunRepository(Path(settings.config_dir))
     run_repository.initialize()
     run_repository.recover_unfinished()
+    # The SEO repository owns the version-3 migration of the same file, so it
+    # always initializes after the run repository opened and recovered.
+    seo_repository = SeoRepository(Path(settings.config_dir))
+    seo_repository.initialize()
     checks = CheckService(connections, factory)
     search = SearchService(None)
     search_settings = SearchSettingsService(
@@ -95,6 +101,7 @@ def build_container(
         runs=RunService(run_repository, checks, search),
         search_settings=search_settings,
         search_client=search_client,
+        seo=seo_repository,
     )
 
 
