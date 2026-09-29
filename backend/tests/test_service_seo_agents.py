@@ -18,18 +18,26 @@ from typing import Any, ClassVar
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from app.core.errors import ProviderError
 from app.db.seo import SeoRepository
 from app.domain.search import SearchDocument
 from app.domain.seo import SeoInput, normalize_seo_request
-from app.domain.seo_tools import MAX_SPECIALIST_TURNS, TOOL_ARGUMENTS, SeoBudget
+from app.domain.seo_tools import (
+    AGENT_TOOLS,
+    MAX_SPECIALIST_TURNS,
+    TOOL_ARGUMENTS,
+    SeoBudget,
+)
+from app.integrations.seo_llm import CONNECTION_ERROR
 from app.service.connections import ConnectionService
 from app.service.seo_agents import (
     CHECKPOINT_FILE_MODE,
     CHECKPOINT_FILE_NAME,
+    ModelTracer,
     SeoAgentRuntime,
     build_agent_graph,
     checkpoint_path,
@@ -177,19 +185,22 @@ class ScriptedChatModel(BaseChatModel):
     """A `BaseChatModel` that answers with one scripted message per call.
 
     It records every dialogue it was asked to answer, so a test can prove the
-    exact order of model calls without any network access. Tool binding is a
-    no-op: the graph still gets the tools from the tool node it built.
+    exact order of model calls without any network access. It also records every
+    tool binding: a model that never receives its tools cannot call them.
     """
 
     script: list[AIMessage]
     index: int = 0
+    failure: Any = None
     calls: ClassVar[list[list[BaseMessage]]] = []
+    bound_tools: ClassVar[list[tuple[str, ...]]] = []
 
     @property
     def _llm_type(self) -> str:
         return "scripted-seo-agent"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        self.bound_tools.append(tuple(getattr(tool, "name", str(tool)) for tool in tools))
         return self
 
     def _generate(
@@ -200,6 +211,8 @@ class ScriptedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         self.calls.append(list(messages))
+        if self.failure is not None:
+            raise self.failure
         assert self.script, "unexpected model call"
         # The last scripted answer repeats, so a test that only wants a fixed
         # turn (a plain answer, or an idle supervisor) needs no padding.
@@ -273,6 +286,10 @@ def make_harness(tmp_path: Path, connection_repository, settings, script=None) -
         request,
         {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
     )
+    # The recorder lists are class attributes, so one harness starts clean and a
+    # test never depends on which test ran before it.
+    ScriptedChatModel.calls.clear()
+    ScriptedChatModel.bound_tools.clear()
     return Harness(
         repository=repository,
         input=request,
@@ -336,6 +353,68 @@ async def test_bridge_tools_mirror_the_declared_schemas_of_every_agent(
 
 
 # -- the happy path ----------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_every_agent_binds_its_declared_tools(tmp_path, repository, settings):
+    """A model that is never given its tools cannot call them.
+
+    `create_agent` binds the tools of a specialist before calling it, and the
+    supervisor needs its control tools just as much; the tracer in between must
+    forward the binding instead of swallowing it.
+    """
+    harness = make_harness(tmp_path, repository, settings)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    bound = {frozenset(names) for names in ScriptedChatModel.bound_tools}
+    for agent, declared in AGENT_TOOLS.items():
+        assert frozenset(declared) in bound, f"{agent} never received its tools"
+
+
+@pytest.mark.anyio
+async def test_the_tracer_forwards_bound_tools_and_still_traces():
+    """The bound view keeps the trace hooks and hands the tools to the model."""
+
+    class NamedTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    inner = ScriptedChatModel(script=[AIMessage(content="готово")])
+    inner.bound_tools.clear()
+    recorded: list[tuple[str, str]] = []
+    tracer = ModelTracer(
+        model=inner,
+        agent="supervisor",
+        recorder=lambda agent, status: recorded.append((agent, status)),
+        should_stop=lambda: False,
+    )
+
+    bound = tracer.bind_tools([NamedTool("handoff_to"), NamedTool("finish_run")])
+    assert bound is not tracer
+    answer = await bound.ainvoke([HumanMessage("передай работу агенту сайта")])
+
+    assert answer.content == "готово"
+    assert inner.bound_tools == [("handoff_to", "finish_run")]
+    assert recorded == [("supervisor", "done")]
+    # The unbound tracer stays unbound: only the clone carries the tools.
+    assert tracer.bound is None
+
+
+@pytest.mark.anyio
+async def test_a_transport_failure_is_stored_with_its_safe_provider_message(
+    tmp_path, repository, settings,
+):
+    """A refused connection must not be reported as an unknown supervisor error."""
+    harness = make_harness(tmp_path, repository, settings)
+    harness.model.failure = ProviderError(CONNECTION_ERROR)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    agents = {entry["agent"]: entry for entry in harness.repository.agents(harness.analysis_id)}
+    assert agents["supervisor"]["status"] == "error"
+    assert agents["supervisor"]["error"] == CONNECTION_ERROR
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "failed"
 
 
 @pytest.mark.anyio

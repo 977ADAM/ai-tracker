@@ -77,6 +77,7 @@ from app.domain.seo_prompts import (
     supervisor_prompt,
 )
 from app.domain.seo_tools import CANCELLED, BudgetExceeded, SeoBudget, SeoCancelled
+from app.integrations.seo_llm import provider_error
 from app.service.seo_tools import SeoToolbox
 
 LOGGER = logging.getLogger(__name__)
@@ -346,6 +347,10 @@ class ModelTracer(BaseChatModel):
     knows who it is acting for, so no prompt has to be matched at run time. The
     wrapper spends one turn of that agent's budget, appends one `model` step with
     the agent and the turn status, and never puts the answer text into the trace.
+
+    `bind_tools` returns a clone that carries the bound inner model: the tools
+    must really reach the provider (an agent without tools can never act), while
+    every turn of the bound model stays traced. The original tracer is unchanged.
     """
 
     model: BaseChatModel
@@ -353,17 +358,15 @@ class ModelTracer(BaseChatModel):
     recorder: Callable[[str, str], None]
     on_turn: Callable[[str], None] | None = None
     should_stop: Callable[[], bool] | None = None
+    bound: Any = None
 
     @property
     def _llm_type(self) -> str:
         return f"seo-agent-trace-{self.model._llm_type}"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
-        # The offered tools are the `ToolNode`'s business: the graph executes the
-        # bridge tools itself. Returning the wrapper — and not a binding of the
-        # inner model — is what keeps every turn visible to the trace.
-        _ = (tools, kwargs)
-        return self
+        """Bind the tools on the inner model and keep this tracer around them."""
+        return self.model_copy(update={"bound": self.model.bind_tools(tools, **kwargs)})
 
     async def _agenerate(
         self,
@@ -373,7 +376,21 @@ class ModelTracer(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         self._spend()
-        result = await self.model._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+        try:
+            if self.bound is not None:
+                answer = await self.bound.ainvoke(messages, stop=stop)
+                result = ChatResult(
+                    generations=[ChatGeneration(message=_answer_message(answer))],
+                )
+            else:
+                result = await self.model._agenerate(
+                    messages, stop=stop, run_manager=run_manager, **kwargs,
+                )
+        except Exception as exc:
+            mapped = provider_error(exc)
+            if mapped is None:
+                raise
+            raise mapped from exc
         self._record(result)
         return result
 
@@ -385,7 +402,21 @@ class ModelTracer(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         self._spend()
-        result = self.model._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+        try:
+            if self.bound is not None:
+                answer = self.bound.invoke(messages, stop=stop)
+                result = ChatResult(
+                    generations=[ChatGeneration(message=_answer_message(answer))],
+                )
+            else:
+                result = self.model._generate(
+                    messages, stop=stop, run_manager=run_manager, **kwargs,
+                )
+        except Exception as exc:
+            mapped = provider_error(exc)
+            if mapped is None:
+                raise
+            raise mapped from exc
         self._record(result)
         return result
 
@@ -413,6 +444,14 @@ def _turn_status(result: ChatResult) -> str:
     if isinstance(message, AIMessage) and message.tool_calls:
         return STATUS_WITH_TOOL_CALL
     return STATUS_WITHOUT_TOOL_CALL
+
+
+def _answer_message(answer: object) -> AIMessage:
+    """Read one answer of a bound model back as an assistant message."""
+    if isinstance(answer, AIMessage):
+        return answer
+    content = getattr(answer, "content", "")
+    return AIMessage(content if isinstance(content, str) else str(content))
 
 
 # -- graph -------------------------------------------------------------------
@@ -447,7 +486,9 @@ def build_agent_graph(
             should_stop=toolbox.cancelled,
         )
 
-    supervisor_model = traced_model(SUPERVISOR_NODE)
+    supervisor_model = traced_model(SUPERVISOR_NODE).bind_tools(
+        langchain_tools(toolbox, SUPERVISOR_NODE),
+    )
 
     async def supervisor_node(state: RunState) -> dict[str, object]:
         return await _supervisor_turn(
@@ -797,7 +838,9 @@ class SeoAgentRuntime:
         except BaseException as exc:  # a run task must never surface an exception
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
-            LOGGER.error("SEO agent run %s stopped: %s", analysis_id, type(exc).__name__)
+            # The stored row keeps a fixed safe message; the operator needs the
+            # real cause, which only this local log line carries.
+            LOGGER.error("SEO agent run %s stopped", analysis_id, exc_info=exc)
             if self._cancelled(analysis_id):
                 # A cancel that raced the failure still owns the outcome: the
                 # run stays `cancelled` instead of turning into `failed`.
@@ -867,7 +910,7 @@ class SeoAgentRuntime:
         except BaseException as exc:  # a resume task must never surface an exception
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
-            LOGGER.error("SEO agent resume %s stopped: %s", analysis_id, type(exc).__name__)
+            LOGGER.error("SEO agent resume %s stopped", analysis_id, exc_info=exc)
             if self._cancelled(analysis_id):
                 self._finalize_cancelled(analysis_id)
             elif toolbox.exhausted:
@@ -1019,9 +1062,18 @@ def _chat_model(model: BaseChatModel | AgentModel) -> BaseChatModel:
 
 
 def _safe_error(error: BaseException) -> str:
-    """A fixed, safe message: no exception text, no URL, and no key reaches a row."""
+    """A fixed, safe message: no exception text, no URL, and no key reaches a row.
+
+    An application error already carries a fixed Russian message that quotes
+    nothing (`ProviderError`, `StorageError`), so the row can name the real kind
+    of failure: a refused connection is not the same as an unknown supervisor
+    crash. Anything else keeps the generic message, because its own text may
+    quote an upstream body.
+    """
     if isinstance(error, StorageError):
         return STORAGE_FAILED
+    if isinstance(error, AppError):
+        return str(error)
     return SUPERVISOR_FAILED
 
 

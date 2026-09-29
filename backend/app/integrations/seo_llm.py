@@ -114,6 +114,12 @@ class LangChainSeoLlmClient:
     temperature is zero, and the timeout bounds the whole call. The tool schemas
     are handed to `bind_tools` unchanged, and the returned tool calls become
     domain `ToolCall` values.
+
+    Every adapter owns the HTTP pool it creates. `langchain_openai` would
+    otherwise hand out one process-wide cached client per endpoint, so closing a
+    throwaway probe adapter would close the client of the long-lived runtime
+    adapter too, and the next call of a live run would fail with
+    «Cannot send a request, as the client has been closed.».
     """
 
     def __init__(
@@ -122,15 +128,20 @@ class LangChainSeoLlmClient:
         *,
         timeout: float = DEFAULT_TIMEOUT,
         model: BaseChatModel | None = None,
-        http_async_client: object | None = None,
+        http_async_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.settings = settings
         self.endpoint = settings.endpoint
         self.model = settings.model
         self.timeout = timeout
+        self._owned_client: httpx.AsyncClient | None = None
         if model is not None:
             self._model: BaseChatModel = model
         else:
+            client = http_async_client
+            if client is None:
+                client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
+                self._owned_client = client
             options: dict[str, object] = {
                 "base_url": chat_completions_base_url(settings.endpoint),
                 "api_key": settings.api_key,
@@ -139,9 +150,8 @@ class LangChainSeoLlmClient:
                 "timeout": timeout,
                 "max_retries": 0,
                 "use_responses_api": False,
+                "http_async_client": client,
             }
-            if http_async_client is not None:
-                options["http_async_client"] = http_async_client
             self._model = ChatOpenAI(**options)
 
     @property
@@ -172,11 +182,35 @@ class LangChainSeoLlmClient:
         return agent_turn(answer)
 
     async def aclose(self) -> None:
-        """Close the HTTP client the SDK created for this adapter, if any."""
-        client = getattr(self._model, "root_async_client", None)
-        close = getattr(client, "close", None)
-        if callable(close):
-            await close()
+        """Close the HTTP client this adapter created, and nothing else.
+
+        An adapter built over an injected client, or over a model handed in from
+        outside, does not own that client: the caller closes it.
+        """
+        client = self._owned_client
+        self._owned_client = None
+        if client is not None:
+            await client.aclose()
+
+
+def provider_error(error: BaseException) -> ProviderError | None:
+    """Map one provider or transport failure onto a fixed safe message.
+
+    `None` means "not a provider failure": a bug in our own code keeps its own
+    exception instead of being disguised as an upstream problem. Nothing of the
+    original text, URL, or key survives the mapping.
+    """
+    if isinstance(error, (openai.AuthenticationError, openai.PermissionDeniedError)):
+        return ProviderError(AUTHORIZATION_ERROR)
+    if isinstance(error, openai.RateLimitError):
+        return ProviderError(RATE_LIMIT_ERROR)
+    if isinstance(error, (openai.APIConnectionError, httpx.HTTPError, TimeoutError)):
+        return ProviderError(CONNECTION_ERROR)
+    if isinstance(error, openai.APIStatusError):
+        return ProviderError(UNAVAILABLE_ERROR)
+    if isinstance(error, openai.OpenAIError):
+        return ProviderError(PAYLOAD_ERROR)
+    return None
 
 
 def openai_tools(tools: Sequence[ToolSchema]) -> list[dict[str, object]]:

@@ -504,3 +504,42 @@ async def test_transport_failures_are_reported_safely(failure):
     assert str(error.value) == CONNECTION_ERROR
     assert "private-host" not in str(error.value)
 
+
+
+# -- HTTP client ownership ----------------------------------------------------
+#
+# `langchain_openai` hands every `ChatOpenAI` the same process-wide default
+# `httpx` client. Closing one adapter would therefore close the client of every
+# other adapter — including the runtime model of a live run — and the next call
+# would fail with "Cannot send a request, as the client has been closed.".
+
+
+@pytest.mark.anyio
+async def test_two_adapters_do_not_share_one_http_pool():
+    first = LangChainSeoLlmClient(seo_settings())
+    second = LangChainSeoLlmClient(seo_settings())
+    try:
+        first_client = first.chat_model.root_async_client
+        second_client = second.chat_model.root_async_client
+        assert first_client is not second_client
+
+        await first.aclose()
+
+        assert first_client.is_closed()
+        assert not second_client.is_closed()
+    finally:
+        await second.aclose()
+
+
+@pytest.mark.anyio
+async def test_a_closed_probe_adapter_leaves_the_runtime_adapter_open():
+    """The sequence of one run start: probe a throwaway adapter, then run."""
+    runtime = LangChainSeoLlmClient(seo_settings())
+    probe = LangChainSeoLlmClient(seo_settings())
+    try:
+        await probe.aclose()
+
+        assert probe.chat_model.root_async_client.is_closed()
+        assert not runtime.chat_model.root_async_client.is_closed()
+    finally:
+        await runtime.aclose()
