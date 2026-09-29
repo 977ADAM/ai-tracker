@@ -1,23 +1,24 @@
-"""Wiring of services for one app instance, plus FastAPI dependencies."""
+"""The composition root: one `Container` of services per application instance.
+
+Nothing here knows about HTTP. Every collaborator is built once, injected where
+it is shared, and passed explicitly where a run needs its own instance, so the
+whole object graph of the application can be assembled — and replaced in tests —
+without starting a server.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
 
 import httpx
-from fastapi import Depends, Request
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage
-from langchain_core.outputs import ChatResult
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from app.api.deps.checkpoints import agent_checkpointer, checkpoint_probe
+from app.api.deps.fallbacks import UnconfiguredAgentModel
 from app.core.config import Settings
-from app.core.errors import ConfigurationError
 from app.db.connections import ConnectionRepository
 from app.db.runs import RunRepository
 from app.db.search_settings import SearchSettingsRepository
@@ -40,66 +41,13 @@ from app.service.provider_settings import ProviderSettingsService
 from app.service.runs import RunService
 from app.service.search import SearchService
 from app.service.search_settings import SearchSettingsService
-from app.service.seo import LLM_NOT_CONFIGURED, SeoService
-from app.service.seo_agents import (
-    CheckpointFactory,
-    SeoAgentRuntime,
-    checkpoint_exists,
-    checkpoint_path,
-    secure_checkpoint,
-)
+from app.service.seo import SeoService
+from app.service.seo_agents import CheckpointFactory, SeoAgentRuntime
 from app.service.seo_settings import SeoSettingsService
 from app.service.seo_tools import SeoToolbox
 
 CONNECT_TIMEOUT = 20
 READ_TIMEOUT = 60
-
-
-class UnconfiguredAgentModel(BaseChatModel):
-    """The stand-in chat model of a container without a configured service LLM.
-
-    The application must start while the SEO LLM settings are empty, but
-    `SeoAgentRuntime` resolves its chat model when it is built. This model is
-    never called: `SeoService.start` refuses such a run with a safe configuration
-    error before any analysis row or paid call exists.
-    """
-
-    @property
-    def _llm_type(self) -> str:
-        return "seo-unconfigured"
-
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        raise ConfigurationError(LLM_NOT_CONFIGURED)
-
-
-def agent_checkpointer(config_dir: Path) -> CheckpointFactory:
-    """Return the factory of the owner-only graph checkpoint file.
-
-    Graph state lives beside `runs.sqlite3`, never inside it, and one file holds
-    the thread of every analysis: the runtime passes the analysis id as the
-    `thread_id`, so a restart finds exactly the run it needs.
-    """
-    path = checkpoint_path(config_dir)
-
-    @asynccontextmanager
-    async def open_checkpointer(_analysis_id: str):
-        secure_checkpoint(path)
-        async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
-            yield saver
-
-    return open_checkpointer
-
-
-def checkpoint_probe(config_dir: Path) -> Callable[[str], bool]:
-    """Return the synchronous restart probe over one config directory."""
-    path = checkpoint_path(config_dir)
-    return lambda analysis_id: checkpoint_exists(path, analysis_id)
 
 
 @dataclass(frozen=True)
@@ -122,6 +70,39 @@ class Container:
     seo_settings: SeoSettingsService
 
 
+def make_seo_toolbox_factory(
+    repository: SeoRepository,
+    fetcher: SiteFetcher,
+    search_settings: SearchSettingsService,
+    connections: ConnectionService,
+    provider_factory: ProviderFactory,
+    seo_settings: SeoSettingsService,
+) -> Callable[[str, SeoInput, SeoBudget], SeoToolbox]:
+    """Return the factory of one run's toolbox, over settings read at run start.
+
+    The gateway and the model name are resolved when a run begins, not at
+    container build, so a settings change reaches the next run; the repository,
+    the fetcher, the connections, and the provider factory are the app's own
+    shared collaborators.
+    """
+
+    def build(analysis_id: str, run_input: SeoInput, budget: SeoBudget) -> SeoToolbox:
+        return SeoToolbox(
+            repository,
+            fetcher,
+            search_settings.gateway_snapshot(),
+            connections,
+            provider_factory,
+            analysis_id=analysis_id,
+            input=run_input,
+            connection_ids=run_input.connection_ids,
+            budget=budget,
+            model_name=str(seo_settings.public()["model"] or ""),
+        )
+
+    return build
+
+
 def build_container(
     settings: Settings,
     *,
@@ -140,6 +121,7 @@ def build_container(
     seo_checkpointer: BaseCheckpointSaver | CheckpointFactory | None = None,
     fetcher: SiteFetcher | None = None,
 ) -> Container:
+    """Assemble the services of one application; every collaborator is injectable."""
     secret_store = secrets or KeyringSecrets()
     if repository is None:
         repository = ConnectionRepository(
@@ -190,26 +172,9 @@ def build_container(
         seo_settings_service = SeoSettingsService(seo_settings_repository, search_client)
 
     resolved_fetcher = fetcher if fetcher is not None else HttpxSiteFetcher(search_client)
-
-    def agent_toolbox(analysis_id: str, run_input: SeoInput, budget: SeoBudget) -> SeoToolbox:
-        """Build one run's toolbox over the settings resolved when it starts.
-
-        The gateway and the model name are read here, not at container build, so
-        a settings change reaches the next run; the connections, the fetcher, and
-        the provider factory are the app's own shared collaborators.
-        """
-        return SeoToolbox(
-            seo_repository,
-            resolved_fetcher,
-            search_settings.gateway_snapshot(),
-            connections,
-            factory,
-            analysis_id=analysis_id,
-            input=run_input,
-            connection_ids=run_input.connection_ids,
-            budget=budget,
-            model_name=str(seo_settings_service.public()["model"] or ""),
-        )
+    toolbox_factory = seo_toolbox_factory or make_seo_toolbox_factory(
+        seo_repository, resolved_fetcher, search_settings, connections, factory, seo_settings_service,
+    )
 
     if seo_agent_runtime is None:
         # The runtime resolves its chat model once, at build time. Without a
@@ -221,7 +186,7 @@ def build_container(
         )
         seo_agent_runtime = SeoAgentRuntime(
             seo_repository,
-            seo_toolbox_factory if seo_toolbox_factory is not None else agent_toolbox,
+            toolbox_factory,
             agent_model if agent_model is not None else UnconfiguredAgentModel(),
             checkpointer=(
                 seo_checkpointer if seo_checkpointer is not None
@@ -230,7 +195,8 @@ def build_container(
         )
     if seo_service is None:
         # The service owns the configuration refusals and the background tasks;
-        # the restart policy below defers a checkpointed run until a loop exists.
+        # the restart policy inside it defers a checkpointed run until a loop
+        # exists.
         seo_service = SeoService(
             seo_repository,
             seo_agent_runtime,
@@ -256,62 +222,3 @@ def build_container(
         seo_service=seo_service,
         seo_settings=seo_settings_service,
     )
-
-
-def get_container(request: Request) -> Container:
-    return request.app.state.container
-
-
-ContainerDep = Annotated[Container, Depends(get_container)]
-
-
-def get_connection_service(container: ContainerDep) -> ConnectionService:
-    return container.connections
-
-
-def get_check_service(container: ContainerDep) -> CheckService:
-    return container.checks
-
-
-def get_form_service(container: ContainerDep) -> FormService:
-    return container.form
-
-
-def get_provider_settings_service(container: ContainerDep) -> ProviderSettingsService:
-    return container.provider_settings
-
-
-def get_config_service(container: ContainerDep) -> ConfigService:
-    return container.config
-
-
-def get_search_service(container: ContainerDep) -> SearchService:
-    return container.search
-
-
-def get_search_settings_service(container: ContainerDep) -> SearchSettingsService:
-    return container.search_settings
-
-
-def get_run_service(container: ContainerDep) -> RunService:
-    return container.runs
-
-
-def get_seo_service(container: ContainerDep) -> SeoService:
-    return container.seo_service
-
-
-def get_seo_settings_service(container: ContainerDep) -> SeoSettingsService:
-    return container.seo_settings
-
-
-ConnectionServiceDep = Annotated[ConnectionService, Depends(get_connection_service)]
-CheckServiceDep = Annotated[CheckService, Depends(get_check_service)]
-FormServiceDep = Annotated[FormService, Depends(get_form_service)]
-ProviderSettingsServiceDep = Annotated[ProviderSettingsService, Depends(get_provider_settings_service)]
-ConfigServiceDep = Annotated[ConfigService, Depends(get_config_service)]
-SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
-SearchSettingsServiceDep = Annotated[SearchSettingsService, Depends(get_search_settings_service)]
-RunServiceDep = Annotated[RunService, Depends(get_run_service)]
-SeoServiceDep = Annotated[SeoService, Depends(get_seo_service)]
-SeoSettingsServiceDep = Annotated[SeoSettingsService, Depends(get_seo_settings_service)]
