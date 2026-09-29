@@ -15,6 +15,9 @@ from pydantic import BaseModel, ConfigDict, StrictStr
 
 SeoAnalysisStatus = Literal["running", "completed", "failed", "interrupted", "cancelled"]
 SeoStageStatus = Literal["pending", "running", "done", "error", "skipped"]
+SeoAgentStatus = Literal["pending", "running", "waiting", "done", "error", "skipped"]
+SeoAgentStepKind = Literal["model", "tool", "handoff", "system"]
+SeoAgentStepStatus = Literal["pending", "running", "done", "error", "rejected", "skipped"]
 
 
 class SeoAnalysisRequest(BaseModel):
@@ -159,6 +162,44 @@ class SeoReadinessResponse(BaseModel):
     model_rows: int
 
 
+class SeoAgentResponse(BaseModel):
+    """One agent of the run: its name, its status, and a safe error."""
+
+    agent: str
+    status: SeoAgentStatus
+    error: str | None = None
+    updated_at: str | None = None
+
+
+class SeoBudgetItemResponse(BaseModel):
+    """One metered resource of the run: what it used and its per-run cap."""
+
+    used: int
+    limit: int
+
+
+class SeoBudgetResponse(BaseModel):
+    """The spent budgets of a run, plus the raw counters they are derived from."""
+
+    pages: SeoBudgetItemResponse
+    searches: SeoBudgetItemResponse
+    model_answers: SeoBudgetItemResponse
+    tool_calls: SeoBudgetItemResponse
+    handoffs: SeoBudgetItemResponse
+    seed_searches: int
+    model_rows: int
+    steps: int
+    agent_steps: dict[str, int]
+
+
+class SeoConclusionsResponse(BaseModel):
+    """The report agent's text: labeled as model output, never a metric."""
+
+    summary: str
+    recommendations: str
+    model: str
+
+
 class SeoSnapshotResponse(BaseModel):
     """The saved analysis without model answers and without operation IDs."""
 
@@ -173,12 +214,35 @@ class SeoSnapshotResponse(BaseModel):
     services: list[str]
     pages: list[SeoPageResponse]
     stages: list[SeoStageResponse]
+    agents: list[SeoAgentResponse]
+    budget: SeoBudgetResponse
+    budget_exhausted: bool
     candidates: list[SeoCandidateResponse]
     queries: list[SeoQueryResponse]
     summary: str | None
+    conclusions: SeoConclusionsResponse | None
     counters: SeoCountsResponse
     readiness: SeoReadinessResponse
     aggregates: SeoAggregatesResponse
+
+
+class SeoTraceStepResponse(BaseModel):
+    """One traced step of one agent: safe arguments and a short result only."""
+
+    step_index: int
+    agent: str
+    kind: SeoAgentStepKind
+    name: str
+    arguments: dict[str, object]
+    result_summary: str | None
+    status: SeoAgentStepStatus
+    error: str | None
+    created_at: str
+
+
+class SeoTracePageResponse(BaseModel):
+    items: list[SeoTraceStepResponse]
+    next_cursor: str | None
 
 
 class SeoHistoryItemResponse(BaseModel):

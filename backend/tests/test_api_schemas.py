@@ -117,7 +117,7 @@ def test_openapi_documents_every_operation(client):
         "/api/runs", "/api/runs/{run_id}", "/api/runs/{run_id}/export.csv",
         "/api/seo/settings", "/api/seo/settings/credentials", "/api/seo/settings/test",
         "/api/seo/analyses", "/api/seo/analyses/{id}",
-        "/api/seo/analyses/{id}/rows", "/api/seo/analyses/{id}/cancel",
+        "/api/seo/analyses/{id}/rows", "/api/seo/analyses/{id}/trace", "/api/seo/analyses/{id}/cancel",
     }
     for path, operations in spec["paths"].items():
         for method, operation in operations.items():

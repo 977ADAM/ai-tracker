@@ -44,8 +44,8 @@ MODEL_ANSWER = "Модель советует «Ромашка» и https://exam
 ESTIMATE = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
 SNAPSHOT_FIELDS = {
     "id", "status", "created_at", "updated_at", "finished_at", "input", "estimate",
-    "company_name", "services", "pages", "stages", "candidates", "queries", "summary",
-    "counters", "readiness", "aggregates",
+    "company_name", "services", "pages", "stages", "agents", "budget", "budget_exhausted",
+    "candidates", "queries", "summary", "conclusions", "counters", "readiness", "aggregates",
 }
 COUNTERS = {
     "queries": 0, "search_rows": 0, "model_rows": 0, "search_errors": 0, "model_errors": 0,
@@ -436,3 +436,41 @@ def test_unknown_ids_and_the_api_prefix(make_client, settings):
         assert client.post("/api/seo/analyses/missing/cancel").status_code == 404
         assert client.get("/seo/analyses").status_code == 404
         assert client.get("/api/seo/analyses").status_code == 200
+
+
+def test_trace_endpoint_serves_steps_without_secrets(make_client, settings):
+    repository = make_repository(settings)
+    analysis_id = seed_analysis(repository)
+    repository.append_step(
+        analysis_id, "supervisor", "model", "supervisor", status="running",
+    )
+    repository.append_step(
+        analysis_id, "site", "tool", "fetch_site",
+        arguments={"max_pages": 2}, result_summary='{"used_pages":1}', status="done",
+    )
+    repository.append_step(
+        analysis_id, "site", "tool", "save_site_facts",
+        arguments={"company_name": "Ромашка"}, result_summary='{"status":"saved"}',
+        status="done",
+    )
+
+    with make_client(seo_repository=repository) as client:
+        response = client.get(f"/api/seo/analyses/{analysis_id}/trace")
+
+    assert response.status_code == 200
+    page = response.json()
+    assert page["next_cursor"] is None
+    assert [item["step_index"] for item in page["items"]] == [1, 2, 3]
+    assert [item["agent"] for item in page["items"]] == ["supervisor", "site", "site"]
+    assert [item["name"] for item in page["items"]] == ["supervisor", "fetch_site", "save_site_facts"]
+    assert page["items"][1]["arguments"] == {"max_pages": 2}
+    assert set(page["items"][0]) == {
+        "step_index", "agent", "kind", "name", "arguments", "result_summary",
+        "status", "error", "created_at",
+    }
+    assert "yandex-operation-secret" not in response.text
+    assert MODEL_ANSWER not in response.text
+
+    with make_client(seo_repository=repository) as client:
+        assert client.get(f"/api/seo/analyses/{analysis_id}/trace?cursor=%%%").status_code == 400
+        assert client.get("/api/seo/analyses/unknown-id/trace").status_code == 404
