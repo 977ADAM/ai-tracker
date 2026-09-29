@@ -461,7 +461,7 @@ def test_saved_report_opens_from_history_and_deletes(page: Page, application: Ap
         for agent in AGENT_IDS:
             expect(seo.agent(agent)).to_contain_text(AGENT_LABELS[agent])
             expect(seo.agent_status(agent)).to_have_text("Готово")
-        assert seo.budget_text("pages") == "1 / 20"
+        assert seo.budget_text("pages") == "1 / 5"
         assert seo.budget_text("searches") == "3 / 43"
         assert seo.budget_text("model_answers") == "3 / 40"
         assert seo.budget_text("tool_calls") == "4 / 120"

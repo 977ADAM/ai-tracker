@@ -29,6 +29,7 @@ from app.domain.seo import SeoInput, normalize_seo_request
 from app.domain.seo_llm import LLM_NOT_CONFIGURED
 from app.domain.seo_tools import (
     AGENT_TOOLS,
+    MAX_FETCH_PAGES,
     MAX_SPECIALIST_TURNS,
     TOOL_ARGUMENTS,
     SeoBudget,
@@ -336,7 +337,7 @@ async def test_bridge_tools_mirror_the_declared_schemas_of_every_agent(
                 .args_schema.model_json_schema()["properties"]["max_pages"],
                 next(tool for tool in tools if tool.name == "fetch_site").args_schema.model_json_schema(),
             )
-            assert (bound["minimum"], bound["maximum"]) == (1, 20)
+            assert (bound["minimum"], bound["maximum"]) == (1, MAX_FETCH_PAGES)
         if agent == "queries":
             root = next(tool for tool in tools if tool.name == "save_queries").args_schema.model_json_schema()
             items = root["properties"]["queries"]

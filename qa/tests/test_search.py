@@ -146,7 +146,7 @@ def agent_snapshot(status: str, *, exhausted: bool = False) -> dict:
         for agent in AGENT_IDS
     ]
     data["budget"] = {
-        "pages": {"used": 1, "limit": 20},
+        "pages": {"used": 1, "limit": 5},
         "searches": {"used": 2, "limit": 43},
         "model_answers": {"used": 1, "limit": 40},
         "tool_calls": {"used": 5, "limit": 120},
@@ -323,7 +323,7 @@ def test_agent_run_shows_agents_budget_trace_and_conclusions(
     expect(page.locator("[data-agent-status='site']")).to_have_text("Ожидает")
 
     # The budget pairs what was spent with the caps of the run.
-    assert page.locator("[data-budget-used='pages']").inner_text().strip() == "1 / 20"
+    assert page.locator("[data-budget-used='pages']").inner_text().strip() == "1 / 5"
     assert page.locator("[data-budget-used='searches']").inner_text().strip() == "2 / 43"
     assert page.locator("[data-budget-used='tool_calls']").inner_text().strip() == "5 / 120"
     assert page.locator("[data-budget-used='handoffs']").inner_text().strip() == "1 / 15"

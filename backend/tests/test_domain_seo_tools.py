@@ -52,7 +52,7 @@ def test_the_agreed_limits_are_the_ones_the_run_uses():
     assert GENERATED_QUERY_LIMIT == 40
     assert MIN_GENERATED_QUERIES == 5
     assert MAX_SEARCH_REQUESTS == 43
-    assert MAX_FETCH_PAGES == 20
+    assert MAX_FETCH_PAGES == 5
     assert MAX_SUPERVISOR_HANDOFFS == 15
     assert MAX_SPECIALIST_TURNS == 20
     assert MAX_TOOL_CALLS == 120

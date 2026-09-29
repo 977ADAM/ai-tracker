@@ -175,7 +175,7 @@ async def test_it_deduplicates_links_without_fragments_and_keeps_the_query():
 
 
 @pytest.mark.anyio
-async def test_it_stops_after_twenty_pages():
+async def test_it_stops_after_the_page_cap():
     routes: dict[str, Route] = {"/robots.txt": httpx.Response(404), "/": links("/p1")}
     for index in range(1, 40):
         routes[f"/p{index}"] = links(f"/p{index + 1}")
@@ -185,9 +185,9 @@ async def test_it_stops_after_twenty_pages():
         pages = await fetcher.fetch("example.ru")
 
     assert len(pages) == MAX_FETCH_PAGES
-    assert pages[-1].url == "https://example.ru/p19"
-    assert len(site.paths) == MAX_FETCH_PAGES + 1  # robots.txt and twenty pages
-    assert "/p20" not in site.paths
+    assert pages[-1].url == f"https://example.ru/p{MAX_FETCH_PAGES - 1}"
+    assert len(site.paths) == MAX_FETCH_PAGES + 1  # robots.txt and the capped pages
+    assert f"/p{MAX_FETCH_PAGES}" not in site.paths
 
 
 @pytest.mark.anyio

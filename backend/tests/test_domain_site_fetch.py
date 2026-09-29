@@ -148,7 +148,7 @@ def test_is_public_address_accepts_a_public_address(value):
 
 
 def test_the_fetch_limits_are_the_agreed_ones():
-    assert MAX_FETCH_PAGES == 20
+    assert MAX_FETCH_PAGES == 5
     assert MAX_FETCH_BYTES == 1024 * 1024
     assert FETCH_TOTAL_TIMEOUT == 60.0
     assert FETCH_CONNECT_TIMEOUT == 10.0

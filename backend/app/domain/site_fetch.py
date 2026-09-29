@@ -15,16 +15,16 @@ from typing import Protocol
 from app.core.errors import ValidationError
 from app.domain.search import INVALID_SITE, normalize_search_host
 
-# Crawl bounds: at most 20 pages of the entered host, 1 MiB per response, five
+# Crawl bounds: at most five pages of the entered host, 1 MiB per response, five
 # redirects per request, and 60 seconds for the whole crawl including robots.txt.
-MAX_FETCH_PAGES = 20
+MAX_FETCH_PAGES = 5
 MAX_FETCH_BYTES = 1024 * 1024
 FETCH_TOTAL_TIMEOUT = 60.0
 FETCH_CONNECT_TIMEOUT = 10.0
 MAX_FETCH_REDIRECTS = 5
 
 # Page text is sent to the configured service LLM, so every page is cut to a
-# fixed length: twenty pages must not turn into tens of megabytes of prompt text.
+# fixed length: five pages must not turn into tens of megabytes of prompt text.
 MAX_PAGE_TEXT_CHARS = 20_000
 
 LOCAL_NAMES = frozenset({"localhost", "local", "localdomain"})
