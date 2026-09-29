@@ -1,9 +1,11 @@
-"""The SEO analysis page: form, run screen, report, history, and the LLM settings tab.
+"""The SEO analysis page: form, run screen, trace, report, history, and the LLM settings tab.
 
-The home page is a one-shot SEO scenario: five form fields start an analysis, six
-fixed stages report their state, the finished run shows a saved report, and the
-SEO history opens or deletes a saved analysis. The settings dialog keeps the
-provider sections and adds a third tab for the service LLM.
+The home page is a one-shot SEO scenario: five form fields start an analysis, a
+supervisor agent hands work to five specialists whose statuses, budget usage, and
+trace steps appear on the run screen, the finished run shows a saved report with
+its model-written conclusions, and the SEO history opens or deletes a saved
+analysis. The settings dialog keeps the provider sections and adds a third tab for
+the service LLM, including whether that model can call tools.
 
 Selectors stay on roles, labels, and the data attributes the components own, so a
 styling change does not break the checks.
@@ -22,6 +24,18 @@ SUBMIT = "Запустить анализ"
 OPEN_REPORT = "Открыть отчёт"
 DELETE_ANALYSIS = "Удалить"
 SHOW_MORE = "Показать ещё"
+
+# The six agents in their fixed supervisor-to-report order, with the labels the
+# run screen renders.
+AGENT_IDS = ("supervisor", "site", "competitors", "queries", "checks", "report")
+AGENT_LABELS = {
+    "supervisor": "Супервизор",
+    "site": "Агент сайта",
+    "competitors": "Агент конкурентов",
+    "queries": "Агент запросов",
+    "checks": "Агент проверок",
+    "report": "Агент отчёта",
+}
 
 
 class SeoPage:
@@ -119,6 +133,46 @@ class SeoPage:
         return self.page.locator(f"[data-stage='{number}']")
 
     @property
+    def agents_panel(self) -> Locator:
+        """The six-agent panel shown for a run of the agent runtime."""
+        return self.page.locator("[data-agent-panel]")
+
+    def agent(self, agent: str) -> Locator:
+        return self.page.locator(f"[data-agent='{agent}']")
+
+    def agent_status(self, agent: str) -> Locator:
+        """The Russian status label of one agent, for example «Выполняется»."""
+        return self.page.locator(f"[data-agent-status='{agent}']")
+
+    def budget_item(self, key: str) -> Locator:
+        """One budget row, for example `tool_calls` or `seed_searches`."""
+        return self.page.locator(f"[data-budget-used='{key}']")
+
+    def budget_text(self, key: str) -> str:
+        """The rendered «used / limit» of one metered resource."""
+        return (self.budget_item(key).inner_text() or "").strip()
+
+    @property
+    def budget_exhausted(self) -> Locator:
+        return self.page.locator("[data-budget-exhausted]")
+
+    @property
+    def trace_feed(self) -> Locator:
+        return self.page.locator("[data-trace-feed]")
+
+    def trace_step(self, index: int) -> Locator:
+        return self.page.locator(f"[data-trace-step='{index}']")
+
+    @property
+    def trace_show_more(self) -> Locator:
+        """The trace cursor button, scoped to the feed so the report tables do not match."""
+        return self.trace_feed.get_by_role("button", name=SHOW_MORE)
+
+    @property
+    def trace_error(self) -> Locator:
+        return self.page.locator("[data-trace-error]")
+
+    @property
     def counters(self) -> Locator:
         return self.page.locator("[aria-label='Счётчики строк']")
 
@@ -153,6 +207,19 @@ class SeoPage:
 
     def candidate(self, host: str) -> Locator:
         return self.page.locator(f"[data-candidate='{host}']")
+
+    @property
+    def conclusions(self) -> Locator:
+        """The report agent's text, shown apart from the server-computed numbers."""
+        return self.page.locator("[data-report-conclusions]")
+
+    @property
+    def conclusions_summary(self) -> Locator:
+        return self.page.locator("[data-conclusions-summary]")
+
+    @property
+    def conclusions_recommendations(self) -> Locator:
+        return self.page.locator("[data-conclusions-recommendations]")
 
     @property
     def search_detail_rows(self) -> Locator:

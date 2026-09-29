@@ -1,8 +1,11 @@
 """The SEO scenario on the home page, without any paid external call.
 
 What the checks cover: the five fields and their client-side validation, the upper
-call estimate, the «SEO-анализ» settings tab, the safe error of a start without a
-configured service LLM, and a saved report with its SEO history.
+call estimate and its agent warning, the «SEO-анализ» settings tab with the
+tool-support probe, the safe error of a start without a configured service LLM, and
+a saved agent run whose run screen shows the six agents, the spent budgets, and the
+trace feed, whose report shows the model-written conclusions, and which the SEO
+history opens and deletes.
 
 No check reaches Yandex or a model API:
 
@@ -10,9 +13,10 @@ No check reaches Yandex or a model API:
   that no `POST /api/seo/analyses` leaves the browser;
 * the settings checks answer the settings write and the connection probe locally,
   so «Проверить подключение» never spends a real completion;
-* the report check prepares a finished analysis straight in `runs.sqlite3` — the
-  page then reads it through the real API, and the record is deleted through the
-  interface (and removed from the database again in a `finally`).
+* the report check prepares a finished agent analysis straight in `runs.sqlite3`
+  — the page then reads it through the real API, including the trace resource, and
+  the record is deleted through the interface (and removed from the database again
+  in a `finally`).
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ import pytest
 from playwright.sync_api import Page, Route, expect
 
 from app import Application
-from pages.seo import SeoPage
+from pages.seo import AGENT_IDS, AGENT_LABELS, SeoPage
 from pages.settings import SettingsPage
 
 CONFIG_DIR_VARIABLE = "AI_TRACKER_CONFIG_DIR"
@@ -68,7 +72,26 @@ SUMMARY = "Ромашка упоминается в половине успеш�
 SEARCH_ERROR = "Не удалось получить выдачу Яндекса"
 MODEL_ANSWER = "Ромашка и flower-shop.example предлагают доставку цветов"
 
+# The agent rows, trace steps, and conclusions of the fixture run. They are what
+# the run screen and the report read back through the real trace resource.
+CONCLUSIONS_SUMMARY = "Ромашка видна в половине ответов моделей."
+CONCLUSIONS_RECOMMENDATIONS = "Усилить страницы услуг и показать цены."
+CONCLUSIONS_MODEL = "qa-service-model"
+BUDGET_EXHAUSTED_ERROR = "Лимит прогона исчерпан"
+
+# (agent, kind, name, arguments_json, result_summary, status, error)
+AGENT_STEPS = (
+    ("supervisor", "handoff", "handoff_to", {"agent": "site"}, '{"status":"accepted"}', "done", None),
+    ("site", "tool", "fetch_site", {"max_pages": 5}, '{"pages":1}', "done", None),
+    ("queries", "tool", "save_queries", {"queries": 3}, '{"saved":3}', "done", None),
+    ("checks", "tool", "yandex_search", {"query_index": 0}, None, "rejected", BUDGET_EXHAUSTED_ERROR),
+    ("report", "tool", "save_report", {"summary_chars": 42}, '{"saved":true}', "done", None),
+)
+
 ANALYSIS_TABLES = (
+    "seo_agent_steps",
+    "seo_agents",
+    "seo_conclusions",
     "seo_candidate_hits",
     "seo_search_rows",
     "seo_seed_rows",
@@ -102,7 +125,7 @@ def seed_finished_analysis() -> str:
 
     analysis_id = f"qa-seo-{uuid4().hex[:10]}"
     now = datetime.now(UTC).isoformat()
-    estimate = {"search_upper": 23, "model_upper": 20, "generated_limit": 20, "connections": 1}
+    estimate = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
 
     with closing(sqlite3.connect(path, timeout=5)) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
@@ -171,6 +194,32 @@ def seed_finished_analysis() -> str:
                 (analysis_id, CONNECTION_ID, "QA SEO модель", 2, "error", None, None, None,
                  "Модель недоступна", now),
             ],
+        )
+        # The agent runtime of this run: six finished agents, their trace, and the
+        # conclusions the report agent wrote. Plain legacy stages stay as well, so
+        # the fixture stays readable to a pre-agent build.
+        connection.executemany(
+            "INSERT INTO seo_agents (analysis_id, agent, status, error, updated_at) "
+            "VALUES (?,?,?,?,?)",
+            [(analysis_id, agent, "done", None, now) for agent in AGENT_IDS],
+        )
+        connection.executemany(
+            "INSERT INTO seo_agent_steps (analysis_id, step_index, agent, kind, name, "
+            "arguments_json, result_summary, status, error, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    analysis_id, index, agent, kind, name,
+                    json.dumps(arguments, ensure_ascii=False), result, status, error, now,
+                )
+                for index, (agent, kind, name, arguments, result, status, error)
+                in enumerate(AGENT_STEPS, start=1)
+            ],
+        )
+        connection.execute(
+            "INSERT INTO seo_conclusions (analysis_id, summary, recommendations, model, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (analysis_id, CONCLUSIONS_SUMMARY, CONCLUSIONS_RECOMMENDATIONS, CONCLUSIONS_MODEL, now),
         )
         connection.commit()
     return analysis_id
@@ -258,11 +307,14 @@ def test_seo_form_shows_the_upper_call_estimate(
     expect(seo.estimate_model).to_have_text("0")
 
     seo.connection_checkbox(PROVIDER_NAME).check()
-    expect(seo.estimate_search).to_have_text("23")
-    expect(seo.estimate_model).to_have_text("20")
+    expect(seo.estimate_search).to_have_text("43")
+    expect(seo.estimate_model).to_have_text("40")
     expect(seo.form).to_contain_text("платные вызовы")
     expect(seo.form).to_contain_text("отложенном режиме")
     expect(seo.form).to_contain_text("отдельно настроенную LLM")
+    # The agent steps of the run are model-driven and stay outside the estimate.
+    expect(seo.form).to_contain_text("Прогон ведут агенты")
+    expect(seo.form).to_contain_text("число шагов зависит от модели")
 
 
 def test_starting_without_a_service_llm_shows_a_safe_error(page: Page, application: Application) -> None:
@@ -326,6 +378,16 @@ def test_seo_settings_tab_saves_and_probes_without_paying(page: Page, applicatio
 
     seo.test_seo_connection()
     expect(seo.seo_settings_alert).to_contain_text(LLM_TEST_ERROR)
+    # The probe always names tool support: the agent runtime needs native tool calling.
+    expect(seo.seo_settings_alert).to_contain_text("Инструменты: не поддерживаются")
+
+    # The same probe answered with a tool-capable model shows the positive result.
+    page.route("**/api/seo/settings/test", lambda route: route.fulfill(
+        status=200, json={"ok": True, "model": SEO_MODEL, "tools": True}
+    ))
+    seo.test_seo_connection()
+    expect(seo.seo_status).to_contain_text(f"Подключение работает: {SEO_MODEL}")
+    expect(seo.seo_status).to_contain_text("Инструменты: поддерживаются")
 
     # The public BFF response never carries the key itself; only its presence.
     response = page.request.get(application.url("/api/seo/settings"))
@@ -368,6 +430,39 @@ def test_saved_report_opens_from_history_and_deletes(page: Page, application: Ap
         expect(seo.model_detail_rows.first).to_contain_text("flower-shop.example")
         expect(seo.model_detail_rows.nth(2)).to_contain_text("Модель недоступна")
         expect(seo.search_detail_rows.nth(2)).to_contain_text(SEARCH_ERROR)
+
+        # The run screen follows the agent runtime: six agents and what they spent.
+        expect(seo.agents_panel).to_be_visible()
+        for agent in AGENT_IDS:
+            expect(seo.agent(agent)).to_contain_text(AGENT_LABELS[agent])
+            expect(seo.agent_status(agent)).to_have_text("Готово")
+        assert seo.budget_text("pages") == "1 / 20"
+        assert seo.budget_text("searches") == "3 / 43"
+        assert seo.budget_text("model_answers") == "3 / 40"
+        assert seo.budget_text("tool_calls") == "4 / 120"
+        assert seo.budget_text("handoffs") == "1 / 15"
+        assert seo.budget_text("steps") == str(len(AGENT_STEPS))
+        expect(seo.budget_exhausted).to_have_count(0)
+
+        # The trace feed shows the steps in order with safe arguments only.
+        expect(seo.trace_feed).to_be_visible()
+        expect(seo.trace_step(1)).to_contain_text("handoff_to")
+        expect(seo.trace_step(1)).to_contain_text("Супервизор")
+        expect(seo.trace_step(1)).to_contain_text('{"agent":"site"}')
+        expect(seo.trace_step(2)).to_contain_text("fetch_site")
+        expect(seo.trace_step(2)).to_contain_text('{"max_pages":5}')
+        expect(seo.trace_step(4)).to_contain_text("yandex_search")
+        expect(seo.trace_step(4)).to_contain_text("Отклонён")
+        expect(seo.trace_step(4)).to_contain_text(BUDGET_EXHAUSTED_ERROR)
+        expect(seo.trace_show_more).to_have_count(0)
+
+        # The report agent's text is labelled and stays apart from the numbers.
+        expect(seo.conclusions).to_be_visible()
+        expect(seo.conclusions).to_contain_text("Текст модели")
+        expect(seo.conclusions).to_contain_text(CONCLUSIONS_MODEL)
+        expect(seo.conclusions_summary).to_have_text(CONCLUSIONS_SUMMARY)
+        expect(seo.conclusions_recommendations).to_have_text(CONCLUSIONS_RECOMMENDATIONS)
+        assert seo.metric_text("site-overall") == "50 %"
 
         assert stored_analyses(analysis_id) == 1
         seo.delete_analysis(analysis_id)

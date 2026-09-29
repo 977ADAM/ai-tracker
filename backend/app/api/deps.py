@@ -163,7 +163,7 @@ def build_container(
     run_repository = RunRepository(Path(settings.config_dir))
     run_repository.initialize()
     run_repository.recover_unfinished()
-    # The SEO repository owns the version-3 migration of the same file, so it
+    # The SEO repository owns the version-4 migration of the same file, so it
     # always initializes after the run repository opened and recovered.
     if seo_repository is None:
         seo_repository = SeoRepository(Path(settings.config_dir))
