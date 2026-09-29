@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  apiTimeoutMs, DEFAULT_TIMEOUT_MS, loadPageData, proxyJson, publicConfigurationFile, publicSearchRegions,
+  apiOrigin, apiTimeoutMs, DEFAULT_TIMEOUT_MS, loadPageData, proxyJson, publicConfigurationFile, publicSearchRegions,
   publicSearchSnapshot, publicSettingsProvider, publicSearchSettings, searchPath, settingsProviderPath,
   publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv,
   publicSeoAnalysisCreated, publicSeoHistory, publicSeoRows, publicSeoSettings, publicSeoSettingsTest,
@@ -15,6 +15,44 @@ const publicSearchState = {
   yandex: { enabled: true, folder_id: 'folder-1', has_api_key: true,
     api_key_source: 'ui', folder_id_source: 'env' }
 };
+
+describe('the Python API origin guard', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('accepts the loopback API of a local run', () => {
+    vi.stubEnv('AI_TRACKER_API_URL', 'http://127.0.0.1:8000');
+    vi.stubEnv('AI_TRACKER_API_HOSTS', '');
+
+    expect(apiOrigin()).toBe('http://127.0.0.1:8000');
+  });
+
+  it('accepts a host the deployment lists explicitly', () => {
+    // A container reaches the API by its compose service name, not by loopback.
+    vi.stubEnv('AI_TRACKER_API_URL', 'http://backend:8000');
+    vi.stubEnv('AI_TRACKER_API_HOSTS', ' backend , other-host ');
+
+    expect(apiOrigin()).toBe('http://backend:8000');
+  });
+
+  it('refuses a host nobody listed', () => {
+    vi.stubEnv('AI_TRACKER_API_URL', 'http://evil.example:8000');
+    vi.stubEnv('AI_TRACKER_API_HOSTS', 'backend');
+
+    expect(() => apiOrigin()).toThrow('Invalid Python API origin');
+  });
+
+  it('keeps refusing a non-http address and a nested path', () => {
+    vi.stubEnv('AI_TRACKER_API_HOSTS', 'backend');
+    vi.stubEnv('AI_TRACKER_API_URL', 'https://backend:8000');
+    expect(() => apiOrigin()).toThrow('Invalid Python API origin');
+
+    vi.stubEnv('AI_TRACKER_API_URL', 'http://backend:8000/api/providers');
+    expect(() => apiOrigin()).toThrow('Invalid Python API origin');
+
+    vi.stubEnv('AI_TRACKER_API_URL', 'http://user:secret@backend:8000');
+    expect(() => apiOrigin()).toThrow('Invalid Python API origin');
+  });
+});
 
 describe('search settings BFF', () => {
   it('projects exactly the public settings fields and drops a returned key', () => {

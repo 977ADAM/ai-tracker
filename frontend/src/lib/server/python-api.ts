@@ -94,9 +94,26 @@ function integerRecord(value: unknown): Record<string, number> {
   return Object.fromEntries(Object.entries(item).map(([key, entry]) => [key, requiredInteger(entry)]));
 }
 
-function apiOrigin(): string {
+/** Hosts the BFF may call without being told: the API of a local run. */
+const DEFAULT_API_HOSTS = ['127.0.0.1', 'localhost'];
+
+/**
+ * The hosts the BFF is allowed to reach: loopback plus the names the deployment
+ * lists in `AI_TRACKER_API_HOSTS`. A container reaches the API by its compose
+ * service name instead of a loopback address, and an explicit list keeps the
+ * rule "never call an arbitrary host from the server" intact.
+ */
+function apiHosts(): string[] {
+  const configured = (process.env.AI_TRACKER_API_HOSTS || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  return [...DEFAULT_API_HOSTS, ...configured];
+}
+
+export function apiOrigin(): string {
   const url = new URL(process.env.AI_TRACKER_API_URL || DEFAULT_API_ORIGIN);
-  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname) ||
+  if (url.protocol !== 'http:' || !apiHosts().includes(url.hostname) ||
       url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
     throw new Error('Invalid Python API origin');
   }

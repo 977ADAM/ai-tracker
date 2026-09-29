@@ -38,6 +38,13 @@ uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 Тот же запуск доступен через `make backend` из корня репозитория.
 
+Образ для развёртывания собирает `backend/Dockerfile`: зависимости ставятся из `uv.lock`
+(`uv sync --frozen --no-dev --extra docker`), приложение запускается от непривилегированного
+пользователя, а каталог данных — том `/data`. Дополнительная группа `docker` ставит
+файловый бэкенд хранилища ключей: в контейнере нет системного хранилища, и без него экран
+настроек не смог бы сохранить ключ. Весь стек поднимается из корня репозитория через
+`docker compose up -d --build` (см. корневой README).
+
 ## Тесты
 
 ```bash
@@ -52,6 +59,7 @@ uv run pytest
 | Переменная | Назначение |
 | --- | --- |
 | `AI_TRACKER_CONFIG_DIR` | Каталог с `providers.json`, `search-settings.json`, `seo-settings.json`, `runs.sqlite3` и чекпойнтом агентов `seo-agents.sqlite3`. По умолчанию `~/.config/ai-tracker` |
+| `AI_TRACKER_ALLOWED_HOSTS` | Имена, по которым принимается API, через запятую. По умолчанию `localhost,127.0.0.1`; контейнеру нужно добавить своё имя (`backend`) |
 | `GIGACHAT_AUTH_KEY` | Запасной ключ для подключения с ID `gigachat` |
 | `DEEPSEEK_API_KEY` | Запасной ключ для подключения с ID `deepseek` |
 | `GIGACHAT_SCOPE` | Область доступа GigaChat по умолчанию |

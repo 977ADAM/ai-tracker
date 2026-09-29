@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install ruff backend frontend frontend-prod build check
+.PHONY: help install ruff backend frontend frontend-prod build check docker-build docker-up docker-down docker-logs
 
 help:
 	@echo "install  Install Python and Node.js dependencies"
@@ -9,6 +9,9 @@ help:
 	@echo "frontend-prod Start the built web interface"
 	@echo "build         Build the web interface"
 	@echo "check         Check Svelte and TypeScript"
+	@echo "docker-up     Build and start the whole app with docker compose"
+	@echo "docker-down   Stop the compose stack"
+	@echo "docker-logs   Follow the logs of the compose stack"
 
 install:
 	cd backend && uv sync
@@ -31,3 +34,15 @@ build:
 
 check:
 	cd frontend && npm run check
+
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f

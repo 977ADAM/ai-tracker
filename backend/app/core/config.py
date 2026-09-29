@@ -14,6 +14,11 @@ DEFAULT_SERVICE_NAME = "ai-tracker"
 DEFAULT_ALLOWED_HOSTS = ("localhost", "127.0.0.1")
 DEFAULT_SCOPE = "GIGACHAT_API_PERS"
 
+# The host guard of the API. The default keeps the app reachable only from the
+# machine it runs on; a deployment lists every name it is reached by, comma
+# separated: `AI_TRACKER_ALLOWED_HOSTS=localhost,127.0.0.1,backend`.
+ALLOWED_HOSTS_VARIABLE = "AI_TRACKER_ALLOWED_HOSTS"
+
 # `.env` lives in the repository root, one level above `backend/`.
 ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
@@ -48,6 +53,18 @@ def first_value(source: Mapping[str, str], names: Iterable[str]) -> str | None:
         if value and value.strip():
             return value.strip()
     return None
+
+
+def parse_allowed_hosts(value: str | None) -> tuple[str, ...]:
+    """Split the comma-separated host guard; a blank value keeps the default.
+
+    `TrustedHostMiddleware` compares the host without its port, so `backend`
+    covers a call to `http://backend:8000` made from another container.
+    """
+    if value is None:
+        return DEFAULT_ALLOWED_HOSTS
+    hosts = tuple(part.strip() for part in value.split(",") if part.strip())
+    return hosts or DEFAULT_ALLOWED_HOSTS
 
 # Built-in connection templates. Empty means the app ships no preconfigured
 # connections and every connection is created by the user in the settings
@@ -90,6 +107,7 @@ class Settings:
         source = os.environ if env is None else env
         return cls(
             config_dir=Path(source.get("AI_TRACKER_CONFIG_DIR") or DEFAULT_CONFIG_DIR),
+            allowed_hosts=parse_allowed_hosts(source.get(ALLOWED_HOSTS_VARIABLE)),
             default_scope=source.get("GIGACHAT_SCOPE") or DEFAULT_SCOPE,
             yandex_search_api_key=first_value(source, YANDEX_SEARCH_API_KEY_VARIABLES),
             yandex_search_folder_id=first_value(source, YANDEX_SEARCH_FOLDER_ID_VARIABLES),

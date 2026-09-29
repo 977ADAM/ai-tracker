@@ -1,0 +1,66 @@
+# One command brings the whole application up:
+#
+#     cp .env.example .env      # fill in what you have (everything is optional)
+#     docker compose up -d --build
+#     open http://localhost:3000
+#
+# Secrets are read from `.env` through the variables below. A value saved in the
+# settings screen wins over the environment, exactly like a local run.
+
+name: ai-tracker
+
+services:
+  backend:
+    build:
+      context: ./backend
+    image: ai-tracker-backend:local
+    environment:
+      AI_TRACKER_CONFIG_DIR: /data
+      # The interface reaches the API as http://backend:8000 inside the compose
+      # network, so that name has to pass the API's own host guard.
+      AI_TRACKER_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      # Keys of the saved connections. Empty values are ignored, so the key
+      # stored in the settings screen stays in charge.
+      GIGACHAT_AUTH_KEY: ${GIGACHAT_AUTH_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # Yandex Search API and the SEO service LLM.
+      YANDEX_SEARCH_API_KEY: ${YANDEX_SEARCH_API_KEY:-}
+      YANDEX_SEARCH_FOLDER_ID: ${YANDEX_SEARCH_FOLDER_ID:-}
+      SEO_LLM_ENDPOINT: ${SEO_LLM_ENDPOINT:-}
+      SEO_LLM_MODEL: ${SEO_LLM_MODEL:-}
+      SEO_LLM_API_KEY: ${SEO_LLM_API_KEY:-}
+    volumes:
+      # providers.json, runs.sqlite3, seo-agents.sqlite3, seo-settings.json, and
+      # the key file of the container keyring backend.
+      - ai-tracker-data:/data
+    ports:
+      # Published on the loopback interface only: the interface talks to the API
+      # over the compose network, and the API is not exposed to the network by
+      # default. Change to "8000:8000" if something else on the host needs it.
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    image: ai-tracker-frontend:local
+    environment:
+      # The BFF calls the Python API server-side, so no browser CORS is involved.
+      # The API host is not loopback inside the network, so it is listed
+      # explicitly for the BFF origin guard.
+      AI_TRACKER_API_URL: http://backend:8000
+      AI_TRACKER_API_HOSTS: ${AI_TRACKER_API_HOSTS:-backend}
+      # adapter-node checks the Origin of state-changing requests against this
+      # value: set it to the address you open the interface from.
+      ORIGIN: ${AI_TRACKER_ORIGIN:-http://localhost:3000}
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ai-tracker-data:

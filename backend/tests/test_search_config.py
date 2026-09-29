@@ -143,3 +143,25 @@ def test_the_root_env_file_never_overrides_the_environment(tmp_path, monkeypatch
 
 def test_a_missing_env_file_is_not_an_error(tmp_path):
     load_env_file(tmp_path / "missing.env")
+
+
+# -- the host guard of a deployment -------------------------------------------
+
+
+def test_allowed_hosts_default_to_the_local_names():
+    assert Settings.from_env({}).allowed_hosts == ("localhost", "127.0.0.1")
+
+
+def test_allowed_hosts_follow_the_environment():
+    settings = Settings.from_env(
+        {"AI_TRACKER_ALLOWED_HOSTS": " localhost, backend ,, 127.0.0.1 "},
+    )
+
+    assert settings.allowed_hosts == ("localhost", "backend", "127.0.0.1")
+
+
+def test_a_blank_allowed_hosts_value_keeps_the_default():
+    assert Settings.from_env({"AI_TRACKER_ALLOWED_HOSTS": " , "}).allowed_hosts == (
+        "localhost",
+        "127.0.0.1",
+    )
