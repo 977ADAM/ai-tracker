@@ -50,6 +50,7 @@ from app.domain.seo_llm import ToolSchema
 from app.domain.seo_tools import (
     AGENT_TOOLS,
     BUDGET_EXHAUSTED,
+    CANCELLED,
     INVALID_AGENT,
     MAX_FETCH_PAGES,
     SEARCH_REGION,
@@ -59,6 +60,7 @@ from app.domain.seo_tools import (
     UNKNOWN_TOOL,
     BudgetExceeded,
     SeoBudget,
+    SeoCancelled,
     ToolRejected,
     tools_for,
     validate_arguments,
@@ -161,6 +163,7 @@ class SeoToolbox:
         max_poll_interval: float = MAX_POLL_INTERVAL,
         max_search_concurrency: int = MAX_SEARCH_CONCURRENCY,
         max_model_concurrency: int = MAX_MODEL_CONCURRENCY,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self.repository = repository
         self.fetcher = fetcher
@@ -174,6 +177,9 @@ class SeoToolbox:
         self.connection_ids = tuple(connection_ids)
         self.budget = budget
         self.on_step = on_step
+        # The run's own cancellation probe: the runtime sets it after building
+        # the toolbox, so a cancelled analysis stops before the next paid call.
+        self.should_stop = should_stop
         self.model_name = model_name or DEFAULT_REPORT_MODEL
         self.poll_interval = poll_interval
         self.max_poll_interval = max_poll_interval
@@ -214,6 +220,15 @@ class SeoToolbox:
         self.current_agent = agent
         return tools
 
+    def cancelled(self) -> bool:
+        """True while this run is cancelled: no further step or paid call starts."""
+        return bool(self.should_stop is not None and self.should_stop())
+
+    def _require_not_cancelled(self) -> None:
+        """Stop the graph at a tool boundary; cancellation is not a tool result."""
+        if self.cancelled():
+            raise SeoCancelled(CANCELLED)
+
     async def call(
         self,
         name: str,
@@ -224,9 +239,11 @@ class SeoToolbox:
         """Validate, budget, execute, and trace one tool call; always answer with JSON.
 
         Domain and provider failures become a safe `rejected`/`error` result for
-        the model. `StorageError` and cancellation still propagate: a broken
-        database must stop the run, not be reported as a tool result.
+        the model. `StorageError` and `SeoCancelled` still propagate: a broken
+        database must stop the run, and a cancelled run must not start another
+        step or another paid call.
         """
+        self._require_not_cancelled()
         resolved = agent if agent is not None else self.current_agent
         step_agent = resolved or "supervisor"
         self._active_agent = step_agent
@@ -248,7 +265,7 @@ class SeoToolbox:
             result = await handler(safe)
         except asyncio.CancelledError:
             raise
-        except StorageError:
+        except (StorageError, SeoCancelled):
             raise
         except BudgetExceeded as exc:
             self.exhausted = True
@@ -390,6 +407,7 @@ class SeoToolbox:
 
     async def _crawl(self) -> tuple[FetchedPage, ...]:
         """Crawl the entered host through the fetcher; its errors stay safe."""
+        self._require_not_cancelled()
         try:
             return tuple(await self.fetcher.fetch(self.input.host))
         except AppError as exc:
@@ -748,6 +766,9 @@ class SeoToolbox:
                 OUTCOME_REUSED, status=str(stored["status"]),
                 documents=stored["documents"], reused=True,
             )
+        # A batch of parallel checks re-reads this before every paid submit: a
+        # run cancelled mid-batch must not send the queries still queued.
+        self._require_not_cancelled()
         operation_id = self._pending_operation(target)
         if operation_id is None:
             self.budget = self.budget.spend_search()
@@ -946,6 +967,8 @@ class SeoToolbox:
         prepared: tuple[AnswerProvider | None, str | None, str],
     ) -> dict:
         query_index = int(target["index"])
+        # A cancelled batch pays for no further provider call.
+        self._require_not_cancelled()
         try:
             self.budget = self.budget.spend_model_answer()
         except BudgetExceeded:

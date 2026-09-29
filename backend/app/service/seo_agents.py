@@ -19,9 +19,15 @@ owner-only; the graph is compiled with an injected checkpointer) so a run
 survives a restart. The runtime owns the happy path here: it marks the
 supervisor `running`, invokes the graph under the analysis id, and — when the
 supervisor called `finish_run` — closes the agents and the run as `completed`.
-Budgets at node boundaries, degradations, cancellation, and resume belong to the
-next steps, which extend this module; without a successful `finish_run` the run
-stays `running` on purpose.
+Budgets at node boundaries, degradations, and resume belong to the next steps,
+which extend this module; without a successful `finish_run` the run stays
+`running` on purpose.
+
+Cancellation is owned here as well: `cancel(analysis_id)` sets the per-run
+`asyncio.Event` and ends the analysis as `cancelled`, and the graph, the tool
+bridge, and every paid boundary of `SeoToolbox` read that event, so a cancelled
+run makes no further external call. A `SeoCancelled` that leaves the graph closes
+every open agent as `skipped` and never rewrites the `cancelled` status.
 
 Every model turn is traced as a `model` step through `ModelTracer`, one wrapper
 per agent, so a turn records the acting agent and whether the turn asked for a
@@ -32,6 +38,7 @@ graph without finishing the run — only `finish_run` finishes it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
@@ -56,7 +63,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, create_model
 
-from app.core.errors import AppError, StorageError
+from app.core.errors import AppError, RunConflict, StorageError
 from app.db.seo import SeoRepository
 from app.domain.seo import AGENTS, SeoInput
 from app.domain.seo_llm import AgentModel, ToolSchema
@@ -68,7 +75,7 @@ from app.domain.seo_prompts import (
     site_agent_prompt,
     supervisor_prompt,
 )
-from app.domain.seo_tools import BudgetExceeded, SeoBudget
+from app.domain.seo_tools import CANCELLED, BudgetExceeded, SeoBudget, SeoCancelled
 from app.service.seo_tools import SeoToolbox
 
 LOGGER = logging.getLogger(__name__)
@@ -190,11 +197,13 @@ class SeoBridgeTool(BaseTool):
     agent: str
 
     async def _arun(self, **arguments: object) -> str:
+        if self.toolbox.cancelled():
+            raise SeoCancelled(CANCELLED)
         try:
             return await self.toolbox.call(
                 self.name, _tool_arguments(arguments), agent=self.agent,
             )
-        except (StorageError, AppError):
+        except (StorageError, SeoCancelled, AppError):
             raise
         except Exception:  # noqa: BLE001 - a broken tool is a safe result, not a crash
             LOGGER.error("SEO agent tool %s failed unexpectedly", self.name)
@@ -342,6 +351,7 @@ class ModelTracer(BaseChatModel):
     agent: str
     recorder: Callable[[str, str], None]
     on_turn: Callable[[str], None] | None = None
+    should_stop: Callable[[], bool] | None = None
 
     @property
     def _llm_type(self) -> str:
@@ -379,7 +389,13 @@ class ModelTracer(BaseChatModel):
         return result
 
     def _spend(self) -> None:
-        """Charge one turn; an exhausted budget stops the graph on purpose."""
+        """Charge one turn; cancellation and an exhausted budget stop the graph.
+
+        The cancellation probe runs first: after a cancel no further model call
+        may be paid for, not even the one the budget would refuse anyway.
+        """
+        if self.should_stop is not None and self.should_stop():
+            raise SeoCancelled(CANCELLED)
         if self.on_turn is not None:
             self.on_turn(self.agent)
 
@@ -427,6 +443,7 @@ def build_agent_graph(
             agent=agent,
             recorder=lambda actor, status: _record_model_step(toolbox, actor, status),
             on_turn=lambda actor: _spend_turn(toolbox, actor),
+            should_stop=toolbox.cancelled,
         )
 
     supervisor_model = traced_model(SUPERVISOR_NODE)
@@ -451,7 +468,7 @@ def build_agent_graph(
         )
 
     async def specialist_node(state: RunState) -> dict[str, object]:
-        return await _specialist_node(state, builders)
+        return await _specialist_node(state, builders, toolbox)
 
     builder: StateGraph = StateGraph(RunState)
     builder.add_node(SUPERVISOR_NODE, supervisor_node)
@@ -498,6 +515,8 @@ async def _supervisor_turn(
     max_supervisor_turns: int,
 ) -> dict[str, object]:
     """Interpret one supervisor turn: run its control tools and route the result."""
+    if toolbox.cancelled():
+        raise SeoCancelled(CANCELLED)
     turns = int(state.get("specialists", {}).get(SUPERVISOR_NODE, 0))
     if turns >= max_supervisor_turns:
         # The graph-level backstop of the handoff budget: never loop forever.
@@ -593,8 +612,14 @@ def _handoff_task(toolbox: SeoToolbox, prompts: AgentPrompts, agent: str) -> Hum
     return HumanMessage(f"{TASK_PREFIX} {agent}.\n{user}")
 
 
-async def _specialist_node(state: RunState, builders: Mapping[str, Any]) -> dict[str, object]:
+async def _specialist_node(
+    state: RunState, builders: Mapping[str, Any], toolbox: SeoToolbox,
+) -> dict[str, object]:
     """Run one specialist loop and hand its dialogue back to the supervisor."""
+    if toolbox.cancelled():
+        # Cancelled between the handoff and this visit: do not start the loop,
+        # so no tool of the specialist and no model turn of it is paid for.
+        raise SeoCancelled(CANCELLED)
     agent = str(state.get("supervisor_next") or "")
     builder = builders.get(agent)
     if builder is None:  # unreachable: routing only sends known specialists
@@ -702,29 +727,70 @@ class SeoAgentRuntime:
             max_supervisor_turns * RECURSION_STEPS_PER_TURN + RECURSION_HEADROOM
         )
         self.chat_model = _chat_model(model)
+        # One event per live analysis: `cancel` sets it, the tool bridge and the
+        # graph read it before every further step and paid call.
+        self._cancel_events: dict[str, asyncio.Event] = {}
+
+    def cancel(self, analysis_id: str) -> None:
+        """Stop a live run before its next step and end it as `cancelled`.
+
+        The event is what the graph and the tools read; `SeoRepository.cancel`
+        marks the analysis `cancelled` and cancels its unfinished rows. The
+        repository refuses a terminal analysis, so a repeated cancel or a cancel
+        of an already finished run is a safe no-op that keeps the stored status.
+        """
+        self._cancel_event(analysis_id).set()
+        try:
+            self.repository.cancel(analysis_id)
+        except RunConflict:
+            LOGGER.info("SEO agent run %s was already finished when cancelled", analysis_id)
 
     async def run(self, analysis_id: str, input: SeoInput) -> None:
         """Run the graph of one analysis; never let an exception escape the task."""
         toolbox: SeoToolbox | None = None
         try:
             self.repository.upsert_agent(analysis_id, SUPERVISOR_NODE, STATUS_RUNNING)
-            toolbox = self.toolbox_factory(analysis_id, input, SeoBudget.for_connections(
-                len(input.connection_ids),
-            ))
+            toolbox = self._toolbox(analysis_id, input)
             if isinstance(self.checkpointer, BaseCheckpointSaver):
                 await self._invoke(analysis_id, toolbox, input, self.checkpointer)
             else:
                 async with self.checkpointer(analysis_id) as saver:
                     await self._invoke(analysis_id, toolbox, input, saver)
             self._finalize(analysis_id, toolbox)
+        except SeoCancelled:
+            self._finalize_cancelled(analysis_id)
         except BaseException as exc:  # a run task must never surface an exception
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             LOGGER.error("SEO agent run %s stopped: %s", analysis_id, type(exc).__name__)
-            if toolbox is not None and toolbox.exhausted:
+            if self._cancelled(analysis_id):
+                # A cancel that raced the failure still owns the outcome: the
+                # run stays `cancelled` instead of turning into `failed`.
+                self._finalize_cancelled(analysis_id)
+            elif toolbox is not None and toolbox.exhausted:
                 self._publish_exhausted(analysis_id)
             else:
                 self._mark_error(analysis_id, exc)
+        finally:
+            self._cancel_events.pop(analysis_id, None)
+
+    def _toolbox(self, analysis_id: str, input: SeoInput) -> SeoToolbox:
+        """Build one run's toolbox and give it this run's cancellation probe."""
+        toolbox = self.toolbox_factory(
+            analysis_id, input, SeoBudget.for_connections(len(input.connection_ids)),
+        )
+        toolbox.should_stop = lambda: self._cancelled(analysis_id)
+        return toolbox
+
+    def _cancel_event(self, analysis_id: str) -> asyncio.Event:
+        event = self._cancel_events.get(analysis_id)
+        if event is None:
+            event = self._cancel_events[analysis_id] = asyncio.Event()
+        return event
+
+    def _cancelled(self, analysis_id: str) -> bool:
+        event = self._cancel_events.get(analysis_id)
+        return event is not None and event.is_set()
 
     async def _invoke(
         self,
@@ -792,6 +858,19 @@ class SeoAgentRuntime:
             self.repository.finish_analysis(analysis_id)
         except AppError:
             LOGGER.error("SEO agent run %s could not publish its budget stop", analysis_id)
+
+    def _finalize_cancelled(self, analysis_id: str) -> None:
+        """Close a cancelled run: open agents end `skipped`, the status stays.
+
+        `repository.cancel` already stored the `cancelled` state and cancelled
+        the unfinished rows; this only gives every still-open agent a terminal
+        status, so nothing is left `running` and no `completed`/`failed` write
+        ever replaces the cancellation.
+        """
+        try:
+            self._close_agents(analysis_id, completed=False)
+        except AppError:
+            LOGGER.error("SEO agent run %s could not close its cancelled agents", analysis_id)
 
     def _close_agents(self, analysis_id: str, *, completed: bool) -> None:
         """Give every agent a terminal status: nothing stays `running`."""

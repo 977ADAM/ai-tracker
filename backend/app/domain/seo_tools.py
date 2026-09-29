@@ -66,6 +66,7 @@ INVALID_QUERY = (
 )
 BUDGET_EXHAUSTED = "Лимит прогона исчерпан"
 SUPERVISOR_ONLY = "Инструмент доступен только супервизору"
+CANCELLED = "Прогон отменён"
 
 # `AGENTS` is imported from `domain.seo`, the single source of the vocabulary;
 # the specialists are the same tuple without the supervisor.
@@ -78,6 +79,15 @@ class ToolRejected(AppError):
 
 class BudgetExceeded(AppError):
     """A hard run budget is used up; the model gets a safe refusal."""
+
+
+class SeoCancelled(AppError):
+    """The user cancelled the run: stop it before any further paid call.
+
+    Cancellation is not a tool result and not a model-visible refusal: it leaves
+    the graph and is handled by `SeoAgentRuntime`, which keeps the stored rows
+    and the trace and leaves the analysis in its `cancelled` state.
+    """
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -548,6 +558,7 @@ __all__ = [
     "AGENTS",
     "AGENT_TOOLS",
     "BUDGET_EXHAUSTED",
+    "CANCELLED",
     "CHECK_TOOLS",
     "COMPETITOR_TOOLS",
     "GENERATED_QUERY_LIMIT",
@@ -568,6 +579,7 @@ __all__ = [
     "TOOL_SCHEMAS",
     "BudgetExceeded",
     "SeoBudget",
+    "SeoCancelled",
     "ToolRejected",
     "schema_for",
     "tools_for",

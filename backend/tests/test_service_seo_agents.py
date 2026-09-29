@@ -578,3 +578,43 @@ async def test_the_run_is_an_awaitable_task_that_never_raises(
     await task
 
     assert task.exception() is None
+
+
+# -- cancellation ------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_cancelling_a_live_run_stops_every_paid_call_and_keeps_the_status(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+    runtime = harness.runtime()
+    original = harness.model._generate
+
+    def cancel_after_the_first_turn(messages, stop=None, run_manager=None, **kwargs):
+        result = original(messages, stop=stop, run_manager=run_manager, **kwargs)
+        # The supervisor has just asked for the first handoff: from here on no
+        # tool of the site agent and no further model turn may be paid for.
+        runtime.cancel(harness.analysis_id)
+        return result
+
+    harness.model._generate = cancel_after_the_first_turn  # type: ignore[method-assign]
+
+    await runtime.run(harness.analysis_id, harness.input)
+
+    snapshot = harness.repository.snapshot(harness.analysis_id)
+    assert snapshot["status"] == "cancelled"
+    assert snapshot["budget_exhausted"] is False
+    assert harness.gateway.submitted == []
+    assert harness.factory.calls == []
+    assert harness.model.index == 1
+    statuses = {
+        entry["agent"]: entry["status"] for entry in harness.repository.agents(harness.analysis_id)
+    }
+    assert all(status in {"done", "error", "skipped"} for status in statuses.values())
+    assert harness.trace(), "the trace of the cancelled run is kept"
+    assert checkpoint_path(tmp_path).exists()
+
+    # A repeated cancel, and a cancel of an already finished run, stay safe.
+    runtime.cancel(harness.analysis_id)
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "cancelled"
