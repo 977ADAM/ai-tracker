@@ -42,8 +42,8 @@ import asyncio
 import json
 import logging
 import sqlite3
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Protocol, TypedDict
 
@@ -64,10 +64,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, create_model
 
-from app.core.errors import AppError, RunConflict, StorageError
+from app.core.errors import AppError, ConfigurationError, RunConflict, StorageError
 from app.db.seo import SeoRepository
 from app.domain.seo import AGENTS, SeoInput
-from app.domain.seo_llm import AgentModel, ToolSchema
+from app.domain.seo_llm import (
+    LLM_NOT_CONFIGURED,
+    AgentModel,
+    ToolSchema,
+    close_agent_model,
+)
 from app.domain.seo_prompts import (
     check_agent_prompt,
     competitor_agent_prompt,
@@ -759,6 +764,18 @@ class CheckpointFactory(Protocol):
     def __call__(self, analysis_id: str) -> AbstractAsyncContextManager[BaseCheckpointSaver]: ...
 
 
+class ModelProvider(Protocol):
+    """Answers the agent model of one run, as it is configured at that moment.
+
+    `None` means the service LLM is not configured at all: the run cannot start.
+    The container passes the settings service here instead of a model, so a
+    service LLM saved in the interface after the container was built is used by
+    the next run.
+    """
+
+    def __call__(self) -> BaseChatModel | AgentModel | None: ...
+
+
 # -- runtime -----------------------------------------------------------------
 
 
@@ -771,15 +788,20 @@ class SeoAgentRuntime:
     `finish_run` — closes the remaining agents and the run itself. A run without
     a successful `finish_run` is left `running`: budget finalization and the
     degradations are the next step of the plan.
+
+    The chat model is resolved per run, never once at build time: the
+    application boots before the user configures the service LLM, so a model
+    resolved at build time would freeze that unconfigured state.
     """
 
     def __init__(
         self,
         repository: SeoRepository,
         toolbox_factory: Callable[[str, SeoInput, SeoBudget], SeoToolbox],
-        model: BaseChatModel | AgentModel,
+        model: BaseChatModel | AgentModel | None = None,
         *,
         checkpointer: BaseCheckpointSaver | CheckpointFactory | None,
+        model_provider: ModelProvider | None = None,
         prompts: AgentPrompts | None = None,
         max_supervisor_turns: int = DEFAULT_MAX_SUPERVISOR_TURNS,
         recursion_limit: int | None = None,
@@ -787,15 +809,17 @@ class SeoAgentRuntime:
         self.repository = repository
         self.toolbox_factory = toolbox_factory
         self.model = model
+        self.model_provider = model_provider
         self.checkpointer = checkpointer
         self.prompts = prompts if prompts is not None else SeoPrompts()
         self.max_supervisor_turns = max_supervisor_turns
         self.recursion_limit = recursion_limit or (
             max_supervisor_turns * RECURSION_STEPS_PER_TURN + RECURSION_HEADROOM
         )
-        # The concrete chat model is resolved on first use: a container may hold
-        # an agent model that only a real run turns into a graph, and building a
-        # container must not fail for a model that is never used.
+        # The chat model injected at build time is resolved on first use: a
+        # container may hold an agent model that only a real run turns into a
+        # graph, and building a container must not fail for a model that is never
+        # used.
         self._chat_model_cache: BaseChatModel | None = None
         # One event per live analysis: `cancel` sets it, the tool bridge and the
         # graph read it before every further step and paid call.
@@ -803,9 +827,37 @@ class SeoAgentRuntime:
 
     @property
     def chat_model(self) -> BaseChatModel:
+        """The chat model injected at build time, resolved once."""
         if self._chat_model_cache is None:
             self._chat_model_cache = _chat_model(self.model)
         return self._chat_model_cache
+
+    def _run_model(self) -> tuple[BaseChatModel, bool]:
+        """Resolve the chat model of one run; `True` means this run owns it.
+
+        A provider is asked on every run, so the service LLM saved in the
+        interface after the container was built is the one the next run calls.
+        The adapter it answers belongs to that run alone and is closed when the
+        run ends; the model injected at build time stays the caller's, and a
+        provider that answers `None` fails the run with the safe configuration
+        message instead of the stand-in's cryptic crash.
+        """
+        if self.model_provider is None:
+            return self.chat_model, False
+        resolved = self.model_provider()
+        if resolved is None:
+            raise ConfigurationError(LLM_NOT_CONFIGURED)
+        return _chat_model(resolved), True
+
+    @asynccontextmanager
+    async def _model_scope(self) -> AsyncIterator[BaseChatModel]:
+        """Yield this run's chat model and release it when the run is over."""
+        model, owned = self._run_model()
+        try:
+            yield model
+        finally:
+            if owned:
+                await close_agent_model(model)
 
     def cancel(self, analysis_id: str) -> None:
         """Stop a live run before its next step and end it as `cancelled`.
@@ -827,11 +879,12 @@ class SeoAgentRuntime:
         try:
             self.repository.upsert_agent(analysis_id, SUPERVISOR_NODE, STATUS_RUNNING)
             toolbox = self._toolbox(analysis_id, input)
-            if isinstance(self.checkpointer, BaseCheckpointSaver):
-                await self._invoke(analysis_id, toolbox, input, self.checkpointer)
-            else:
-                async with self.checkpointer(analysis_id) as saver:
-                    await self._invoke(analysis_id, toolbox, input, saver)
+            async with self._model_scope() as model:
+                if isinstance(self.checkpointer, BaseCheckpointSaver):
+                    await self._invoke(analysis_id, toolbox, input, self.checkpointer, model)
+                else:
+                    async with self.checkpointer(analysis_id) as saver:
+                        await self._invoke(analysis_id, toolbox, input, saver, model)
             self._finalize(analysis_id, toolbox)
         except SeoCancelled:
             self._finalize_cancelled(analysis_id)
@@ -876,8 +929,9 @@ class SeoAgentRuntime:
         toolbox: SeoToolbox,
         input: SeoInput,
         checkpointer: BaseCheckpointSaver | None,
+        model: BaseChatModel,
     ) -> None:
-        graph = self._graph(toolbox, checkpointer)
+        graph = self._graph(toolbox, checkpointer, model)
         state: RunState = {
             "messages": [HumanMessage(_run_task(input))],
             "supervisor_next": SUPERVISOR_NODE,
@@ -900,10 +954,11 @@ class SeoAgentRuntime:
         request = self._request_of(analysis_id)
         toolbox = self._toolbox(analysis_id, request)
         try:
-            if isinstance(self.checkpointer, BaseCheckpointSaver):
-                return await self._continue(analysis_id, toolbox, self.checkpointer)
-            async with self.checkpointer(analysis_id) as saver:
-                return await self._continue(analysis_id, toolbox, saver)
+            async with self._model_scope() as model:
+                if isinstance(self.checkpointer, BaseCheckpointSaver):
+                    return await self._continue(analysis_id, toolbox, self.checkpointer, model)
+                async with self.checkpointer(analysis_id) as saver:
+                    return await self._continue(analysis_id, toolbox, saver, model)
         except SeoCancelled:
             self._finalize_cancelled(analysis_id)
             return True
@@ -922,10 +977,14 @@ class SeoAgentRuntime:
             self._cancel_events.pop(analysis_id, None)
 
     async def _continue(
-        self, analysis_id: str, toolbox: SeoToolbox, checkpointer: BaseCheckpointSaver | None,
+        self,
+        analysis_id: str,
+        toolbox: SeoToolbox,
+        checkpointer: BaseCheckpointSaver | None,
+        model: BaseChatModel,
     ) -> bool:
         """Re-enter the graph of one run on its own thread and publish the result."""
-        graph = self._graph(toolbox, checkpointer)
+        graph = self._graph(toolbox, checkpointer, model)
         config = self._config(analysis_id)
         state = await graph.aget_state(config)
         if not state.values:
@@ -936,9 +995,11 @@ class SeoAgentRuntime:
         self._finalize(analysis_id, toolbox)
         return True
 
-    def _graph(self, toolbox: SeoToolbox, checkpointer: BaseCheckpointSaver | None) -> Any:
+    def _graph(
+        self, toolbox: SeoToolbox, checkpointer: BaseCheckpointSaver | None, model: BaseChatModel,
+    ) -> Any:
         return build_agent_graph(
-            self.chat_model,
+            model,
             toolbox,
             checkpointer=checkpointer,
             prompts=self.prompts,
@@ -1046,7 +1107,7 @@ def _run_task(input: SeoInput) -> str:
     return f"Проведи SEO-анализ сайта {input.host} в сфере «{input.sphere}» и доведи прогон до отчёта."
 
 
-def _chat_model(model: BaseChatModel | AgentModel) -> BaseChatModel:
+def _chat_model(model: BaseChatModel | AgentModel | None) -> BaseChatModel:
     """Return the LangChain chat model behind an agent model.
 
     The graph and its specialist nodes need the concrete `BaseChatModel` they
@@ -1084,6 +1145,7 @@ __all__ = [
     "SUPERVISOR_NODE",
     "AgentPrompts",
     "CheckpointFactory",
+    "ModelProvider",
     "ModelTracer",
     "RunState",
     "SeoAgentRuntime",

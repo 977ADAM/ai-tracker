@@ -31,6 +31,15 @@ class UnconfiguredAgentModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "seo-unconfigured"
 
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        """Refuse the tool binding like every other call of this stand-in.
+
+        The `BaseChatModel` default answers a binding with a bare
+        `NotImplementedError`, which would hide the real reason — an
+        unconfigured service LLM — from the error the run stores.
+        """
+        raise ConfigurationError(LLM_NOT_CONFIGURED)
+
     def _generate(
         self,
         messages: list[BaseMessage],

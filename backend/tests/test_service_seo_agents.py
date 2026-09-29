@@ -26,6 +26,7 @@ from app.core.errors import ProviderError
 from app.db.seo import SeoRepository
 from app.domain.search import SearchDocument
 from app.domain.seo import SeoInput, normalize_seo_request
+from app.domain.seo_llm import LLM_NOT_CONFIGURED
 from app.domain.seo_tools import (
     AGENT_TOOLS,
     MAX_SPECIALIST_TURNS,
@@ -741,3 +742,101 @@ async def test_resume_without_a_checkpoint_reports_that_nothing_can_be_resumed(
     assert await runtime.resume(harness.analysis_id) is False
     assert harness.repository.snapshot(harness.analysis_id)["status"] == "running"
     assert len(harness.model.calls) == baseline
+
+
+# -- the service LLM of a run -------------------------------------------------
+#
+# The application boots before the service LLM is configured, so a model
+# resolved when the container is built is the unconfigured stand-in. The runtime
+# therefore asks the provider at the start of every run: a deployment that saves
+# the key in the interface afterwards — the documented Docker flow — must run
+# with the model it saved, not with the state of the boot.
+
+
+class ClosingScriptedChatModel(ScriptedChatModel):
+    """A scripted model that records the close of an adapter a run owned."""
+
+    closed: bool = False
+
+    async def aclose(self, **kwargs: Any) -> None:
+        self.closed = True
+
+
+def another_analysis(harness: Harness) -> str:
+    """Create a second analysis row for a second run over the same harness."""
+    return harness.repository.create_analysis(
+        harness.input,
+        {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+    )
+
+
+@pytest.mark.anyio
+async def test_a_service_llm_saved_after_the_build_is_used_by_the_next_run(
+    tmp_path, repository, settings,
+):
+    """Every run asks the provider, so a later settings change reaches it."""
+    harness = make_harness(tmp_path, repository, settings)
+    resolved: list[ClosingScriptedChatModel] = []
+
+    def provider() -> ClosingScriptedChatModel:
+        model = ClosingScriptedChatModel(script=happy_path_script())
+        resolved.append(model)
+        return model
+
+    runtime = harness.runtime(model_provider=provider)
+    await runtime.run(harness.analysis_id, harness.input)
+    await runtime.run(another_analysis(harness), harness.input)
+
+    assert [model.index > 0 for model in resolved] == [True, True], "each run called its own model"
+    # The model injected at the build is never called while a provider answers.
+    assert harness.model.index == 0
+
+
+@pytest.mark.anyio
+async def test_a_run_without_a_configured_service_llm_fails_with_the_safe_message(
+    tmp_path, repository, settings,
+):
+    """An answerless provider is the missing configuration, not a crash.
+
+    The stand-in the container injects at build time only knows how to raise
+    from `_generate`, so a graph built over it would fail with a bare
+    `NotImplementedError` out of `bind_tools` instead of naming the real reason.
+    """
+    harness = make_harness(tmp_path, repository, settings)
+    runtime = harness.runtime(model_provider=lambda: None)
+
+    await runtime.run(harness.analysis_id, harness.input)
+
+    agents = {entry["agent"]: entry for entry in harness.repository.agents(harness.analysis_id)}
+    assert agents["supervisor"]["status"] == "error"
+    assert agents["supervisor"]["error"] == LLM_NOT_CONFIGURED
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "failed"
+    assert harness.model.index == 0
+
+
+@pytest.mark.anyio
+async def test_only_the_adapter_a_run_resolved_itself_is_closed(tmp_path, repository, settings):
+    """The run releases what the provider gave it and leaves the caller's model.
+
+    A provider answers a fresh adapter that owns an HTTP pool, so the run closes
+    it; the model injected at build time belongs to its caller and stays open.
+    """
+    harness = make_harness(tmp_path, repository, settings)
+    own = ClosingScriptedChatModel(script=happy_path_script())
+
+    await harness.runtime(model_provider=lambda: own).run(harness.analysis_id, harness.input)
+
+    assert own.index > 0, "the graph used the model the provider answered"
+    assert own.closed is True
+
+    injected = ClosingScriptedChatModel(script=happy_path_script())
+    injected_runtime = SeoAgentRuntime(
+        harness.repository,
+        harness.toolbox_factory,
+        injected,
+        checkpointer=checkpoint_factory(harness.config_dir),
+    )
+    await injected_runtime.run(another_analysis(harness), harness.input)
+
+    assert injected.index > 0
+    assert injected.closed is False

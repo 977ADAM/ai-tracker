@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from typing import Annotated, get_args
 
+import pytest
 from fastapi.params import Depends
 
 from app.api import deps
 from app.api.deps import dependencies
+from app.core.errors import ConfigurationError
+from app.domain.seo_llm import LLM_NOT_CONFIGURED
 
 DEPENDENCIES = {
     "ConnectionServiceDep": "get_connection_service",
@@ -71,3 +74,18 @@ def test_the_routers_get_the_service_their_alias_names():
     }
 
     assert set(fields.values()) <= set(container)
+
+
+def test_the_unconfigured_stand_in_names_the_missing_llm_on_every_call():
+    """A stand-in reached by mistake must still report the real reason.
+
+    `BaseChatModel.bind_tools` answers a bare `NotImplementedError`, so without
+    its own binding the stand-in would hide an unconfigured service LLM behind a
+    crash that says nothing about the configuration.
+    """
+    stand_in = deps.UnconfiguredAgentModel()
+
+    with pytest.raises(ConfigurationError) as raised:
+        stand_in.bind_tools([])
+
+    assert str(raised.value) == LLM_NOT_CONFIGURED

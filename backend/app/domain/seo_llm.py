@@ -25,6 +25,9 @@ EMPTY_ANSWER = "Модель вернула пустой ответ"
 INVALID_JSON = "Не удалось разобрать JSON-ответ модели"
 NOT_AN_OBJECT = "Модель вернула JSON не в виде объекта"
 UNKNOWN_ROLE = "Недопустимая роль сообщения агента"
+# Every path that needs a configured service LLM — the run entry point, the
+# agent runtime, and the build-time stand-in — reports this same fixed message.
+LLM_NOT_CONFIGURED = "Не настроена служебная LLM для SEO-анализа"
 
 AGENT_ROLES = ("system", "user", "assistant", "tool")
 
@@ -125,3 +128,20 @@ class AgentModel(Protocol):
     ) -> AgentTurn:
         """Answer the dialogue, using one of the offered tools when needed."""
         ...
+
+
+async def close_agent_model(model: object) -> None:
+    """Release the HTTP resources an agent model owns, if it owns any.
+
+    An adapter built by the application holds its own HTTP pool and must be
+    closed; a model handed in from outside does not implement `aclose` at all and
+    is left to its owner. Releasing the pool is best effort: a broken close never
+    replaces the outcome of the run that has just used the model.
+    """
+    aclose = getattr(model, "aclose", None)
+    if not callable(aclose):
+        return
+    try:
+        await aclose()
+    except Exception:  # noqa: BLE001, S110 - releasing HTTP resources is best effort
+        pass

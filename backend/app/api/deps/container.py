@@ -177,9 +177,11 @@ def build_container(
     )
 
     if seo_agent_runtime is None:
-        # The runtime resolves its chat model once, at build time. Without a
-        # configured service LLM it gets a stand-in that is never called, because
-        # `SeoService.start` refuses such a run first.
+        # The runtime asks for the service LLM at the start of every run, not
+        # once at build time: the application boots before the user configures
+        # it, so a model resolved here would freeze that unconfigured state and
+        # every later run would fail. The build-time model is only what a runtime
+        # built without a provider falls back to.
         agent_model = (
             seo_agent_model if seo_agent_model is not None
             else seo_settings_service.build_agent_model()
@@ -188,6 +190,10 @@ def build_container(
             seo_repository,
             toolbox_factory,
             agent_model if agent_model is not None else UnconfiguredAgentModel(),
+            model_provider=(
+                None if seo_agent_model is not None
+                else seo_settings_service.build_agent_model
+            ),
             checkpointer=(
                 seo_checkpointer if seo_checkpointer is not None
                 else agent_checkpointer(Path(settings.config_dir))

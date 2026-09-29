@@ -608,3 +608,38 @@ def test_the_injected_runtime_and_model_replace_the_built_ones(tmp_path):
         assert container.seo_settings is injected_settings
     finally:
         asyncio.run(container.search_client.aclose())
+
+
+def test_a_service_llm_saved_after_the_container_build_reaches_the_next_run(tmp_path):
+    """The deployment flow the application documents: keys come after boot.
+
+    The container is built while nothing is configured, so the runtime holds the
+    stand-in; the settings service is its provider, and the adapter it answers
+    after the save — an LLM entered in the interface minutes later — is the one
+    the next run calls instead of the state of the boot.
+    """
+    from app.api.deps import build_container
+    from app.core.config import Settings
+    from app.integrations.seo_llm import LangChainSeoLlmClient
+
+    container = build_container(Settings(config_dir=tmp_path), secrets=MemorySecrets())
+
+    try:
+        runtime = container.seo_service.runtime
+        assert container.seo_settings.build_agent_model() is None
+
+        # «Настройки API» → «SEO-анализ»: the user saves the service LLM now.
+        container.seo_settings.update(
+            {
+                "endpoint": "https://api.deepseek.com/chat/completions",
+                "model": "deepseek-flash",
+                "api_key": "sk-test",
+            },
+        )
+
+        model = runtime.model_provider()
+        assert isinstance(model, LangChainSeoLlmClient)
+        assert model.model == "deepseek-flash"
+        asyncio.run(model.aclose())
+    finally:
+        asyncio.run(container.search_client.aclose())

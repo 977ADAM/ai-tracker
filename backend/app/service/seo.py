@@ -30,7 +30,12 @@ from typing import Any
 from app.core.errors import AppError, ConfigurationError, RunConflict, StorageError
 from app.db.seo import ANALYSIS_TERMINAL, SeoRepository
 from app.domain.seo import GENERATED_QUERY_LIMIT, normalize_seo_request
-from app.domain.seo_llm import AgentMessage, AgentModel
+from app.domain.seo_llm import (
+    LLM_NOT_CONFIGURED,
+    AgentMessage,
+    AgentModel,
+    close_agent_model,
+)
 from app.domain.seo_tools import MAX_SEARCH_REQUESTS
 from app.service.checks import MISSING_KEY_MESSAGE
 from app.service.connections import ConnectionService
@@ -46,8 +51,6 @@ from app.service.seo_settings import (
 )
 
 LOGGER = logging.getLogger(__name__)
-
-LLM_NOT_CONFIGURED = "Не настроена служебная LLM для SEO-анализа"
 
 # A restart may resume only a run whose graph state was checkpointed; the probe
 # reads the checkpoint file synchronously, because `recover` runs during the
@@ -210,7 +213,7 @@ class SeoService:
 
         One probe with a trivial schema: a model that answers without a tool call
         has no native tool calling, and the graph would never hand off. The probe
-        adapter is closed here because the runtime owns a separate one.
+        adapter is closed here: the runtime builds its own adapter for each run.
         """
         try:
             turn = await model.step(
@@ -224,7 +227,7 @@ class SeoService:
             # Adapter messages are fixed and safe by contract.
             raise ConfigurationError(str(exc)) from exc
         finally:
-            await _close_model(model)
+            await close_agent_model(model)
         if not turn.tool_calls:
             raise ConfigurationError(TOOLS_UNSUPPORTED)
 
@@ -253,17 +256,6 @@ class SeoService:
         error = task.exception()
         if error is not None:
             LOGGER.error("SEO analysis %s stopped: %s", analysis_id, type(error).__name__)
-
-
-async def _close_model(model: AgentModel) -> None:
-    """Release the probe adapter; a broken close never blocks the refusal."""
-    aclose = getattr(model, "aclose", None)
-    if not callable(aclose):
-        return
-    try:
-        await aclose()
-    except Exception:  # noqa: BLE001, S110 - releasing HTTP resources is best effort
-        pass
 
 
 __all__ = ["LLM_NOT_CONFIGURED", "SeoService"]
