@@ -51,6 +51,10 @@ REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 NON_PAGE_PREFIXES = ("mailto:", "tel:", "javascript:", "data:", "ftp:", "blob:")
 
 FETCH_FAILED = "Не удалось загрузить сайт"
+FETCH_UNREACHABLE = "Сайт не отвечает"
+FETCH_REFUSED = "Сайт отклонил запрос"
+FETCH_UNRESOLVED = "Не удалось определить адрес сайта"
+FETCH_NOT_HTML = "Ответ сайта не является HTML-страницей"
 FETCH_TIMEOUT = "Превышено время обхода сайта"
 BLOCKED_ADDRESS = "Адрес сайта недоступен для безопасного обхода"
 REDIRECT_REFUSED = "Перенаправление сайта отклонено"
@@ -108,8 +112,6 @@ class HttpxSiteFetcher:
             except _SkipPage as failure:
                 refused = refused or failure.message
                 continue
-            if page is None:
-                continue
             pages.append(page)
             for link in links:
                 if link not in seen:
@@ -137,13 +139,18 @@ class HttpxSiteFetcher:
         host: str,
         url: str,
         robots: RobotFileParser | None,
-    ) -> tuple[FetchedPage | None, tuple[str, ...]]:
-        """Read one URL; a non-HTML response is not a page and yields no links."""
+    ) -> tuple[FetchedPage, tuple[str, ...]]:
+        """Read one URL into a page; a skipped URL carries the reason it was skipped.
+
+        The refusal of the site is named for the operator and the model: an HTTP
+        status that is not a success, a response that is not HTML, or a transport
+        failure each become their own safe message. No upstream body is quoted.
+        """
         response = await self._follow(host, url, robots)
         if not 200 <= response.status_code < 300:
-            raise _SkipPage(FETCH_FAILED)
+            raise _SkipPage(f"{FETCH_REFUSED} ({response.status_code})")
         if not _is_html(response.content_type):
-            return None, ()
+            raise _SkipPage(FETCH_NOT_HTML)
         title, text, links = _extract(_decode(response.body, response.content_type))
         page = FetchedPage(
             url=response.url,
@@ -208,16 +215,18 @@ class HttpxSiteFetcher:
                     body=body,
                 )
         except httpx.HTTPError as exc:
-            raise _SkipPage(FETCH_FAILED) from exc
+            # A refused connection, a timeout, or a broken transport mean the
+            # same thing for the caller: the site did not answer.
+            raise _SkipPage(FETCH_UNREACHABLE) from exc
 
     async def _verified_address(self, host: str) -> str:
         """Resolve a host and refuse it unless every address is public."""
         try:
             addresses = await self.resolver(host)
         except OSError as exc:
-            raise _SkipPage(FETCH_FAILED) from exc
+            raise _SkipPage(FETCH_UNRESOLVED) from exc
         if not addresses:
-            raise _SkipPage(FETCH_FAILED)
+            raise _SkipPage(FETCH_UNRESOLVED)
         for address in addresses:
             if not is_public_address(address):
                 raise _SkipPage(BLOCKED_ADDRESS)

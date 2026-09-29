@@ -67,6 +67,15 @@ INVALID_QUERY = (
 BUDGET_EXHAUSTED = "Лимит прогона исчерпан"
 SUPERVISOR_ONLY = "Инструмент доступен только супервизору"
 CANCELLED = "Прогон отменён"
+FATAL_SITE_UNREACHABLE = "Сайт недоступен: не удалось прочитать ни одной страницы"
+
+# The tools that spend real money at Yandex or at a model provider. A run whose
+# site can never be read is already lost (its facts, and therefore its queries,
+# can never exist), so the first of these calls stops it instead of paying.
+PAID_TOOLS = frozenset({"yandex_search", "search_many", "ask_models"})
+# Failed crawls of one run before the site counts as unreachable: one network
+# blip is still retried, an unreachable host is not paid for twice.
+SITE_FAILURE_LIMIT = 2
 
 # `AGENTS` is imported from `domain.seo`, the single source of the vocabulary;
 # the specialists are the same tuple without the supervisor.
@@ -87,6 +96,17 @@ class SeoCancelled(AppError):
     Cancellation is not a tool result and not a model-visible refusal: it leaves
     the graph and is handled by `SeoAgentRuntime`, which keeps the stored rows
     and the trace and leaves the analysis in its `cancelled` state.
+    """
+
+
+class SeoFatal(AppError):
+    """A fatal run condition: stop the graph before any further paid call.
+
+    Like cancellation it is not a tool result: it leaves the graph, and
+    `SeoAgentRuntime` fails the analysis with this fixed safe message. The
+    trigger is a state the run can never recover from — currently a site that
+    answered no page at all, which makes the site facts and the queries
+    impossible.
     """
 
 
@@ -561,6 +581,7 @@ __all__ = [
     "CANCELLED",
     "CHECK_TOOLS",
     "COMPETITOR_TOOLS",
+    "FATAL_SITE_UNREACHABLE",
     "GENERATED_QUERY_LIMIT",
     "LLM_CALL_TIMEOUT",
     "MAX_FETCH_PAGES",
@@ -569,9 +590,11 @@ __all__ = [
     "MAX_SUPERVISOR_HANDOFFS",
     "MAX_TOOL_CALLS",
     "MIN_GENERATED_QUERIES",
+    "PAID_TOOLS",
     "QUERY_TOOLS",
     "REPORT_TOOLS",
     "SEARCH_REGION",
+    "SITE_FAILURE_LIMIT",
     "SITE_TOOLS",
     "SPECIALIST_AGENTS",
     "SUPERVISOR_ONLY",
@@ -580,6 +603,7 @@ __all__ = [
     "BudgetExceeded",
     "SeoBudget",
     "SeoCancelled",
+    "SeoFatal",
     "ToolRejected",
     "schema_for",
     "tools_for",

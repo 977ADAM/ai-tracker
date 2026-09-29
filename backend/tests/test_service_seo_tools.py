@@ -20,9 +20,16 @@ from app.core.errors import ProviderError
 from app.db.seo import SeoRepository
 from app.domain.search import SearchDocument
 from app.domain.seo import SeoInput, normalize_seo_request
-from app.domain.seo_tools import SEARCH_REGION, SeoBudget, ToolRejected
+from app.domain.seo_tools import (
+    FATAL_SITE_UNREACHABLE,
+    SEARCH_REGION,
+    SITE_FAILURE_LIMIT,
+    SeoBudget,
+    SeoFatal,
+    ToolRejected,
+)
 from app.domain.site_fetch import FetchedPage
-from app.integrations.site_fetcher import ROBOTS_DISALLOWED
+from app.integrations.site_fetcher import FETCH_UNREACHABLE, ROBOTS_DISALLOWED
 from app.service.connections import ConnectionService
 from app.service.seo_tools import SeoToolbox
 from tests.fakes import (
@@ -318,17 +325,79 @@ async def test_read_page_falls_back_to_the_host_root_and_refuses_an_unknown_page
 
 
 @pytest.mark.anyio
-async def test_robots_refusal_is_reported_as_a_safe_refusal(tmp_path, repository, settings):
+async def test_robots_refusal_is_reported_as_a_failed_action(tmp_path, repository, settings):
+    """A site that refuses the crawl is a failure, not a rejected tool call.
+
+    The tool ran and the site answered badly (robots.txt, a status, a timeout),
+    so the trace marks it `error` and the model learns the reason instead of
+    retrying the same call with other arguments.
+    """
     env = make_env(
         tmp_path, repository, settings, fetcher=FakeSiteFetcher(error=ProviderError(ROBOTS_DISALLOWED)),
     )
 
     answer = result(await env.toolbox.call("fetch_site", {}))
 
-    assert answer == {"status": "rejected", "error": ROBOTS_DISALLOWED}
+    assert answer == {"status": "error", "error": ROBOTS_DISALLOWED}
     assert env.toolbox.budget.pages == 0
     assert env.repository.pages(env.analysis_id) == ()
     assert result(await env.toolbox.call("read_page", {"url": "https://example.ru/"}))["error"] == ROBOTS_DISALLOWED
+    assert [(item["name"], item["status"], item["error"]) for item in trace_items(env)] == [
+        ("fetch_site", "error", ROBOTS_DISALLOWED),
+        ("read_page", "error", ROBOTS_DISALLOWED),
+    ]
+
+
+@pytest.mark.anyio
+async def test_an_unreadable_site_stops_the_run_before_any_paid_call(tmp_path, repository, settings):
+    """A crawl failure is fatal in the spec: it must not buy searches or answers."""
+    env = make_env(
+        tmp_path, repository, settings, fetcher=FakeSiteFetcher(error=ProviderError(FETCH_UNREACHABLE)),
+    )
+
+    for _ in range(SITE_FAILURE_LIMIT):
+        assert result(await env.toolbox.call("fetch_site", {}, agent="site"))["status"] == "error"
+
+    with pytest.raises(SeoFatal) as raised:
+        await env.toolbox.call("yandex_search", {"query": SEEDS[0]}, agent="competitors")
+
+    assert str(raised.value) == FATAL_SITE_UNREACHABLE
+    # Nothing was paid at Yandex, and the model answers of the checks never start.
+    assert env.gateway.submitted == []
+    assert env.toolbox.budget.searches == 0
+    fatal = trace_items(env)[-1]
+    assert (fatal["name"], fatal["status"], fatal["error"]) == (
+        "yandex_search", "error", FATAL_SITE_UNREACHABLE,
+    )
+    with pytest.raises(SeoFatal):
+        await env.toolbox.call("search_many", {}, agent="checks")
+
+
+@pytest.mark.anyio
+async def test_one_failed_crawl_is_retried_and_does_not_end_the_run(tmp_path, repository, settings):
+    env = make_env(tmp_path, repository, settings)
+    env.fetcher.error = ProviderError(FETCH_UNREACHABLE)
+
+    assert result(await env.toolbox.call("fetch_site", {}, agent="site"))["status"] == "error"
+    env.fetcher.error = None
+
+    answer = result(await env.toolbox.call("yandex_search", {"query": SEEDS[0]}, agent="competitors"))
+    assert answer["status"] in {"found", "absent"}
+    assert env.gateway.submitted
+
+
+@pytest.mark.anyio
+async def test_stored_pages_keep_paid_work_allowed_after_failed_crawls(tmp_path, repository, settings):
+    """Only a run that never read a page is lost; a stored page keeps it alive."""
+    env = make_env(tmp_path, repository, settings)
+
+    assert result(await env.toolbox.call("fetch_site", {}, agent="site"))["pages"]
+    env.fetcher.error = ProviderError(FETCH_UNREACHABLE)
+    for _ in range(SITE_FAILURE_LIMIT):
+        assert result(await env.toolbox.call("fetch_site", {}, agent="site"))["status"] == "error"
+
+    answer = result(await env.toolbox.call("yandex_search", {"query": SEEDS[0]}, agent="competitors"))
+    assert answer["status"] in {"found", "absent"}
 
 
 @pytest.mark.anyio

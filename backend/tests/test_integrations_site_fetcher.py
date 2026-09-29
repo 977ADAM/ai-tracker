@@ -22,8 +22,11 @@ from app.domain.site_fetch import (
 from app.integrations import site_fetcher as site_fetcher_module
 from app.integrations.site_fetcher import (
     BLOCKED_ADDRESS,
-    FETCH_FAILED,
+    FETCH_NOT_HTML,
+    FETCH_REFUSED,
     FETCH_TIMEOUT,
+    FETCH_UNREACHABLE,
+    FETCH_UNRESOLVED,
     REDIRECT_REFUSED,
     HttpxSiteFetcher,
 )
@@ -293,14 +296,28 @@ async def test_a_failed_page_keeps_the_pages_already_read():
 
 
 @pytest.mark.anyio
-async def test_a_failed_start_page_is_a_safe_error():
-    site = Site({"/": httpx.Response(500, content=b"secret stack trace")})
+@pytest.mark.parametrize("status", [429, 500, 503])
+async def test_a_refusing_start_page_names_its_status_safely(status):
+    """A rate limit or a server error is reported with its code, never its body."""
+    site = Site({"/": httpx.Response(status, content=b"secret stack trace")})
 
     async with build(site) as fetcher:
         with pytest.raises(ProviderError) as raised:
             await fetcher.fetch("example.ru")
 
-    assert str(raised.value) == FETCH_FAILED
+    assert str(raised.value) == f"{FETCH_REFUSED} ({status})"
+    assert "secret" not in str(raised.value)
+
+
+@pytest.mark.anyio
+async def test_a_non_html_start_page_is_reported_as_such():
+    site = Site({"/": httpx.Response(200, content=b"%PDF-1.4 secret", headers={"Content-Type": "application/pdf"})})
+
+    async with build(site) as fetcher:
+        with pytest.raises(ProviderError) as raised:
+            await fetcher.fetch("example.ru")
+
+    assert str(raised.value) == FETCH_NOT_HTML
     assert "secret" not in str(raised.value)
 
 
@@ -313,7 +330,8 @@ async def test_a_transport_failure_on_the_start_page_is_a_safe_error():
         with pytest.raises(ProviderError) as raised:
             await fetcher.fetch("example.ru")
 
-    assert str(raised.value) == FETCH_FAILED
+    assert str(raised.value) == FETCH_UNREACHABLE
+    assert "connection refused" not in str(raised.value)
 
 
 @pytest.mark.anyio
@@ -325,7 +343,21 @@ async def test_a_connect_timeout_on_the_start_page_is_a_safe_error():
         with pytest.raises(ProviderError) as raised:
             await fetcher.fetch("example.ru")
 
-    assert str(raised.value) == FETCH_FAILED
+    assert str(raised.value) == FETCH_UNREACHABLE
+    assert "timed out" not in str(raised.value)
+
+
+@pytest.mark.anyio
+async def test_a_host_that_does_not_resolve_is_reported_safely():
+    async def resolver(host: str) -> tuple[str, ...]:
+        raise OSError("no such host")
+
+    async with build(Site({"/": body_page("<p>Привет</p>")}), resolver) as fetcher:
+        with pytest.raises(ProviderError) as raised:
+            await fetcher.fetch("example.ru")
+
+    assert str(raised.value) == FETCH_UNRESOLVED
+    assert "no such host" not in str(raised.value)
 
 
 @pytest.mark.anyio

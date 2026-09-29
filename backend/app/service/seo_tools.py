@@ -51,9 +51,12 @@ from app.domain.seo_tools import (
     AGENT_TOOLS,
     BUDGET_EXHAUSTED,
     CANCELLED,
+    FATAL_SITE_UNREACHABLE,
     INVALID_AGENT,
     MAX_FETCH_PAGES,
+    PAID_TOOLS,
     SEARCH_REGION,
+    SITE_FAILURE_LIMIT,
     SPECIALIST_AGENTS,
     SUPERVISOR_ONLY,
     TOOL_NOT_ALLOWED,
@@ -61,6 +64,7 @@ from app.domain.seo_tools import (
     BudgetExceeded,
     SeoBudget,
     SeoCancelled,
+    SeoFatal,
     ToolRejected,
     tools_for,
     validate_arguments,
@@ -207,6 +211,7 @@ class SeoToolbox:
         self._candidates_cache: list | None = None
         self._pages: dict[str, FetchedPage] = {}
         self._pages_loaded = False
+        self._crawl_failures = 0
         self._site_facts_saved = False
         self._candidates_saved = False
         self._queries_saved = False
@@ -239,9 +244,10 @@ class SeoToolbox:
         """Validate, budget, execute, and trace one tool call; always answer with JSON.
 
         Domain and provider failures become a safe `rejected`/`error` result for
-        the model. `StorageError` and `SeoCancelled` still propagate: a broken
-        database must stop the run, and a cancelled run must not start another
-        step or another paid call.
+        the model. `StorageError`, `SeoCancelled`, and `SeoFatal` still
+        propagate: a broken database must stop the run, a cancelled run must not
+        start another step or another paid call, and a run whose site can never
+        be read must not pay for searches or answers either.
         """
         self._require_not_cancelled()
         resolved = agent if agent is not None else self.current_agent
@@ -251,12 +257,18 @@ class SeoToolbox:
         try:
             self.budget = self.budget.spend_tool_call()
             self._require_allowed(name, resolved)
+            self._require_site_for_paid_work(name)
             safe: object = validate_arguments(name, arguments)
         except BudgetExceeded as exc:
             self.exhausted = True
             return self._record_rejection(step_agent, name, arguments, str(exc))
         except ToolRejected as exc:
             return self._record_rejection(step_agent, name, arguments, str(exc))
+        except SeoFatal as exc:
+            # Fatal is not a tool result: trace it, then leave the graph so the
+            # runtime fails the analysis before anything else is paid for.
+            self._record(step_agent, name, {}, STEP_ERROR, error=str(exc))
+            raise
 
         handler = getattr(self, f"_tool_{name}", None)
         if handler is None:  # unreachable: `validate_arguments` knows every tool name
@@ -265,7 +277,7 @@ class SeoToolbox:
             result = await handler(safe)
         except asyncio.CancelledError:
             raise
-        except (StorageError, SeoCancelled):
+        except (StorageError, SeoCancelled, SeoFatal):
             raise
         except BudgetExceeded as exc:
             self.exhausted = True
@@ -406,14 +418,46 @@ class SeoToolbox:
         }
 
     async def _crawl(self) -> tuple[FetchedPage, ...]:
-        """Crawl the entered host through the fetcher; its errors stay safe."""
+        """Crawl the entered host through the fetcher; its errors stay safe.
+
+        An unreachable or refusing site is a failure of the action, not a refusal
+        of the arguments: the adapter error travels on so the trace records
+        `error` and names the reason (status, robots.txt, timeout) instead of
+        looking like a rejected tool call the model should retry with other
+        arguments. Failed crawls are counted: `SITE_FAILURE_LIMIT` of them means
+        the site cannot be read at all, and the run must not pay for the work
+        that depends on it.
+        """
         self._require_not_cancelled()
         try:
-            return tuple(await self.fetcher.fetch(self.input.host))
-        except AppError as exc:
-            raise ToolRejected(str(exc)) from exc
+            pages = tuple(await self.fetcher.fetch(self.input.host))
+        except AppError:
+            self._crawl_failures += 1
+            raise
         except Exception as exc:
-            raise ToolRejected(FETCH_FAILED) from exc
+            self._crawl_failures += 1
+            raise ProviderError(FETCH_FAILED) from exc
+        self._crawl_failures = 0
+        return pages
+
+    def _require_site_for_paid_work(self, name: str) -> None:
+        """Stop a run whose site can never be read before it pays for anything.
+
+        A crawl failure is fatal in the spec: without one stored page the site
+        agent can never save its facts, and without facts the queries can never
+        exist, so the run is already lost. The first paid tool of such a run ends
+        it here instead of buying Yandex searches and model answers for a report
+        that can only be empty. One failed crawl is not enough: a single network
+        blip is still retried.
+        """
+        if name not in PAID_TOOLS:
+            return
+        self._load_pages()
+        if self._pages or self._site_facts_saved:
+            return
+        if self._crawl_failures < SITE_FAILURE_LIMIT:
+            return
+        raise SeoFatal(FATAL_SITE_UNREACHABLE)
 
     def _load_pages(self) -> None:
         """Read the stored pages once, so a resumed toolbox never drops them."""
