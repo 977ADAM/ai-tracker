@@ -25,7 +25,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.db.seo import SeoRepository
 from app.domain.search import SearchDocument
 from app.domain.seo import SeoInput, normalize_seo_request
-from app.domain.seo_tools import TOOL_ARGUMENTS, SeoBudget
+from app.domain.seo_tools import MAX_SPECIALIST_TURNS, TOOL_ARGUMENTS, SeoBudget
 from app.service.connections import ConnectionService
 from app.service.seo_agents import (
     CHECKPOINT_FILE_MODE,
@@ -351,17 +351,19 @@ async def test_happy_path_runs_every_agent_and_completes_the_analysis(
     statuses = {
         entry["agent"]: entry["status"] for entry in harness.repository.agents(harness.analysis_id)
     }
-    # `save_*` marks its own agent `done`; the check agent only reads, so it is
-    # closed as `skipped` by the runtime like every other agent without a status.
+    # `save_*` marks its own agent `done`; a running checks agent is closed as
+    # `done` when the supervisor moves on to the report; the supervisor itself
+    # gets a terminal status when the run is published.
     assert statuses == {
-        "supervisor": "running",
+        "supervisor": "done",
         "site": "done",
         "competitors": "done",
         "queries": "done",
-        "checks": "skipped",
+        "checks": "done",
         "report": "done",
     }
     assert harness.repository.snapshot(harness.analysis_id)["status"] == "completed"
+    assert harness.repository.snapshot(harness.analysis_id)["budget_exhausted"] is False
 
     trace = [(item["agent"], item["kind"], item["name"]) for item in harness.trace()]
     assert trace == HAPPY_PATH_TRACE
@@ -444,7 +446,7 @@ async def test_finish_run_only_flags_the_end_and_the_runtime_completes_the_analy
 
 
 @pytest.mark.anyio
-async def test_without_finish_run_the_run_stays_running_and_the_agents_stay_open(
+async def test_supervisor_turn_backstop_publishes_the_run_as_stopped_by_the_limit(
     tmp_path, repository, settings,
 ):
     harness = make_harness(
@@ -453,16 +455,65 @@ async def test_without_finish_run_the_run_stays_running_and_the_agents_stay_open
 
     await harness.runtime(max_supervisor_turns=2).run(harness.analysis_id, harness.input)
 
-    assert harness.repository.snapshot(harness.analysis_id)["status"] == "running"
+    snapshot = harness.repository.snapshot(harness.analysis_id)
+    # A supervisor that never reaches a handoff burns its turn budget: the run is
+    # published from the stored rows (here: nothing was collected) and flagged.
+    assert snapshot["status"] == "completed"
+    assert snapshot["budget_exhausted"] is True
     statuses = {
         entry["agent"]: entry["status"] for entry in harness.repository.agents(harness.analysis_id)
     }
-    # An open run keeps its unfinished agents open: the runtime only closes them
-    # when `finish_run` completed the run.
-    assert statuses["supervisor"] == "running"
-    assert all(statuses[agent] == "pending" for agent in SPECIALISTS)
+    assert statuses["supervisor"] == "done"
+    assert all(statuses[agent] == "skipped" for agent in SPECIALISTS)
     assert harness.model.index == 2
-    assert [item["name"] for item in harness.trace()] == ["supervisor", "supervisor"]
+
+
+@pytest.mark.anyio
+async def test_specialist_turn_budget_stops_the_run_with_the_limit_flag(
+    tmp_path, repository, settings,
+):
+    endless = [call("handoff_to", agent="site", reason="Собрать сведения")]
+    endless += [call("fetch_site", max_pages=1) for _ in range(MAX_SPECIALIST_TURNS + 2)]
+    harness = make_harness(tmp_path, repository, settings, script=endless)
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    snapshot = harness.repository.snapshot(harness.analysis_id)
+    assert snapshot["status"] == "completed"
+    assert snapshot["budget_exhausted"] is True
+    # One supervisor turn plus exactly the specialist cap: the over-limit turn is
+    # refused before the paid model call is made.
+    assert harness.model.index == MAX_SPECIALIST_TURNS + 1
+
+
+@pytest.mark.anyio
+async def test_a_run_without_site_facts_fails_before_it_can_publish_a_report(
+    tmp_path, repository, settings,
+):
+    script = [
+        call("handoff_to", agent="site", reason="Собрать сведения"),
+        call("fetch_site", max_pages=1),
+        # `save_site_facts` is refused: the crawl found no page to base facts on.
+        call("save_site_facts", company_name="Ромашка", services=["Букеты"]),
+        AIMessage(content="Не удалось сохранить сведения"),
+        # The supervisor gives up early instead of looping: the run must not
+        # pretend to have a report when the site facts are missing.
+        call("finish_run", reason="Больше нечего делать"),
+    ]
+    harness = make_harness(tmp_path, repository, settings, script=script)
+    harness.fetcher.pages = ()
+
+    await harness.runtime().run(harness.analysis_id, harness.input)
+
+    snapshot = harness.repository.snapshot(harness.analysis_id)
+    assert snapshot["status"] == "failed"
+    assert snapshot["budget_exhausted"] is False
+    agents = {entry["agent"]: entry for entry in harness.repository.agents(harness.analysis_id)}
+    assert agents["supervisor"]["status"] == "error"
+    assert agents["supervisor"]["error"] is not None
+    assert all(
+        entry["status"] in {"done", "error", "skipped"} for entry in agents.values()
+    )
 
 
 # -- checkpointing and containment -------------------------------------------
@@ -509,7 +560,12 @@ async def test_runtime_contains_a_failing_model_as_a_safe_supervisor_error(
     assert agents["supervisor"]["status"] == "error"
     assert agents["supervisor"]["error"] is not None
     assert "unexpected model call" not in agents["supervisor"]["error"]
-    assert harness.repository.snapshot(harness.analysis_id)["status"] == "running"
+    # An unexpected model failure fails this run with a safe message and leaves
+    # no agent open; the raw exception text never reaches the stored error.
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "failed"
+    assert all(
+        entry["status"] in {"done", "error", "skipped"} for entry in agents.values()
+    )
 
 
 @pytest.mark.anyio

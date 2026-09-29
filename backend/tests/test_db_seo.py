@@ -1493,3 +1493,60 @@ def test_deleting_an_analysis_removes_its_pages_and_documents(tmp_path):
     repository.delete(analysis_id)
 
     assert table_counts(tmp_path / DB_FILE, DOCUMENT_TABLES) == {"seo_search_documents": 0}
+
+
+def test_budget_exhaustion_is_flagged_on_the_analysis(tmp_path):
+    repository = seo_repo(tmp_path)
+    analysis_id = create(repository)
+
+    assert repository.snapshot(analysis_id)["budget_exhausted"] is False
+
+    repository.mark_budget_exhausted(analysis_id)
+
+    assert repository.snapshot(analysis_id)["budget_exhausted"] is True
+    # The flag never touches the lifecycle: the run still has to be closed.
+    assert repository.snapshot(analysis_id)["status"] == "running"
+    with pytest.raises(RunNotFound):
+        repository.mark_budget_exhausted("нет такого анализа")
+
+
+def test_a_version_four_database_gains_the_budget_flag_column(tmp_path):
+    path = tmp_path / DB_FILE
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE seo_analyses (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            finished_at TEXT,
+            url TEXT NOT NULL,
+            host TEXT NOT NULL,
+            sphere TEXT NOT NULL,
+            seeds_json TEXT NOT NULL,
+            input_services_json TEXT NOT NULL,
+            connection_ids_json TEXT NOT NULL,
+            estimate_json TEXT NOT NULL,
+            company_name TEXT NOT NULL DEFAULT '',
+            services_json TEXT NOT NULL,
+            summary_text TEXT
+        );
+        PRAGMA user_version=4;
+        """
+    )
+    connection.execute(
+        "INSERT INTO seo_analyses (id, status, created_at, updated_at, url, host, sphere, "
+        "seeds_json, input_services_json, connection_ids_json, estimate_json, services_json) "
+        "VALUES ('old', 'running', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', "
+        "'https://example.ru/', 'example.ru', 'Цветы', '[]', '[]', '[]', '{}', '[]')",
+    )
+    connection.commit()
+    connection.close()
+
+    repository = seo_repo(tmp_path)
+
+    snapshot = repository.snapshot("old")
+    assert snapshot["budget_exhausted"] is False
+    repository.mark_budget_exhausted("old")
+    assert repository.snapshot("old")["budget_exhausted"] is True

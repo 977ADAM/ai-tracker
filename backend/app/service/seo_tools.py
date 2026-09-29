@@ -230,6 +230,7 @@ class SeoToolbox:
         resolved = agent if agent is not None else self.current_agent
         step_agent = resolved or "supervisor"
         self._active_agent = step_agent
+        self._mark_agent_running(step_agent)
         try:
             self.budget = self.budget.spend_tool_call()
             self._require_allowed(name, resolved)
@@ -265,6 +266,24 @@ class SeoToolbox:
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
     # -- trace -----------------------------------------------------------
+
+    def _mark_agent_running(self, agent: str) -> None:
+        """Show the acting agent as `running` from its first tool call on.
+
+        The interface reads the agent state while the run is live, so an agent
+        that started working must not stay `pending`. A `save_*` tool still ends
+        its own agent with `done`; the upsert here only moves `pending` forward
+        and never rewrites a terminal status.
+        """
+        try:
+            for entry in self.repository.agents(self.analysis_id):
+                if entry["agent"] != agent:
+                    continue
+                if entry["status"] == "pending":
+                    self.repository.upsert_agent(self.analysis_id, agent, "running")
+                return
+        except AppError:
+            LOGGER.error("SEO agent state could not be marked running")
 
     def _require_allowed(self, name: str, agent: str | None) -> None:
         """Refuse a tool that is outside the acting agent's own subset."""

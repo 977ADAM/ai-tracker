@@ -37,8 +37,9 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from typing import Annotated, Any, NotRequired, Protocol, TypedDict
+from typing import Annotated, Any, Protocol, TypedDict
 
+from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -53,8 +54,6 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.managed import RemainingSteps
-from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field, create_model
 
 from app.core.errors import AppError, StorageError
@@ -69,7 +68,7 @@ from app.domain.seo_prompts import (
     site_agent_prompt,
     supervisor_prompt,
 )
-from app.domain.seo_tools import SeoBudget
+from app.domain.seo_tools import BudgetExceeded, SeoBudget
 from app.service.seo_tools import SeoToolbox
 
 LOGGER = logging.getLogger(__name__)
@@ -107,6 +106,10 @@ STATUS_WITHOUT_TOOL_CALL = "done"
 
 HANDOFF_TOOL = "handoff_to"
 FINISH_TOOL = "finish_run"
+REPORT_AGENT = "report"
+CHECK_AGENT = "checks"
+SITE_AGENT = "site"
+FATAL_DATA_MISSING = "Не собраны сведения о сайте или не сгенерированы запросы"
 
 SEARCH_FAILED = "Инструмент временно недоступен"
 SUPERVISOR_FAILED = "Супервизор SEO-анализа завершился ошибкой"
@@ -131,7 +134,6 @@ class RunState(TypedDict):
     finished: bool
     finish_reason: str
     specialists: dict[str, int]
-    remaining_steps: NotRequired[RemainingSteps]
 
 
 class AgentPrompts(Protocol):
@@ -329,16 +331,17 @@ def _object_model(document: Mapping[str, object]) -> type[BaseModel]:
 class ModelTracer(BaseChatModel):
     """One agent's model plus one `model` trace step per model turn.
 
-    `create_react_agent` calls the model itself, so a specialist turn can only be
+    `create_agent` calls the model itself, so a specialist turn can only be
     traced from inside the model. One wrapper is built per agent and already
     knows who it is acting for, so no prompt has to be matched at run time. The
-    wrapper appends one `model` step with the agent and the turn status; the
-    answer text never reaches the trace by contract.
+    wrapper spends one turn of that agent's budget, appends one `model` step with
+    the agent and the turn status, and never puts the answer text into the trace.
     """
 
     model: BaseChatModel
     agent: str
     recorder: Callable[[str, str], None]
+    on_turn: Callable[[str], None] | None = None
 
     @property
     def _llm_type(self) -> str:
@@ -358,6 +361,7 @@ class ModelTracer(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self._spend()
         result = await self.model._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
         self._record(result)
         return result
@@ -369,9 +373,15 @@ class ModelTracer(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self._spend()
         result = self.model._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
         self._record(result)
         return result
+
+    def _spend(self) -> None:
+        """Charge one turn; an exhausted budget stops the graph on purpose."""
+        if self.on_turn is not None:
+            self.on_turn(self.agent)
 
     def _record(self, result: ChatResult) -> None:
         try:
@@ -416,6 +426,7 @@ def build_agent_graph(
             model=model,
             agent=agent,
             recorder=lambda actor, status: _record_model_step(toolbox, actor, status),
+            on_turn=lambda actor: _spend_turn(toolbox, actor),
         )
 
     supervisor_model = traced_model(SUPERVISOR_NODE)
@@ -431,10 +442,10 @@ def build_agent_graph(
             system, _user = prompts.report({})
         else:
             system, _user = prompts.specialist(name, toolbox.input)
-        builders[name] = create_react_agent(
+        builders[name] = create_agent(
             traced_model(name),
             tools=langchain_tools(toolbox, name),
-            prompt=SystemMessage(system),
+            system_prompt=system,
             state_schema=RunState,
             name=name,
         )
@@ -462,6 +473,23 @@ def _record_model_step(toolbox: SeoToolbox, agent: str, status: str) -> None:
     toolbox.repository.append_step(toolbox.analysis_id, agent, STEP_MODEL, agent, status=status)
 
 
+def _spend_turn(toolbox: SeoToolbox, agent: str) -> None:
+    """Charge one model turn of one specialist.
+
+    The supervisor has its own ceiling (`max_supervisor_turns`) and no per-agent
+    turn row, so only specialists are charged. An exhausted turn budget raises
+    `BudgetExceeded` out of the model call: the graph stops and the runtime
+    publishes the run as stopped by the limit instead of looping.
+    """
+    if agent not in SPECIALIST_NODES:
+        return
+    try:
+        toolbox.budget = toolbox.budget.spend_turn(agent)
+    except BudgetExceeded:
+        toolbox.exhausted = True
+        raise
+
+
 async def _supervisor_turn(
     state: RunState,
     toolbox: SeoToolbox,
@@ -473,8 +501,9 @@ async def _supervisor_turn(
     turns = int(state.get("specialists", {}).get(SUPERVISOR_NODE, 0))
     if turns >= max_supervisor_turns:
         # The graph-level backstop of the handoff budget: never loop forever.
-        # It ends the graph but not the run: only `finish_run` finishes a run,
-        # and what to do with a stopped supervisor is the next step's decision.
+        # It ends the graph and marks the run as stopped by the limit, so the
+        # runtime publishes what is stored instead of leaving the run open.
+        toolbox.exhausted = True
         return {"supervisor_next": NEXT_END}
     status = _toolbox_status(toolbox)
     budget = toolbox.budget.as_dict()
@@ -499,6 +528,8 @@ async def _supervisor_turn(
         if next_node != NEXT_END:
             next_node = decision
             task = _handoff_task(toolbox, prompts, decision)
+            if decision == REPORT_AGENT:
+                _complete_checks(toolbox)
 
     specialists = dict(state.get("specialists", {}))
     specialists[SUPERVISOR_NODE] = turns + 1
@@ -518,6 +549,13 @@ async def _supervisor_turn(
     # No usable control call (a refusal or a plain answer): ask the supervisor
     # again, which either hands off or is stopped by the turn backstop.
     return {"messages": updates, "supervisor_next": NEXT_SUPERVISOR, "specialists": specialists}
+
+
+def _complete_checks(toolbox: SeoToolbox) -> None:
+    """Close a running checks agent: its work is done once the report starts."""
+    for entry in toolbox.repository.agents(toolbox.analysis_id):
+        if entry["agent"] == CHECK_AGENT and entry["status"] == STATUS_RUNNING:
+            toolbox.repository.upsert_agent(toolbox.analysis_id, CHECK_AGENT, STATUS_DONE)
 
 
 def _control_decision(name: str, result: str) -> str | None:
@@ -667,6 +705,7 @@ class SeoAgentRuntime:
 
     async def run(self, analysis_id: str, input: SeoInput) -> None:
         """Run the graph of one analysis; never let an exception escape the task."""
+        toolbox: SeoToolbox | None = None
         try:
             self.repository.upsert_agent(analysis_id, SUPERVISOR_NODE, STATUS_RUNNING)
             toolbox = self.toolbox_factory(analysis_id, input, SeoBudget.for_connections(
@@ -677,12 +716,15 @@ class SeoAgentRuntime:
             else:
                 async with self.checkpointer(analysis_id) as saver:
                     await self._invoke(analysis_id, toolbox, input, saver)
-            self._finish(analysis_id, toolbox)
+            self._finalize(analysis_id, toolbox)
         except BaseException as exc:  # a run task must never surface an exception
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             LOGGER.error("SEO agent run %s stopped: %s", analysis_id, type(exc).__name__)
-            self._mark_error(analysis_id, exc)
+            if toolbox is not None and toolbox.exhausted:
+                self._publish_exhausted(analysis_id)
+            else:
+                self._mark_error(analysis_id, exc)
 
     async def _invoke(
         self,
@@ -715,28 +757,62 @@ class SeoAgentRuntime:
             toolbox.finished = bool(result.get("finished"))
             toolbox.finish_reason = str(result.get("finish_reason") or "") or toolbox.finish_reason
 
-    def _finish(self, analysis_id: str, toolbox: SeoToolbox) -> None:
-        """Finish the run when the supervisor asked for it, or leave it running."""
-        if not toolbox.finished:
-            LOGGER.info("SEO agent run %s has no finish_run yet; left running", analysis_id)
+    def _finalize(self, analysis_id: str, toolbox: SeoToolbox) -> None:
+        """Publish the run: stopped by the limit, failed, or completed.
+
+        The spec's fatal matrix is decided here, from stored rows only: the site
+        agent must have saved its facts and at least five valid queries must
+        exist. Candidateless runs, failed rows, a failed connection, and a
+        missing report agent are not fatal — the numbers are computed from the
+        stored rows, so the report is still publishable.
+        """
+        if toolbox.exhausted:
+            self._publish_exhausted(analysis_id)
             return
-        for entry in self.repository.agents(analysis_id):
-            agent = str(entry["agent"])
-            if agent == SUPERVISOR_NODE or entry["status"] == STATUS_DONE:
-                continue
+        snapshot = self.repository.snapshot(analysis_id)
+        agents = {str(entry["agent"]): str(entry["status"]) for entry in snapshot["agents"]}
+        facts_ready = agents.get(SITE_AGENT) == STATUS_DONE
+        queries_ready = bool(snapshot["readiness"].get("queries_ready"))
+        self._close_agents(analysis_id, completed=True)
+        if not (facts_ready and queries_ready):
             self.repository.upsert_agent(
-                analysis_id,
-                agent,
-                STATUS_ERROR if entry["status"] == STATUS_ERROR else STATUS_SKIPPED,
+                analysis_id, SUPERVISOR_NODE, STATUS_ERROR, error=FATAL_DATA_MISSING,
             )
+            self.repository.fail_analysis(analysis_id)
+            return
+        if not toolbox.finished:
+            LOGGER.info("SEO agent run %s stopped without finish_run; published anyway", analysis_id)
         self.repository.finish_analysis(analysis_id)
 
+    def _publish_exhausted(self, analysis_id: str) -> None:
+        """Close a run that ran out of budget: keep the rows, flag the limit."""
+        try:
+            self.repository.mark_budget_exhausted(analysis_id)
+            self._close_agents(analysis_id, completed=True)
+            self.repository.finish_analysis(analysis_id)
+        except AppError:
+            LOGGER.error("SEO agent run %s could not publish its budget stop", analysis_id)
+
+    def _close_agents(self, analysis_id: str, *, completed: bool) -> None:
+        """Give every agent a terminal status: nothing stays `running`."""
+        for entry in self.repository.agents(analysis_id):
+            agent = str(entry["agent"])
+            status = str(entry["status"])
+            if status in (STATUS_DONE, STATUS_ERROR):
+                continue
+            if completed and status == STATUS_RUNNING:
+                self.repository.upsert_agent(analysis_id, agent, STATUS_DONE)
+            else:
+                self.repository.upsert_agent(analysis_id, agent, STATUS_SKIPPED)
+
     def _mark_error(self, analysis_id: str, error: BaseException) -> None:
-        """Record a safe supervisor error; the next step turns it into a failed run."""
+        """Record a safe supervisor error and fail this run only."""
         try:
             self.repository.upsert_agent(
                 analysis_id, SUPERVISOR_NODE, STATUS_ERROR, error=_safe_error(error),
             )
+            self._close_agents(analysis_id, completed=False)
+            self.repository.fail_analysis(analysis_id)
         except AppError:
             LOGGER.error("SEO agent run %s could not store its error", analysis_id)
 

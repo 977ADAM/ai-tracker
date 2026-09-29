@@ -133,7 +133,8 @@ CREATE TABLE IF NOT EXISTS seo_analyses (
     estimate_json TEXT NOT NULL,
     company_name TEXT NOT NULL DEFAULT '',
     services_json TEXT NOT NULL,
-    summary_text TEXT
+    summary_text TEXT,
+    budget_exhausted INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS seo_stages (
     analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
@@ -311,8 +312,24 @@ class SeoRepository:
         self._enable_wal()
         with self._connection(write=True) as connection:
             connection.executescript(SCHEMA)
+            self._ensure_columns(connection)
             if version < SCHEMA_VERSION:
                 connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+    @staticmethod
+    def _ensure_columns(connection: sqlite3.Connection) -> None:
+        """Add columns introduced after a table already existed.
+
+        `CREATE TABLE IF NOT EXISTS` cannot add a column to an existing table, so
+        a database written by an earlier schema needs an explicit `ALTER TABLE`.
+        """
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(seo_analyses)")
+        }
+        if "budget_exhausted" not in columns:
+            connection.execute(
+                "ALTER TABLE seo_analyses ADD COLUMN budget_exhausted INTEGER NOT NULL DEFAULT 0",
+            )
 
     def _read_version(self) -> int:
         """Read `user_version` before any write, so a newer file is never touched."""
@@ -859,6 +876,20 @@ class SeoRepository:
         """Move a running analysis to `failed`; a cancelled analysis stays cancelled."""
         self._close_analysis(analysis_id, "failed")
 
+    def mark_budget_exhausted(self, analysis_id: str) -> None:
+        """Flag the run that stopped because an agent budget ran out.
+
+        The rows already stored stay readable; the flag only tells the report and
+        the interface that the run ended by limit rather than by `finish_run`.
+        """
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_analysis(connection, analysis_id)
+            connection.execute(
+                "UPDATE seo_analyses SET budget_exhausted=1, updated_at=? WHERE id=?",
+                (now, analysis_id),
+            )
+
     def _close_analysis(self, analysis_id: str, status: SeoAnalysisStatus) -> None:
         now = _now()
         with self._connection(write=True) as connection:
@@ -1367,6 +1398,7 @@ class SeoRepository:
             "stages": self._stages(connection, analysis_id),
             "agents": list(self._agents_in(connection, analysis_id)),
             "budget": self._budget_state(connection, analysis_id),
+            "budget_exhausted": bool(row["budget_exhausted"]),
             "candidates": [_plain(candidate) for candidate in candidates],
             "queries": [
                 {
