@@ -799,14 +799,7 @@ class SeoAgentRuntime:
         input: SeoInput,
         checkpointer: BaseCheckpointSaver | None,
     ) -> None:
-        graph = build_agent_graph(
-            self.chat_model,
-            toolbox,
-            checkpointer=checkpointer,
-            prompts=self.prompts,
-            max_supervisor_turns=self.max_supervisor_turns,
-            recursion_limit=self.recursion_limit,
-        )
+        graph = self._graph(toolbox, checkpointer)
         state: RunState = {
             "messages": [HumanMessage(_run_task(input))],
             "supervisor_next": SUPERVISOR_NODE,
@@ -814,14 +807,89 @@ class SeoAgentRuntime:
             "finish_reason": "",
             "specialists": {},
         }
-        config: RunnableConfig = {
+        result = await graph.ainvoke(state, self._config(analysis_id))
+        self._read_result(toolbox, result)
+
+    async def resume(self, analysis_id: str) -> bool:
+        """Continue a run from its checkpoint; `False` when there is none.
+
+        The toolbox rebuilds its view from the stored rows, so the work of the
+        interrupted run is reused instead of repeated: a search answers from the
+        stored outcome, an already submitted deferred operation is polled, and an
+        already answered model pair is not asked again. A run without a
+        checkpoint is left to the caller (it becomes `interrupted`).
+        """
+        request = self._request_of(analysis_id)
+        toolbox = self._toolbox(analysis_id, request)
+        try:
+            if isinstance(self.checkpointer, BaseCheckpointSaver):
+                return await self._continue(analysis_id, toolbox, self.checkpointer)
+            async with self.checkpointer(analysis_id) as saver:
+                return await self._continue(analysis_id, toolbox, saver)
+        except SeoCancelled:
+            self._finalize_cancelled(analysis_id)
+            return True
+        except BaseException as exc:  # a resume task must never surface an exception
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            LOGGER.error("SEO agent resume %s stopped: %s", analysis_id, type(exc).__name__)
+            if self._cancelled(analysis_id):
+                self._finalize_cancelled(analysis_id)
+            elif toolbox.exhausted:
+                self._publish_exhausted(analysis_id)
+            else:
+                self._mark_error(analysis_id, exc)
+            return True
+        finally:
+            self._cancel_events.pop(analysis_id, None)
+
+    async def _continue(
+        self, analysis_id: str, toolbox: SeoToolbox, checkpointer: BaseCheckpointSaver | None,
+    ) -> bool:
+        """Re-enter the graph of one run on its own thread and publish the result."""
+        graph = self._graph(toolbox, checkpointer)
+        config = self._config(analysis_id)
+        state = await graph.aget_state(config)
+        if not state.values:
+            return False
+        self.repository.upsert_agent(analysis_id, SUPERVISOR_NODE, STATUS_RUNNING)
+        result = await graph.ainvoke(None, config)
+        self._read_result(toolbox, result)
+        self._finalize(analysis_id, toolbox)
+        return True
+
+    def _graph(self, toolbox: SeoToolbox, checkpointer: BaseCheckpointSaver | None) -> Any:
+        return build_agent_graph(
+            self.chat_model,
+            toolbox,
+            checkpointer=checkpointer,
+            prompts=self.prompts,
+            max_supervisor_turns=self.max_supervisor_turns,
+            recursion_limit=self.recursion_limit,
+        )
+
+    def _config(self, analysis_id: str) -> RunnableConfig:
+        return {
             "configurable": {"thread_id": analysis_id},
             "recursion_limit": self.recursion_limit,
         }
-        result = await graph.ainvoke(state, config)
+
+    def _read_result(self, toolbox: SeoToolbox, result: object) -> None:
         if isinstance(result, Mapping):
             toolbox.finished = bool(result.get("finished"))
             toolbox.finish_reason = str(result.get("finish_reason") or "") or toolbox.finish_reason
+
+    def _request_of(self, analysis_id: str) -> SeoInput:
+        """Rebuild the run input from the stored analysis, for a resume."""
+        payload = self.repository.snapshot(analysis_id)["input"]
+        return SeoInput(
+            url=str(payload["url"]),
+            host=str(payload["host"]),
+            sphere=str(payload["sphere"]),
+            seeds=tuple(str(seed) for seed in payload["seeds"]),
+            services=tuple(str(service) for service in payload["services"]),
+            connection_ids=tuple(str(item) for item in payload["connection_ids"]),
+        )
 
     def _finalize(self, analysis_id: str, toolbox: SeoToolbox) -> None:
         """Publish the run: stopped by the limit, failed, or completed.

@@ -618,3 +618,47 @@ async def test_cancelling_a_live_run_stops_every_paid_call_and_keeps_the_status(
     # A repeated cancel, and a cancel of an already finished run, stay safe.
     runtime.cancel(harness.analysis_id)
     assert harness.repository.snapshot(harness.analysis_id)["status"] == "cancelled"
+
+
+# -- resume after a restart --------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_resume_continues_from_the_checkpoint_and_never_repeats_stored_work(
+    tmp_path, repository, settings,
+):
+    # First process: it crawls the site, then dies mid-run (the finalization
+    # never happens, which is exactly what a restart leaves behind).
+    dying = make_harness(tmp_path, repository, settings)
+    crashed = dying.runtime(recursion_limit=8)
+    crashed._mark_error = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    await crashed.run(dying.analysis_id, dying.input)
+
+    assert dying.repository.snapshot(dying.analysis_id)["status"] == "running"
+    assert dying.repository.snapshot(dying.analysis_id)["pages"], "the crawl was stored"
+
+    # Second process: a new runtime, a fresh toolbox, the same config directory.
+    resumed = make_harness(tmp_path, repository, settings, script=happy_path_script()[4:])
+    assert await resumed.runtime().resume(dying.analysis_id) is True
+
+    snapshot = dying.repository.snapshot(dying.analysis_id)
+    assert snapshot["status"] == "completed"
+    # The site agent is not visited again: the pages come from the database.
+    assert resumed.fetcher.hosts == []
+    assert [page["url"] for page in snapshot["pages"]] == [DEFAULT_SEO_PAGE.url]
+    assert snapshot["company_name"] == "Ромашка"
+    assert snapshot["conclusions"]["summary"] == SUMMARY
+
+
+@pytest.mark.anyio
+async def test_resume_without_a_checkpoint_reports_that_nothing_can_be_resumed(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+    runtime = harness.runtime()
+    baseline = len(harness.model.calls)
+
+    assert await runtime.resume(harness.analysis_id) is False
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "running"
+    assert len(harness.model.calls) == baseline
