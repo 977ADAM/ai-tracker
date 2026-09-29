@@ -70,7 +70,10 @@ SEEDS = ["купить цветы", "доставка букетов", "цвет
 SERVICES = ["Доставка цветов", "Букеты"]
 SUMMARY = "Ромашка упоминается в половине успешных ответов."
 SEARCH_ERROR = "Не удалось получить выдачу Яндекса"
-MODEL_ANSWER = "Ромашка и flower-shop.example предлагают доставку цветов"
+MODEL_ANSWER = (
+    "Ромашка и flower-shop.example предлагают доставку цветов. "
+    + "Подробности заказа: сроки, бригада, смета и материалы. " * 12
+)
 
 # The agent rows, trace steps, and conclusions of the fixture run. They are what
 # the run screen and the report read back through the real trace resource.
@@ -426,8 +429,19 @@ def test_saved_report_opens_from_history_and_deletes(page: Page, application: Ap
         expect(seo.page.locator(f"[data-candidate='{ONE_OFF_HOST}']")).to_have_count(0)
         expect(seo.report).to_contain_text(SUMMARY)
 
-        # The saved detail shows the answer and the failed row as they are.
+        # The saved detail shows the answer and the failed row as they are. A long
+        # answer stays a preview in the table and opens in full on click.
         expect(seo.model_detail_rows.first).to_contain_text("flower-shop.example")
+        preview = seo.model_detail_rows.first.locator("[data-model-answer-preview]")
+        expect(preview).to_contain_text("flower-shop.example")
+        expect(preview).not_to_contain_text("материалы. " * 8)
+        seo.model_detail_rows.first.get_by_role("button", name="Читать полностью").click()
+        dialog = page.get_by_role("dialog", name="Ответ модели")
+        expect(dialog).to_be_visible()
+        expect(dialog.locator("[data-answer-full]")).to_contain_text("смета и материалы.")
+        expect(dialog.locator("[data-answer-caption]")).to_contain_text("купить цветы")
+        dialog.get_by_role("button", name="Закрыть").click()
+        expect(page.get_by_role("dialog")).to_have_count(0)
         expect(seo.model_detail_rows.nth(2)).to_contain_text("Модель недоступна")
         expect(seo.search_detail_rows.nth(2)).to_contain_text(SEARCH_ERROR)
 

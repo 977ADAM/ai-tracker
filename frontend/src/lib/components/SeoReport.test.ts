@@ -190,6 +190,53 @@ describe('SeoReport', () => {
     expect(document.querySelector('[data-search-detail]')?.getAttribute('data-status')).toBe('error');
   });
 
+  it('keeps a long answer out of the table and opens it on click', async () => {
+    const long = 'Первая строка ответа.\n' + 'Подробности ремонта. '.repeat(60);
+    const row: SeoModelRow = { ...modelRow, answer: long };
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
+
+    const table = screen.getByRole('table', { name: 'Ответы моделей' });
+    const preview = document.querySelector('[data-model-answer-preview]') as HTMLElement;
+    expect(preview.textContent?.length).toBeLessThanOrEqual(161);
+    expect(preview.textContent?.endsWith('…')).toBe(true);
+    expect(table.textContent).not.toContain('Подробности ремонта. '.repeat(60));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Читать полностью' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.querySelector('[data-answer-full]')?.textContent).toBe(long);
+    expect(document.querySelector('[data-answer-caption]')?.textContent).toContain('Модель');
+    expect(document.querySelector('[data-answer-caption]')?.textContent).toContain('купить цветы');
+    // The row still shows the preview, not the whole answer.
+    expect(document.querySelector('[data-model-answer-preview]')?.textContent?.endsWith('…')).toBe(true);
+  });
+
+  it('closes the answer dialog on the button, on Escape, and on the backdrop', async () => {
+    const row: SeoModelRow = { ...modelRow, answer: 'я'.repeat(400) };
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
+    const trigger = screen.getByRole('button', { name: 'Читать полностью' });
+
+    await fireEvent.click(trigger);
+    await fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await fireEvent.click(trigger);
+    await fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    await fireEvent.click(trigger);
+    await fireEvent.click(document.querySelector('[data-answer-backdrop]') as HTMLElement);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('offers no dialog for an answer that already fits its preview', () => {
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [modelRow], search: [] } } });
+
+    expect(document.querySelector('[data-model-answer-preview]')?.textContent).toBe(modelRow.answer);
+    expect(screen.queryByRole('button', { name: 'Читать полностью' })).toBeNull();
+  });
+
   it('paginates the detail rows through the cursor callbacks', async () => {
     const onMore = vi.fn();
     const view = render(SeoReport, { props: {
