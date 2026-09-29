@@ -27,7 +27,9 @@ from app.integrations.site_fetcher import (
     FETCH_TIMEOUT,
     FETCH_UNREACHABLE,
     FETCH_UNRESOLVED,
+    MAX_FETCH_RETRIES,
     REDIRECT_REFUSED,
+    RETRY_BACKOFF_SECONDS,
     HttpxSiteFetcher,
 )
 
@@ -73,17 +75,25 @@ class Site:
 
 
 @asynccontextmanager
-async def build(handler: Callable[[httpx.Request], object], resolver: Callable | None = None):
+async def build(
+    handler: Callable[[httpx.Request], object],
+    resolver: Callable | None = None,
+    sleep: Callable | None = None,
+):
     """A fetcher over a mock transport, closed when the test leaves the block."""
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
-        yield HttpxSiteFetcher(client, resolver=resolver or public_resolver)
+        yield HttpxSiteFetcher(client, resolver=resolver or public_resolver, sleep=sleep)
     finally:
         await client.aclose()
 
 
 def body_page(body: str, content_type: str = "text/html; charset=utf-8") -> httpx.Response:
     return httpx.Response(200, content=body.encode("utf-8"), headers={"Content-Type": content_type})
+
+
+async def no_sleep(_seconds: float) -> None:
+    """The default pause of a test: the real one is asserted, never spent."""
 
 
 def links(*hrefs: str, title: str = "Заголовок") -> httpx.Response:
@@ -301,7 +311,7 @@ async def test_a_refusing_start_page_names_its_status_safely(status):
     """A rate limit or a server error is reported with its code, never its body."""
     site = Site({"/": httpx.Response(status, content=b"secret stack trace")})
 
-    async with build(site) as fetcher:
+    async with build(site, sleep=no_sleep) as fetcher:
         with pytest.raises(ProviderError) as raised:
             await fetcher.fetch("example.ru")
 
@@ -590,3 +600,98 @@ async def test_an_unreachable_robots_file_does_not_block_the_crawl():
         pages = await fetcher.fetch("example.ru")
 
     assert [page.url for page in pages] == ["https://example.ru/", "https://example.ru/open"]
+
+
+# -- one page, several addresses, and a site that asks for patience -----------
+#
+# A host commonly answers on several addresses, and they are not equal: a
+# dual-stack name in a host without an IPv6 route, or one broken replica, would
+# otherwise lose the page — and a lost entry page loses the whole run, because a
+# crawl that read nothing is a fatal site failure. A `429`/`503` answer is not a
+# dead end either: it asks for a slower client, and repeating the URL a couple of
+# times after a pause is what a polite crawler does with it.
+
+SECOND_IP = "93.184.216.35"
+
+
+@pytest.mark.anyio
+async def test_a_page_is_read_from_the_next_address_when_the_first_one_fails():
+    async def resolver(_host: str) -> tuple[str, ...]:
+        return (PUBLIC_IP, SECOND_IP)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == PUBLIC_IP:
+            raise httpx.ConnectError("no route to this address", request=request)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return body_page("<html><head><title>Второй адрес</title></head><body>ok</body></html>")
+
+    async with build(handler, resolver=resolver) as fetcher:
+        pages = await fetcher.fetch("example.ru")
+
+    assert [page.title for page in pages] == ["Второй адрес"]
+
+
+@pytest.mark.anyio
+async def test_a_page_no_address_answers_is_still_unreachable():
+    """The fallback never hides a site that is simply down."""
+    async def resolver(_host: str) -> tuple[str, ...]:
+        return (PUBLIC_IP, SECOND_IP)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route to this address", request=request)
+
+    async with build(handler, resolver=resolver) as fetcher:
+        with pytest.raises(ProviderError) as raised:
+            await fetcher.fetch("example.ru")
+
+    assert str(raised.value) == FETCH_UNREACHABLE
+
+
+@pytest.mark.anyio
+async def test_a_slow_down_answer_is_repeated_after_the_pause_it_asks_for():
+    slept: list[float] = []
+    answers: list[int] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        answers.append(len(answers) + 1)
+        if len(answers) == 1:
+            return httpx.Response(429, headers={"Retry-After": "2"}, content=b"slow down")
+        return body_page("<html><head><title>Со второй попытки</title></head><body>ok</body></html>")
+
+    async with build(handler, sleep=sleep) as fetcher:
+        pages = await fetcher.fetch("example.ru")
+
+    assert [page.title for page in pages] == ["Со второй попытки"]
+    assert len(answers) == 2
+    assert slept == [2.0]
+
+
+@pytest.mark.anyio
+async def test_a_permanent_slow_down_stops_after_the_bounded_retries():
+    """The pause grows per attempt, and the last answer keeps its status."""
+    slept: list[float] = []
+    calls = 0
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        calls += 1
+        return httpx.Response(503, content=b"unavailable")
+
+    async with build(handler, sleep=sleep) as fetcher:
+        with pytest.raises(ProviderError) as raised:
+            await fetcher.fetch("example.ru")
+
+    assert str(raised.value) == f"{FETCH_REFUSED} (503)"
+    assert calls == MAX_FETCH_RETRIES + 1
+    assert slept == [RETRY_BACKOFF_SECONDS, RETRY_BACKOFF_SECONDS * 2]

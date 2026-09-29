@@ -6,6 +6,10 @@ verified address: the `Host` header and the TLS SNI name stay the entered
 hostname, so a DNS answer that changes between the check and the connection
 cannot move the socket. Redirects are followed manually, only within the entered
 host and its subdomains, at most five times, and robots.txt is always obeyed.
+One page is tried over every verified address of its host, so a single
+unreachable node does not lose it, and an answer that asks for a slower client
+(`429`, `503`) is repeated a bounded number of times after `Retry-After` or a
+short pause instead of ending the crawl.
 
 The adapter owns no client and no secrets: it reuses the shared
 `httpx.AsyncClient`, and tests inject both the transport and the resolver.
@@ -39,6 +43,7 @@ from app.domain.site_fetch import (
 )
 
 Resolver = Callable[[str], Awaitable[tuple[str, ...]]]
+Sleeper = Callable[[float], Awaitable[None]]
 
 USER_AGENT = "ai-tracker-seo/1.0"
 # robots.txt is always read for the wildcard group: the User-Agent is never
@@ -49,6 +54,14 @@ HTML_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 SKIPPED_TAGS = frozenset({"script", "style", "noscript", "template"})
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 NON_PAGE_PREFIXES = ("mailto:", "tel:", "javascript:", "data:", "ftp:", "blob:")
+# A slow-down answer asks for a patient client, not for a lost page: the same
+# URL is repeated a couple of times, and the last answer is reported as it is.
+RETRY_STATUSES = frozenset({429, 503})
+MAX_FETCH_RETRIES = 2
+RETRY_BACKOFF_SECONDS = 1.0
+# A long `Retry-After` would spend the whole crawl budget on one URL, so it is
+# capped; the whole walk is bounded by `FETCH_TOTAL_TIMEOUT` anyway.
+MAX_RETRY_AFTER_SECONDS = 5.0
 
 FETCH_FAILED = "Не удалось загрузить сайт"
 FETCH_UNREACHABLE = "Сайт не отвечает"
@@ -76,9 +89,16 @@ async def resolve_with_loop(host: str) -> tuple[str, ...]:
 class HttpxSiteFetcher:
     """The `SiteFetcher` port over a shared client, with pinned addresses."""
 
-    def __init__(self, client: httpx.AsyncClient, *, resolver: Resolver | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        resolver: Resolver | None = None,
+        sleep: Sleeper | None = None,
+    ) -> None:
         self.client = client
         self.resolver: Resolver = resolver if resolver is not None else resolve_with_loop
+        self.sleep: Sleeper = sleep if sleep is not None else asyncio.sleep
 
     async def fetch(self, host: str) -> tuple[FetchedPage, ...]:
         """Crawl the host and return the pages read.
@@ -177,15 +197,19 @@ class HttpxSiteFetcher:
         raise _SkipPage(REDIRECT_REFUSED)
 
     async def _request(self, url: str) -> _Response:
-        """Connect to the verified address of the URL host, never to its unresolved name.
+        """Request a URL over the verified addresses of its host, minding a slow-down.
 
         The host of the current URL is resolved and checked at every hop, so a
-        redirect to another same-site name is verified on its own.
+        redirect to another same-site name is verified on its own. The addresses
+        are then tried in order, so one unreachable node — an IPv6 address where
+        the client has no IPv6 route, a broken replica — does not lose the page.
+        A slow-down answer is repeated a bounded number of times; the last answer
+        is returned as it is, and the caller reports it like any other status.
         """
         host = _url_host(url)
         if not host:
             raise _SkipPage(FETCH_FAILED)
-        address = await self._verified_address(host)
+        addresses = await self._verified_addresses(host)
         timeout = httpx.Timeout(
             connect=FETCH_CONNECT_TIMEOUT,
             read=FETCH_TOTAL_TIMEOUT,
@@ -197,29 +221,63 @@ class HttpxSiteFetcher:
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml",
         }
-        try:
-            async with self.client.stream(
-                "GET",
-                _pinned_url(url, address),
-                headers=headers,
-                timeout=timeout,
-                follow_redirects=False,
-                extensions={"sni_hostname": host},
-            ) as response:
-                body = await _read_bounded(response)
-                return _Response(
-                    url=url,
-                    status_code=response.status_code,
-                    content_type=response.headers.get("content-type", ""),
-                    location=response.headers.get("location"),
-                    body=body,
-                )
-        except httpx.HTTPError as exc:
-            # A refused connection, a timeout, or a broken transport mean the
-            # same thing for the caller: the site did not answer.
-            raise _SkipPage(FETCH_UNREACHABLE) from exc
+        delay = 0.0
+        for attempt in range(MAX_FETCH_RETRIES + 1):
+            if attempt:
+                await self.sleep(delay)
+            response = await self._send(url, host, addresses, headers, timeout)
+            if response.status_code not in RETRY_STATUSES:
+                break
+            delay = _retry_delay(response, attempt)
+        return response
 
-    async def _verified_address(self, host: str) -> str:
+    async def _send(
+        self,
+        url: str,
+        host: str,
+        addresses: tuple[str, ...],
+        headers: dict[str, str],
+        timeout: httpx.Timeout,
+    ) -> _Response:
+        """One request, over the addresses in order until one of them answers."""
+        failure: httpx.HTTPError | None = None
+        for address in addresses:
+            try:
+                return await self._stream(url, host, address, headers, timeout)
+            except httpx.HTTPError as exc:
+                # A refused connection, a timeout, or a broken transport mean the
+                # same thing for this address; the next verified one is asked.
+                failure = exc
+        raise _SkipPage(FETCH_UNREACHABLE) from failure
+
+    async def _stream(
+        self,
+        url: str,
+        host: str,
+        address: str,
+        headers: dict[str, str],
+        timeout: httpx.Timeout,
+    ) -> _Response:
+        """Read one URL from one verified address, or raise what the transport raised."""
+        async with self.client.stream(
+            "GET",
+            _pinned_url(url, address),
+            headers=headers,
+            timeout=timeout,
+            follow_redirects=False,
+            extensions={"sni_hostname": host},
+        ) as response:
+            body = await _read_bounded(response)
+            return _Response(
+                url=url,
+                status_code=response.status_code,
+                content_type=response.headers.get("content-type", ""),
+                location=response.headers.get("location"),
+                retry_after=response.headers.get("retry-after"),
+                body=body,
+            )
+
+    async def _verified_addresses(self, host: str) -> tuple[str, ...]:
         """Resolve a host and refuse it unless every address is public."""
         try:
             addresses = await self.resolver(host)
@@ -230,7 +288,24 @@ class HttpxSiteFetcher:
         for address in addresses:
             if not is_public_address(address):
                 raise _SkipPage(BLOCKED_ADDRESS)
-        return addresses[0]
+        return addresses
+
+
+def _retry_delay(response: _Response, attempt: int) -> float:
+    """How long to wait before repeating one slow-down answer.
+
+    A numeric `Retry-After` is honoured while it fits the crawl's budget; an HTTP
+    date, a nonsense value, or a missing header falls back to a short backoff
+    that grows with every attempt.
+    """
+    header = (response.retry_after or "").strip()
+    try:
+        seconds = float(header)
+    except ValueError:
+        seconds = None
+    if seconds is not None and seconds >= 0:
+        return min(seconds, MAX_RETRY_AFTER_SECONDS)
+    return RETRY_BACKOFF_SECONDS * (attempt + 1)
 
 
 @dataclass(frozen=True)
@@ -242,6 +317,7 @@ class _Response:
     content_type: str
     location: str | None
     body: bytes
+    retry_after: str | None = None
 
 
 class _SkipPage(Exception):
