@@ -158,6 +158,7 @@ describe('SeoRunProgress', () => {
       snapshot: snapshot({ agents: legacyAgents }),
       trace, traceCursor: 'cur_1', onTraceMore, onCancel: vi.fn()
     } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Показать трассу' }));
     expect(document.querySelector('[data-trace-step="1"]')?.textContent).toContain('handoff_to');
 
     await fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));

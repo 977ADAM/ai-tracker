@@ -280,6 +280,10 @@ describe('SEO run page', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Запустить анализ/ }));
 
     await waitFor(() => expect(document.querySelector('[data-agent-panel]')).toBeTruthy());
+    // The trace arrives folded: the header counts the steps, the toggle shows them.
+    await waitFor(() => expect(document.querySelector('[data-trace-summary]')?.textContent).toContain('1 шаг'));
+    expect(document.querySelector('[data-trace-step="1"]')).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Показать трассу' }));
     await waitFor(() => expect(document.querySelector('[data-trace-step="1"]')?.textContent).toContain('handoff_to'));
     expect(document.querySelector('[data-agent-status="supervisor"]')?.textContent?.trim()).toBe('Выполняется');
     expect(document.querySelector('[data-budget-used="tool_calls"]')?.textContent?.trim()).toBe('5 / 120');

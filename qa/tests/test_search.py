@@ -329,7 +329,12 @@ def test_agent_run_shows_agents_budget_trace_and_conclusions(
     assert page.locator("[data-budget-used='handoffs']").inner_text().strip() == "1 / 15"
     expect(page.locator("[data-budget-exhausted]")).to_have_count(0)
 
-    # The trace feed shows the first page and loads the next one through the cursor.
+    # The trace feed starts folded: the header counts the steps, the toggle opens them.
+    feed = page.locator("[data-trace-feed]")
+    expect(feed.get_by_role("button", name="Показать трассу")).to_have_attribute("aria-expanded", "false")
+    expect(page.locator("[data-trace-step='1']")).to_have_count(0)
+    expect(page.locator("[data-trace-summary]")).to_contain_text("1 шаг")
+    feed.get_by_role("button", name="Показать трассу").click()
     expect(page.locator("[data-trace-step='1']")).to_contain_text("handoff_to")
     expect(page.locator("[data-trace-step='1']")).to_contain_text('{"agent":"site"}')
     page.locator("[data-trace-feed]").get_by_role("button", name="Показать ещё").click()

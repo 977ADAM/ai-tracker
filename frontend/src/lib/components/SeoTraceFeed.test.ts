@@ -26,9 +26,18 @@ function step(index: number): HTMLElement {
   return document.querySelector(`[data-trace-step="${index}"]`) as HTMLElement;
 }
 
+function toggle(): HTMLElement {
+  return screen.getByRole('button', { name: /Показать трассу|Скрыть трассу/ });
+}
+
+async function open(): Promise<void> {
+  await fireEvent.click(toggle());
+}
+
 describe('SeoTraceFeed', () => {
-  it('renders the steps in trace order with agent, kind, tool, arguments, result and status', () => {
+  it('renders the steps in trace order with agent, kind, tool, arguments, result and status', async () => {
     render(SeoTraceFeed, { props: { steps: [handoff, fetchStep, modelStep] } });
+    await open();
     const items = screen.getAllByRole('listitem');
     expect(items).toHaveLength(3);
     expect(items.map((item) => item.getAttribute('data-trace-step'))).toEqual(['1', '2', '3']);
@@ -63,27 +72,49 @@ describe('SeoTraceFeed', () => {
   it('loads more through the cursor button and disables it while a page is in flight', async () => {
     const onMore = vi.fn();
     const view = render(SeoTraceFeed, { props: { steps: [handoff], nextCursor: 'cur_1', onMore } });
+    await open();
     await fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));
     expect(onMore).toHaveBeenCalledTimes(1);
     view.unmount();
 
     render(SeoTraceFeed, { props: { steps: [handoff], nextCursor: 'cur_1', loading: true, onMore } });
+    await open();
     const button = screen.getByRole('button', { name: 'Загружаем…' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
 
-  it('hides the cursor button without a next page and reports a safe load error', () => {
+  it('hides the cursor button without a next page and reports a safe load error', async () => {
     const view = render(SeoTraceFeed, { props: { steps: [handoff], nextCursor: null } });
+    await open();
     expect(screen.queryByRole('button', { name: 'Показать ещё' })).toBeNull();
     view.unmount();
 
+    // A load error is worth showing even while the feed itself is folded.
     render(SeoTraceFeed, { props: { steps: [], error: 'Не удалось загрузить трассу' } });
     expect(screen.getByRole('alert').textContent).toContain('Не удалось загрузить трассу');
   });
 
-  it('shortens long safe arguments instead of dumping them', () => {
+  it('starts folded, opens and closes on the toggle, and counts the steps', async () => {
+    render(SeoTraceFeed, { props: { steps: [handoff, fetchStep] } });
+
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('listitem')).toBeNull();
+    expect(document.querySelector('[data-trace-summary]')?.textContent).toContain('2 шага');
+
+    await open();
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(document.querySelector('[data-trace-body]')).toBeTruthy();
+
+    await fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('listitem')).toBeNull();
+  });
+
+  it('shortens long safe arguments instead of dumping them', async () => {
     const long = { text: 'я'.repeat(400) };
     render(SeoTraceFeed, { props: { steps: [{ ...fetchStep, arguments: long }] } });
+    await open();
     const shown = step(2).querySelector('[data-trace-arguments]')?.textContent ?? '';
     expect(shown.endsWith('…')).toBe(true);
     expect(shown.length).toBeLessThanOrEqual(160);

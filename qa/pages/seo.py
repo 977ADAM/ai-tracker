@@ -164,6 +164,19 @@ class SeoPage:
         return self.page.locator(f"[data-trace-step='{index}']")
 
     @property
+    def trace_toggle(self) -> Locator:
+        """The fold control of the trace feed; it exists only when steps are saved."""
+        return self.trace_feed.get_by_role("button", name=re.compile("Показать трассу|Скрыть трассу"))
+
+    def open_trace(self) -> SeoPage:
+        """Unfold the trace feed: a folded feed renders no step at all."""
+        toggle = self.trace_toggle
+        if toggle.count() and toggle.get_attribute("aria-expanded") != "true":
+            toggle.click()
+            expect(self.page.locator("[data-trace-body]")).to_be_visible()
+        return self
+
+    @property
     def trace_show_more(self) -> Locator:
         """The trace cursor button, scoped to the feed so the report tables do not match."""
         return self.trace_feed.get_by_role("button", name=SHOW_MORE)

@@ -444,8 +444,11 @@ def test_saved_report_opens_from_history_and_deletes(page: Page, application: Ap
         assert seo.budget_text("steps") == str(len(AGENT_STEPS))
         expect(seo.budget_exhausted).to_have_count(0)
 
-        # The trace feed shows the steps in order with safe arguments only.
+        # The trace feed is folded by default and shows the steps once opened.
         expect(seo.trace_feed).to_be_visible()
+        expect(seo.trace_toggle).to_have_attribute("aria-expanded", "false")
+        expect(seo.trace_step(1)).to_have_count(0)
+        seo.open_trace()
         expect(seo.trace_step(1)).to_contain_text("handoff_to")
         expect(seo.trace_step(1)).to_contain_text("Супервизор")
         expect(seo.trace_step(1)).to_contain_text('{"agent":"site"}')
