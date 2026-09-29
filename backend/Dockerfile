@@ -1,15 +1,24 @@
+# syntax=docker/dockerfile:1
+
 FROM python:3.13-slim AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /bin/uv
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=0 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
 WORKDIR /app
+
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen --no-dev --extra docker
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen \
+    --no-default-groups \
+    --no-install-project \
+    --extra docker
+
 
 FROM python:3.13-slim AS runtime
 
@@ -21,15 +30,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring \
     PORT=8000
 
-WORKDIR /app
-COPY --from=builder /opt/venv /opt/venv
-COPY app ./app
-
-RUN useradd --uid 10001 --user-group --home-dir /data --shell /usr/sbin/nologin app \
+RUN useradd --uid 10001 --user-group \
+        --home-dir /data --shell /usr/sbin/nologin app \
     && mkdir -p /data \
-    && chown -R app:app /data /app
+    && chown app:app /data
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=app:app app ./app
 
 USER app
+
 VOLUME ["/data"]
 EXPOSE 8000
 
