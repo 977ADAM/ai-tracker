@@ -1,14 +1,15 @@
-"""The SEO orchestrator: six stages, degradation, lifecycle, and resume.
+"""The SEO service over the agent runtime: refusals, lifecycle, and restart.
 
-Every collaborator is a fake, so the suite proves the stage order and the
-"no paid call before stage 3 is done" guarantee without ever reaching a paid
-external API.
+The runtime itself is a fake here, so the suite proves the service contract —
+which configuration refuses a run before an analysis row or a paid call exists,
+what `start` answers, what it delegates, and how a restart is decided — without a
+graph and without any paid API. The real graph, its budgets, and its checkpoint
+resume are covered by `test_service_seo_agents.py`.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,7 +20,6 @@ import pytest
 
 from app.core.errors import (
     ConfigurationError,
-    ProviderError,
     RunConflict,
     RunNotFound,
     StorageError,
@@ -27,43 +27,26 @@ from app.core.errors import (
 )
 from app.db.search_settings import SearchSettingsRepository
 from app.db.seo import SeoRepository
-from app.db.seo_settings import SeoSettingsRepository
-from app.domain.seo import (
-    Candidate,
-    GeneratedQuery,
-    QueryFlags,
-    SeoInput,
-    normalize_seo_request,
-)
+from app.domain.seo import SeoInput, normalize_seo_request
+from app.domain.seo_llm import AgentTurn
+from app.service.checks import MISSING_KEY_MESSAGE
 from app.service.connections import ConnectionService
-from app.service.search import SearchService
+from app.service.search import DISABLED_ENGINE, MISSING_CREDENTIALS, SearchService
 from app.service.search_settings import SearchSettingsService
-from app.service.seo import SeoService
+from app.service.seo import LLM_NOT_CONFIGURED, SeoService
+from app.service.seo_settings import TOOLS_UNSUPPORTED
 from tests.fakes import (
-    DEFAULT_SEO_DOCUMENTS,
-    DEFAULT_SEO_PAGE,
-    SEO_MENTION_ANSWER,
-    FakeSiteFetcher,
+    FakeAgentModel,
+    FakeSeoAgentRuntime,
+    FakeSeoSettingsService,
     MemorySecrets,
     ScriptedSeoGateway,
-    ScriptedSeoLlmClient,
-    SeoProviderFactorySpy,
     StorageFailingSeoRepository,
+    tool_calling_settings,
 )
 
-REGION = 225
-ENDPOINT = "https://api.example.com/v1/chat/completions"
 SEEDS = ("букет цветов", "доставка цветов", "розы")
-SITE_FACTS = json.dumps({"company_name": "Ромашка", "services": ["Свадьбы"]}, ensure_ascii=False)
-SUMMARY = "Итог: сайт виден в Яндексе и упоминается моделями."
-QUERY_TEXTS = (
-    "купить букет недорого",
-    "Ромашка доставка цветов",
-    "rival.ru отзывы",
-    "как выбрать букет",
-    "сравнение конкурентов букеты",
-    "доставка роз цена",
-)
+ESTIMATE = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
 TERMINAL = frozenset({"completed", "failed", "interrupted", "cancelled"})
 # A sentinel for "this container has no Yandex gateway at all".
 NO_GATEWAY = object()
@@ -81,41 +64,8 @@ def payload(**overrides: object) -> dict[str, object]:
     return data
 
 
-def generated_payload(texts: tuple[str, ...] = QUERY_TEXTS, *, service: str = "Букеты") -> str:
-    return json.dumps(
-        {
-            "queries": [
-                {
-                    "query": text,
-                    "category": "comparative" if "сравнение" in text else "commercial",
-                    "service": service,
-                }
-                for text in texts
-            ]
-        },
-        ensure_ascii=False,
-    )
-
-
-def stored_query(text: str, index: int) -> GeneratedQuery:
-    return GeneratedQuery(
-        text=text,
-        category="commercial",
-        service="Букеты",
-        flags=QueryFlags(
-            mentions_company_name=index == 0,
-            mentions_company_host=False,
-            mentions_candidate_host=False,
-            branded=index == 0,
-        ),
-    )
-
-
 def stored_input(**overrides: object) -> SeoInput:
     return normalize_seo_request(payload(**overrides))
-
-
-ESTIMATE = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
 
 
 def make_search_settings(tmp_path: Path, gateway: Any, *, enabled: bool = True) -> SearchSettingsService:
@@ -134,73 +84,42 @@ def make_harness(
     connection_repository: Any,
     settings: Any,
     *,
-    fetcher: FakeSiteFetcher | None = None,
-    llm_responses: list[Any] | None = None,
-    llm_factory: Any = None,
     gateway: ScriptedSeoGateway | None = None,
     yandex_enabled: bool = True,
     yandex_configured: bool = True,
-    provider_factory: SeoProviderFactorySpy | None = None,
-    seo_repository: Any = None,
     configured_connections: tuple[tuple[str, str], ...] = (("gigachat", "test-key"),),
-    poll_interval: float = 0.0,
-    max_requests_per_second: int = 0,
+    seo_repository: Any = None,
+    llm_settings: Any = None,
+    runtime: Any = None,
+    runtime_mode: str = "complete",
+    checkpoint_probe: Any = None,
 ) -> SimpleNamespace:
     connections = ConnectionService(connection_repository, settings)
     for connection_id, key in configured_connections:
         connections.save({"api_key": key}, connection_id)
-    repository = seo_repository
-    if repository is None:
-        repository = SeoRepository(tmp_path)
-        repository.initialize()
-    llm_settings = SeoSettingsRepository(
-        tmp_path,
-        MemorySecrets(),
-        env_endpoint=ENDPOINT,
-        env_model="seo-model",
-        env_api_key="seo-key",
-        service_name="test",
-    )
-    fetcher = fetcher if fetcher is not None else FakeSiteFetcher()
-    responses = llm_responses if llm_responses is not None else [SITE_FACTS, generated_payload(), SUMMARY]
-    shared_calls: list[tuple[str, str]] = []
-
-    def default_factory() -> ScriptedSeoLlmClient:
-        # Every run captures its own client, exactly as the container does.
-        return ScriptedSeoLlmClient(responses, calls=shared_calls)
-
-    llm = default_factory()
+    repository = seo_repository if seo_repository is not None else SeoRepository(tmp_path)
+    repository.initialize()
+    runtime = runtime if runtime is not None else FakeSeoAgentRuntime(repository, mode=runtime_mode)
+    llm = llm_settings if llm_settings is not None else tool_calling_settings()
     gateway = gateway if gateway is not None else ScriptedSeoGateway()
-    factory = provider_factory if provider_factory is not None else SeoProviderFactorySpy()
     search_settings = make_search_settings(
         tmp_path, gateway if yandex_configured else NO_GATEWAY, enabled=yandex_enabled,
     )
     service = SeoService(
-        repository,
-        llm_settings,
-        llm_factory if llm_factory is not None else default_factory,
-        fetcher,
-        search_settings,
-        connections,
-        factory,
-        max_model_concurrency=5,
-        poll_interval=poll_interval,
-        max_poll_interval=poll_interval,
-        max_requests_per_second=max_requests_per_second,
+        repository, runtime, search_settings, llm, connections, checkpoint_probe=checkpoint_probe,
     )
     return SimpleNamespace(
         service=service,
         repository=repository,
+        runtime=runtime,
         llm=llm,
-        fetcher=fetcher,
         gateway=gateway,
-        factory=factory,
         connections=connections,
         search_settings=search_settings,
     )
 
 
-async def wait_for(service: SeoService, analysis_id: str, *, timeout: float = 5.0) -> dict:
+async def wait_terminal(service: SeoService, analysis_id: str, *, timeout: float = 5.0) -> dict:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
@@ -209,10 +128,6 @@ async def wait_for(service: SeoService, analysis_id: str, *, timeout: float = 5.
             return snapshot
         await asyncio.sleep(0.001)
     raise AssertionError(f"analysis stayed {service.snapshot(analysis_id)['status']}")
-
-
-def stage_statuses(snapshot: dict) -> dict[int, str]:
-    return {stage["stage"]: stage["status"] for stage in snapshot["stages"]}
 
 
 def seed_states(db_path: Path, analysis_id: str) -> dict[int, tuple[str, str | None]]:
@@ -230,107 +145,39 @@ def seed_states(db_path: Path, analysis_id: str) -> dict[int, tuple[str, str | N
         connection.close()
 
 
-def row_statuses(service: SeoService, analysis_id: str, kind: str) -> list[str]:
-    return [row["status"] for row in service.rows_page(analysis_id, kind)["items"]]
-
-
-# -- happy path --------------------------------------------------------------
+# -- start -------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_happy_path_runs_six_stages_in_order(tmp_path, repository, settings):
-    observed_gateway: list[dict[int, str]] = []
-    observed_models: list[dict[int, str]] = []
-    harness_id: dict[str, str] = {}
-    harness: SimpleNamespace | None = None
-
-    def gateway_probe(prompt: str, region: int) -> None:
-        assert region == REGION
-        if prompt not in SEEDS and harness is not None:
-            observed_gateway.append(stage_statuses(harness.service.snapshot(harness_id["id"])))
-
-    def model_probe(connection_id: str, prompt: str) -> None:
-        if harness is not None:
-            observed_models.append(stage_statuses(harness.service.snapshot(harness_id["id"])))
-
-    harness = make_harness(
-        tmp_path,
-        repository,
-        settings,
-        gateway=ScriptedSeoGateway(hook=gateway_probe),
-        provider_factory=SeoProviderFactorySpy(hook=model_probe),
-    )
+async def test_start_writes_the_analysis_and_runs_the_graph_in_the_background(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
 
     created = await harness.service.start(payload())
-    harness_id["id"] = created["id"]
 
+    assert set(created) == {"id", "status", "estimate"}
     assert created["status"] == "running"
-    assert created["estimate"] == {
-        "search_upper": 43,
-        "model_upper": 40,
-        "generated_limit": 40,
-        "connections": 1,
-    }
+    assert created["estimate"] == ESTIMATE
+    assert harness.service.snapshot(created["id"])["status"] == "running"
+    assert harness.gateway.submitted == []
 
-    snapshot = await wait_for(harness.service, created["id"])
+    snapshot = await wait_terminal(harness.service, created["id"])
 
     assert snapshot["status"] == "completed"
-    assert [stage["stage"] for stage in snapshot["stages"]] == [1, 2, 3, 4, 5, 6]
-    assert [stage["status"] for stage in snapshot["stages"]] == ["done"] * 6
-
-    # Services: entered ones first, site services appended after the merge.
-    assert snapshot["services"] == ["Букеты", "Доставка", "Свадьбы"]
-    assert snapshot["company_name"] == "Ромашка"
-    assert [page["url"] for page in snapshot["pages"]] == [DEFAULT_SEO_PAGE.url]
-
-    # Candidates are ranked by host and marked recurring across the three SERPs.
-    assert [candidate["host"] for candidate in snapshot["candidates"]] == ["rival.ru"]
-    assert snapshot["candidates"][0]["occurrences"] == 3
-    assert snapshot["candidates"][0]["recurring"] is True
-    assert snapshot["candidates"][0]["title"] == "Соперник — букеты"
-
-    # Generated queries keep their server-computed flags.
-    queries = {query["text"]: query["flags"] for query in snapshot["queries"]}
-    assert len(queries) == len(QUERY_TEXTS)
-    assert queries["Ромашка доставка цветов"]["branded"] is True
-    assert queries["rival.ru отзывы"]["mentions_candidate_host"] is True
-    assert queries["купить букет недорого"]["branded"] is False
-
-    # Both branches wrote one row per generated query, and the report is ready.
-    assert row_statuses(harness.service, created["id"], "search") == ["found"] * len(QUERY_TEXTS)
-    assert row_statuses(harness.service, created["id"], "model") == ["found"] * len(QUERY_TEXTS)
-    model_rows = harness.service.rows_page(created["id"], "model")["items"]
-    assert all(row["answer"] == SEO_MENTION_ANSWER for row in model_rows)
-    assert all(row["name_mentioned"] and row["host_mentioned"] for row in model_rows)
-    search_rows = harness.service.rows_page(created["id"], "search")["items"]
-    assert all(row["site_position"] == 2 for row in search_rows)
-    assert all(row["site_url"] == "https://example.ru/page" for row in search_rows)
-    assert snapshot["summary"] == SUMMARY
-    assert snapshot["readiness"]["report_ready"] is True
-    assert snapshot["aggregates"]["site"]["search"]["overall"]["denominator"] == len(QUERY_TEXTS)
-
-    # The service LLM was asked exactly three times: facts, queries, summary.
-    assert len(harness.llm.calls) == 3
-    # The three key queries are the first paid Yandex calls, and nothing paid
-    # happened before stage 3 finished.
-    assert [prompt for prompt, _ in harness.gateway.submitted[:3]] == list(SEEDS)
-    assert len(harness.gateway.submitted) == 3 + len(QUERY_TEXTS)
-    assert observed_gateway, "the generated-query branch never submitted"
-    assert observed_models, "the model branch never answered"
-    assert all(stages[3] == "done" for stages in observed_gateway)
-    assert all(stages[3] == "done" for stages in observed_models)
-    assert all(provider.closed for provider in harness.factory.providers.values())
+    assert harness.runtime.runs == [(created["id"], stored_input())]
+    # The finished run leaves no task and no cancellation state behind.
+    assert harness.service.tasks == {}
     await harness.service.close()
 
 
 @pytest.mark.anyio
-async def test_estimate_counts_every_selected_connection(tmp_path, repository, settings):
+async def test_the_estimate_counts_every_selected_connection(tmp_path, repository, settings):
     harness = make_harness(
         tmp_path,
         repository,
         settings,
         configured_connections=(("gigachat", "key-1"), ("deepseek", "key-2")),
-        llm_responses=[SITE_FACTS, generated_payload(), SUMMARY],
     )
 
     created = await harness.service.start(payload(connection_ids=["gigachat", "deepseek"]))
@@ -338,14 +185,28 @@ async def test_estimate_counts_every_selected_connection(tmp_path, repository, s
     assert created["estimate"] == {
         "search_upper": 43, "model_upper": 80, "generated_limit": 40, "connections": 2,
     }
-    snapshot = await wait_for(harness.service, created["id"])
-    assert snapshot["status"] == "completed"
-    assert len(harness.factory.providers) == 2
-    assert len(harness.service.rows_page(created["id"], "model")["items"]) == 2 * len(QUERY_TEXTS)
+    await asyncio.sleep(0)
+    assert harness.runtime.runs[0][1].connection_ids == ("gigachat", "deepseek")
     await harness.service.close()
 
 
-# -- start rejections --------------------------------------------------------
+@pytest.mark.anyio
+async def test_the_tool_probe_sends_one_trivial_schema_and_closes_the_adapter(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings)
+    model = harness.llm.model
+
+    created = await harness.service.start(payload())
+
+    assert len(model.steps) == 1
+    messages, tools = model.steps[0]
+    assert [message.role for message in messages] == ["system", "user"]
+    assert [tool.name for tool in tools] == ["check_connection"]
+    # The probe adapter is one paid call of its own and never the run adapter.
+    assert model.closed is True
+    assert created["status"] == "running"
+    await harness.service.close()
 
 
 @pytest.mark.anyio
@@ -356,215 +217,113 @@ async def test_start_rejects_malformed_input_before_any_side_effect(tmp_path, re
         await harness.service.start(payload(seeds=["один запрос"]))
 
     assert harness.service.list_page()["items"] == []
-    assert harness.gateway.submitted == []
-    assert harness.llm.calls == []
+    assert harness.runtime.runs == []
+    assert harness.llm.builds == 0
+    assert harness.llm.model.steps == []
     await harness.service.close()
 
 
 @pytest.mark.anyio
-async def test_start_rejects_a_disabled_or_unconfigured_yandex(tmp_path, repository, settings):
+async def test_start_refuses_a_disabled_or_unconfigured_yandex(tmp_path, repository, settings):
     disabled = make_harness(tmp_path, repository, settings, yandex_enabled=False)
     with pytest.raises(ConfigurationError) as raised:
         await disabled.service.start(payload())
-    assert str(raised.value) == "Поиск Яндекса выключен"
+    assert str(raised.value) == DISABLED_ENGINE
     assert disabled.service.list_page()["items"] == []
+    assert disabled.runtime.runs == []
+    assert disabled.llm.builds == 0
     await disabled.service.close()
 
-    without_gateway = make_harness(
-        tmp_path, repository, settings, yandex_configured=False,
-    )
+    without_gateway = make_harness(tmp_path, repository, settings, yandex_configured=False)
     with pytest.raises(ConfigurationError) as raised:
         await without_gateway.service.start(payload())
-    assert str(raised.value) == "Не заданы ключ и каталог для поиска Яндекса"
+    assert str(raised.value) == MISSING_CREDENTIALS
     assert without_gateway.service.list_page()["items"] == []
+    assert without_gateway.runtime.runs == []
     await without_gateway.service.close()
 
 
 @pytest.mark.anyio
 async def test_start_requires_a_configured_service_llm(tmp_path, repository, settings):
-    harness = make_harness(tmp_path, repository, settings, llm_factory=lambda: None)
+    harness = make_harness(
+        tmp_path, repository, settings, llm_settings=FakeSeoSettingsService(None),
+    )
 
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ConfigurationError) as raised:
         await harness.service.start(payload())
 
+    assert str(raised.value) == LLM_NOT_CONFIGURED
     assert harness.service.list_page()["items"] == []
-    assert harness.gateway.submitted == []
+    assert harness.runtime.runs == []
     await harness.service.close()
 
 
 @pytest.mark.anyio
-async def test_start_rejects_unknown_and_unconfigured_connections(tmp_path, repository, settings):
+async def test_start_refuses_a_model_that_cannot_call_tools(tmp_path, repository, settings):
+    plain = FakeAgentModel(AgentTurn(text="OK", tool_calls=()))
+    harness = make_harness(
+        tmp_path, repository, settings, llm_settings=FakeSeoSettingsService(plain),
+    )
+
+    with pytest.raises(ConfigurationError) as raised:
+        await harness.service.start(payload())
+
+    assert str(raised.value) == TOOLS_UNSUPPORTED
+    assert len(plain.steps) == 1
+    assert harness.service.list_page()["items"] == []
+    assert harness.runtime.runs == []
+    await harness.service.close()
+
+
+@pytest.mark.anyio
+async def test_start_refuses_unknown_and_unconfigured_connections(tmp_path, repository, settings):
     harness = make_harness(tmp_path, repository, settings)
 
     with pytest.raises(ValidationError):
         await harness.service.start(payload(connection_ids=["missing"]))
     with pytest.raises(ConfigurationError) as raised:
         await harness.service.start(payload(connection_ids=["deepseek"]))
-    assert str(raised.value) == "Добавьте API-ключ в настройках подключения"
+    assert str(raised.value) == MISSING_KEY_MESSAGE
 
     assert harness.service.list_page()["items"] == []
-    assert harness.gateway.submitted == []
-    assert harness.llm.calls == []
+    assert harness.runtime.runs == []
+    # Every local check runs before the only check that costs a model call.
+    assert harness.llm.model.steps == []
     await harness.service.close()
 
 
-# -- fatal stages ------------------------------------------------------------
+# -- snapshot, history, rows, and trace --------------------------------------
 
 
 @pytest.mark.anyio
-async def test_crawl_error_is_fatal_before_any_paid_call(tmp_path, repository, settings):
-    harness = make_harness(
-        tmp_path,
-        repository,
-        settings,
-        fetcher=FakeSiteFetcher(error=ProviderError("Не удалось загрузить сайт")),
-    )
-
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["status"] == "failed"
-    assert stage_statuses(snapshot)[1] == "error"
-    assert snapshot["stages"][0]["error"] == "Не удалось обойти сайт"
-    assert harness.gateway.submitted == []
-    assert harness.factory.keys == []
-    assert harness.llm.calls == []
-    await harness.service.close()
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    "responses,expected_calls",
-    [
-        (["{not json", "{still not json"], 2),
-        ([ProviderError("Сервис модели временно недоступен"), "{not json"], 1),
-    ],
-)
-async def test_site_facts_llm_error_is_fatal_after_one_repeat(
-    tmp_path, repository, settings, responses, expected_calls,
-):
-    harness = make_harness(tmp_path, repository, settings, llm_responses=responses)
-
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["status"] == "failed"
-    assert stage_statuses(snapshot)[1] == "error"
-    assert len(harness.llm.calls) == expected_calls
-    assert harness.gateway.submitted == []
-    assert harness.factory.keys == []
-    await harness.service.close()
-
-
-@pytest.mark.anyio
-async def test_too_few_generated_queries_is_fatal_after_one_repeat(tmp_path, repository, settings):
-    too_few = generated_payload(QUERY_TEXTS[:4])
-    harness = make_harness(
-        tmp_path, repository, settings, llm_responses=[SITE_FACTS, too_few, too_few],
-    )
-
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["status"] == "failed"
-    assert stage_statuses(snapshot)[3] == "error"
-    assert len(harness.llm.calls) == 3
-    # Only the three key searches were paid for; nothing reached stage 4.
-    assert harness.gateway.submitted == [(seed, REGION) for seed in SEEDS]
-    assert harness.factory.keys == []
-    assert harness.service.rows_page(created["id"], "search")["items"] == []
-    await harness.service.close()
-
-
-# -- degradation -------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_all_key_searches_failing_still_produces_a_report(tmp_path, repository, settings):
-    harness = make_harness(
-        tmp_path, repository, settings, gateway=ScriptedSeoGateway(fail_submits=SEEDS),
-    )
-
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["status"] == "completed"
-    statuses = stage_statuses(snapshot)
-    assert statuses[2] == "error"
-    assert snapshot["stages"][1]["error"] == "Не удалось получить ключевые выдачи Яндекса"
-    assert snapshot["candidates"] == []
-    assert statuses[3] == "done" and statuses[6] == "done"
-    # No key search was submitted; only the generated queries were paid for.
-    assert [prompt for prompt, _ in harness.gateway.submitted] == list(QUERY_TEXTS)
-    assert len(harness.service.rows_page(created["id"], "search")["items"]) == len(QUERY_TEXTS)
-    assert snapshot["readiness"]["report_ready"] is True
-    await harness.service.close()
-
-
-@pytest.mark.anyio
-async def test_one_failing_search_row_does_not_block_the_other_rows(tmp_path, repository, settings):
-    failing = QUERY_TEXTS[-1]
-    harness = make_harness(
-        tmp_path, repository, settings, gateway=ScriptedSeoGateway(fail_results={failing}),
-    )
-
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["status"] == "completed"
-    rows = {
-        row["query"]: row["status"]
-        for row in harness.service.rows_page(created["id"], "search")["items"]
-    }
-    assert rows[failing] == "error"
-    assert all(status == "found" for query, status in rows.items() if query != failing)
-    assert row_statuses(harness.service, created["id"], "model") == ["found"] * len(QUERY_TEXTS)
-    assert snapshot["aggregates"]["counts"]["search_errors"] == 1
-    await harness.service.close()
-
-
-@pytest.mark.anyio
-async def test_one_failing_connection_does_not_block_other_connections_or_yandex(
+async def test_snapshot_history_rows_and_trace_delegate_to_the_repository(
     tmp_path, repository, settings,
 ):
-    harness = make_harness(
-        tmp_path,
-        repository,
-        settings,
-        provider_factory=SeoProviderFactorySpy(failing_ids=["gigachat"]),
-        configured_connections=(("gigachat", "key-1"), ("deepseek", "key-2")),
+    harness = make_harness(tmp_path, repository, settings)
+    analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
+    harness.repository.append_step(
+        analysis_id, "supervisor", "handoff", "handoff_to",
+        arguments={"agent": "site"}, status="done",
     )
 
-    created = await harness.service.start(payload(connection_ids=["gigachat", "deepseek"]))
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["status"] == "completed"
-    by_connection: dict[str, list[str]] = {}
-    for row in harness.service.rows_page(created["id"], "model")["items"]:
-        by_connection.setdefault(row["connection_id"], []).append(row["status"])
-    assert by_connection["gigachat"] == ["error"] * len(QUERY_TEXTS)
-    assert by_connection["deepseek"] == ["found"] * len(QUERY_TEXTS)
-    assert row_statuses(harness.service, created["id"], "search") == ["found"] * len(QUERY_TEXTS)
-    await harness.service.close()
-
-
-@pytest.mark.anyio
-async def test_a_summary_failure_still_completes_the_report(tmp_path, repository, settings):
-    harness = make_harness(
-        tmp_path,
-        repository,
-        settings,
-        llm_responses=[SITE_FACTS, generated_payload(), ProviderError("Сервис модели недоступен")],
+    assert harness.service.snapshot(analysis_id) == harness.repository.snapshot(analysis_id)
+    assert harness.service.list_page() == harness.repository.list_page()
+    assert harness.service.list_page(None)["items"][0]["id"] == analysis_id
+    assert harness.service.rows_page(analysis_id, "search") == harness.repository.rows_page(
+        analysis_id, "search",
     )
+    assert harness.service.rows_page(analysis_id, "model") == harness.repository.rows_page(
+        analysis_id, "model",
+    )
+    assert harness.service.trace_page(analysis_id) == harness.repository.trace_page(analysis_id)
+    assert harness.service.trace_page(analysis_id)["items"][0]["name"] == "handoff_to"
 
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["status"] == "completed"
-    assert stage_statuses(snapshot)[5] == "error"
-    assert snapshot["summary"] is None
-    assert snapshot["readiness"]["report_ready"] is True
-    assert snapshot["aggregates"]["counts"]["search_rows"] == len(QUERY_TEXTS)
+    with pytest.raises(RunNotFound):
+        harness.service.snapshot("нет такого")
+    with pytest.raises(ValidationError):
+        harness.service.rows_page(analysis_id, "unknown")
+    with pytest.raises(RunNotFound):
+        harness.service.trace_page("нет такого")
     await harness.service.close()
 
 
@@ -572,199 +331,185 @@ async def test_a_summary_failure_still_completes_the_report(tmp_path, repository
 
 
 @pytest.mark.anyio
-async def test_cancel_during_polling_stops_new_submissions(tmp_path, repository, settings):
-    harness = make_harness(
-        tmp_path,
-        repository,
-        settings,
-        gateway=ScriptedSeoGateway(never_finishing=SEEDS),
-        poll_interval=0.001,
-    )
+async def test_cancel_delegates_to_the_runtime_and_keeps_the_conflict_contract(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings, runtime_mode="hold")
 
     created = await harness.service.start(payload())
-    for _ in range(500):
-        if len(harness.gateway.submitted) == len(SEEDS):
-            break
-        await asyncio.sleep(0.001)
+    await asyncio.sleep(0)
+    assert created["id"] in harness.service.tasks
 
     cancelled = harness.service.cancel(created["id"])
 
+    assert harness.runtime.cancels == [created["id"]]
     assert cancelled["status"] == "cancelled"
     assert cancelled["finished_at"] is not None
-    submitted = len(harness.gateway.submitted)
-    await asyncio.sleep(0.02)
-    assert len(harness.gateway.submitted) == submitted == len(SEEDS)
-    assert harness.factory.keys == []
-    assert harness.service.snapshot(created["id"])["status"] == "cancelled"
+    # Cancellation is final: the stored state can never be cancelled twice.
+    with pytest.raises(RunConflict):
+        harness.service.cancel(created["id"])
+    with pytest.raises(RunNotFound):
+        harness.service.cancel("нет такого")
     await harness.service.close()
 
 
 @pytest.mark.anyio
-async def test_delete_works_only_in_a_terminal_state(tmp_path, repository, settings):
-    harness = make_harness(
-        tmp_path,
-        repository,
-        settings,
-        gateway=ScriptedSeoGateway(never_finishing=SEEDS),
-        poll_interval=0.001,
-    )
+async def test_delete_works_only_in_a_terminal_state_and_drops_the_task(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings, runtime_mode="hold")
     created = await harness.service.start(payload())
+    await asyncio.sleep(0)
+
     with pytest.raises(RunConflict):
         harness.service.delete(created["id"])
 
     harness.service.cancel(created["id"])
-    harness.gateway.never_finishing.clear()
-
-    saved = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, saved["id"])
-    assert snapshot["status"] == "completed"
-
-    harness.service.delete(saved["id"])
-    with pytest.raises(RunNotFound):
-        harness.service.snapshot(saved["id"])
-    with pytest.raises(RunNotFound):
-        harness.service.delete(saved["id"])
     await harness.service.close()
+    assert harness.service.tasks == {}
+    harness.service.delete(created["id"])
+
+    with pytest.raises(RunNotFound):
+        harness.service.snapshot(created["id"])
+    with pytest.raises(RunNotFound):
+        harness.service.delete(created["id"])
+
+
+@pytest.mark.anyio
+async def test_close_cancels_every_live_run_task_and_is_idempotent(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(tmp_path, repository, settings, runtime_mode="hold")
+    first = await harness.service.start(payload())
+    second = await harness.service.start(payload())
+    await asyncio.sleep(0)
+    assert set(harness.service.tasks) == {first["id"], second["id"]}
+
+    await harness.service.close()
+    assert harness.service.tasks == {}
+    await harness.service.close()
+
+
+# -- storage isolation -------------------------------------------------------
 
 
 @pytest.mark.anyio
 async def test_a_storage_failure_isolates_only_its_own_analysis(tmp_path, repository, settings):
     real = SeoRepository(tmp_path)
     real.initialize()
-    wrapper = StorageFailingSeoRepository(real, methods=["save_search_row"])
+    wrapper = StorageFailingSeoRepository(real, methods=["create_analysis"])
     harness = make_harness(tmp_path, repository, settings, seo_repository=wrapper)
 
-    broken = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, broken["id"])
+    with pytest.raises(StorageError):
+        await harness.service.start(payload())
 
-    assert snapshot["status"] == "failed"
-    assert harness.service.list_page()["items"][0]["id"] == broken["id"]
+    assert harness.service.list_page()["items"] == []
+    assert harness.service.tasks == {}
 
     wrapper.failing_methods.clear()
-    healthy = await harness.service.start(payload())
-    healed = await wait_for(harness.service, healthy["id"])
-    assert healed["status"] == "completed"
-    assert healed["readiness"]["report_ready"] is True
-    assert harness.service.list_page()["items"][0]["id"] == healthy["id"]
-    await harness.service.close()
-
-
-# -- recover -----------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_recover_resumes_submitted_seeds_without_resubmitting_them(tmp_path, repository, settings):
-    harness = make_harness(
-        tmp_path, repository, settings, llm_responses=[generated_payload(), SUMMARY],
-    )
-    analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
-    harness.repository.update_stage(analysis_id, 1, "done")
-    harness.repository.save_site_facts(
-        analysis_id,
-        "Ромашка",
-        ["Букеты", "Доставка"],
-        [(DEFAULT_SEO_PAGE.url, DEFAULT_SEO_PAGE.title)],
-    )
-    harness.repository.update_stage(analysis_id, 2, "running")
-    harness.repository.save_seed_row(analysis_id, 0, status="waiting", operation_id="seo-operation-1")
-    harness.repository.save_seed_row(analysis_id, 1, status="submitting")
-
-    harness.service.recover()
-    snapshot = await wait_for(harness.service, analysis_id)
+    created = await harness.service.start(payload())
+    snapshot = await wait_terminal(harness.service, created["id"])
 
     assert snapshot["status"] == "completed"
-    # The already-paid seed was polled again, never submitted again.
-    submitted_prompts = [prompt for prompt, _ in harness.gateway.submitted]
-    assert all(prompt not in SEEDS for prompt in submitted_prompts)
-    assert len(submitted_prompts) == len(QUERY_TEXTS)
-    assert seed_states(tmp_path / "runs.sqlite3", analysis_id) == {
-        0: ("found", "seo-operation-1"),
-        1: ("interrupted", None),
-    }
-    assert snapshot["candidates"][0]["host"] == "rival.ru"
-    assert snapshot["readiness"]["report_ready"] is True
+    assert harness.service.list_page()["items"][0]["id"] == created["id"]
     await harness.service.close()
 
 
 @pytest.mark.anyio
-async def test_recover_polls_submitted_search_rows_and_finishes_the_report(
+async def test_a_failing_run_task_never_escapes_and_keeps_the_service_usable(
     tmp_path, repository, settings,
 ):
-    harness = make_harness(tmp_path, repository, settings, llm_responses=[SUMMARY])
-    analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
-    harness.repository.update_stage(analysis_id, 1, "done")
-    harness.repository.update_stage(analysis_id, 2, "done")
-    harness.repository.save_site_facts(
-        analysis_id, "Ромашка", ["Букеты", "Доставка"], [(DEFAULT_SEO_PAGE.url, "")],
-    )
-    harness.repository.replace_candidates(
-        analysis_id, (Candidate("rival.ru", "Соперник", 3, 1.0, (0, 1, 2), True),),
-    )
-    harness.repository.replace_queries(
-        analysis_id, [stored_query(text, index) for index, text in enumerate(QUERY_TEXTS)],
-    )
-    harness.repository.update_stage(analysis_id, 3, "done")
-    harness.repository.update_stage(analysis_id, 4, "running")
-    harness.repository.save_search_row(analysis_id, 0, status="waiting", operation_id="op-0")
-    harness.repository.save_model_row(analysis_id, "gigachat", "GigaChat", 0, status="pending")
+    harness = make_harness(tmp_path, repository, settings, runtime_mode="crash")
 
-    harness.service.recover()
-    snapshot = await wait_for(harness.service, analysis_id)
+    broken = await harness.service.start(payload())
+    await asyncio.sleep(0.01)
 
-    assert snapshot["status"] == "completed"
-    assert harness.gateway.submitted == []
-    assert harness.factory.keys == []
-    rows = harness.service.rows_page(analysis_id, "search")["items"]
-    assert [row["status"] for row in rows] == ["found"]
-    assert rows[0]["site_position"] == 2
-    assert rows[0]["site_url"] == "https://example.ru/page"
-    # The queued model call is interrupted, never replayed.
-    model_rows = harness.service.rows_page(analysis_id, "model")["items"]
-    assert [row["status"] for row in model_rows] == ["interrupted"]
-    assert len(harness.llm.calls) == 1  # only the summary
-    assert snapshot["summary"] == SUMMARY
-    assert snapshot["readiness"]["report_ready"] is True
+    assert harness.service.tasks == {}
+    assert harness.service.snapshot(broken["id"])["status"] == "running"
+    assert harness.service.list_page()["items"][0]["id"] == broken["id"]
+
+    harness.runtime.mode = "complete"
+    healthy = await harness.service.start(payload())
+    assert (await wait_terminal(harness.service, healthy["id"]))["status"] == "completed"
     await harness.service.close()
 
 
+# -- recover and resume ------------------------------------------------------
+
+
 @pytest.mark.anyio
-async def test_recover_interrupts_an_analysis_with_nothing_to_resume(tmp_path, repository, settings):
+async def test_recover_interrupts_a_run_without_a_checkpoint(tmp_path, repository, settings):
     harness = make_harness(tmp_path, repository, settings)
     analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
+    harness.repository.save_seed_row(analysis_id, 0, status="submitting")
 
     harness.service.recover()
 
     snapshot = harness.service.snapshot(analysis_id)
     assert snapshot["status"] == "interrupted"
     assert snapshot["finished_at"] is not None
+    # A row that was never submitted is never replayed after a restart.
+    assert seed_states(tmp_path / "runs.sqlite3", analysis_id)[0] == ("interrupted", None)
+    assert harness.service.tasks == {}
+    assert harness.runtime.resumes == []
     assert harness.gateway.submitted == []
-    assert harness.llm.calls == []
+    await harness.service.close()
+
+
+@pytest.mark.anyio
+async def test_recover_defers_a_checkpointed_run_until_resume_pending(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(
+        tmp_path, repository, settings, checkpoint_probe=lambda _analysis_id: True,
+    )
+    analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
+
+    harness.service.recover()
+
+    # `recover` runs while the container is built, so nothing may start yet.
+    assert harness.service.tasks == {}
+    assert harness.runtime.resumes == []
+    assert harness.service.snapshot(analysis_id)["status"] == "running"
+
+    harness.service.resume_pending()
+    snapshot = await wait_terminal(harness.service, analysis_id)
+
+    assert snapshot["status"] == "completed"
+    assert harness.runtime.resumes == [analysis_id]
     assert harness.service.tasks == {}
     await harness.service.close()
 
 
 @pytest.mark.anyio
-async def test_recover_completes_an_analysis_whose_report_is_ready(tmp_path, repository, settings):
-    harness = make_harness(tmp_path, repository, settings)
+async def test_recover_reads_the_checkpoint_of_every_running_analysis(
+    tmp_path, repository, settings,
+):
+    probed: list[str] = []
+
+    def probe(analysis_id: str) -> bool:
+        probed.append(analysis_id)
+        return False
+
+    harness = make_harness(tmp_path, repository, settings, checkpoint_probe=probe)
     analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
-    harness.repository.update_stage(analysis_id, 6, "done")
+    running = harness.repository.running_analysis_ids()
 
     harness.service.recover()
 
-    snapshot = harness.service.snapshot(analysis_id)
-    assert snapshot["status"] == "completed"
-    assert snapshot["readiness"]["report_ready"] is True
-    assert harness.gateway.submitted == []
+    assert running == (analysis_id,)
+    assert probed == list(running)
+    assert harness.service.snapshot(analysis_id)["status"] == "interrupted"
     await harness.service.close()
 
 
-def test_recover_without_a_loop_defers_the_resume_until_a_loop_exists(tmp_path, repository, settings):
-    harness = make_harness(tmp_path, repository, settings, llm_responses=[generated_payload(), SUMMARY])
+def test_recover_without_a_loop_defers_the_resume_until_a_loop_exists(
+    tmp_path, repository, settings,
+):
+    harness = make_harness(
+        tmp_path, repository, settings, checkpoint_probe=lambda _analysis_id: True,
+    )
     analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
-    harness.repository.update_stage(analysis_id, 1, "done")
-    harness.repository.save_site_facts(analysis_id, "Ромашка", ["Букеты"], [(DEFAULT_SEO_PAGE.url, "")])
-    harness.repository.update_stage(analysis_id, 2, "running")
-    harness.repository.save_seed_row(analysis_id, 0, status="waiting", operation_id="seo-operation-9")
 
     # Called from a container build (no running loop), the resume is deferred.
     harness.service.recover()
@@ -773,88 +518,93 @@ def test_recover_without_a_loop_defers_the_resume_until_a_loop_exists(tmp_path, 
 
     async def kick() -> dict:
         harness.service.resume_pending()
-        return await wait_for(harness.service, analysis_id)
+        return await wait_terminal(harness.service, analysis_id)
 
     snapshot = asyncio.run(kick())
 
     assert snapshot["status"] == "completed"
-    assert harness.gateway.submitted and all(prompt not in SEEDS for prompt, _ in harness.gateway.submitted)
+    assert harness.runtime.resumes == [analysis_id]
     asyncio.run(harness.service.close())
 
 
-# -- snapshot and rows delegates ---------------------------------------------
-
-
 @pytest.mark.anyio
-async def test_snapshot_and_pages_delegate_to_the_repository(tmp_path, repository, settings):
-    harness = make_harness(tmp_path, repository, settings)
-
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert harness.service.snapshot(created["id"]) == snapshot
-    page = harness.service.list_page()
-    assert page["items"][0]["id"] == created["id"]
-    assert len(harness.service.rows_page(created["id"], "search")["items"]) == len(QUERY_TEXTS)
-    assert len(harness.service.rows_page(created["id"], "model")["items"]) == len(QUERY_TEXTS)
-    with pytest.raises(RunNotFound):
-        harness.service.snapshot("нет такого")
-    with pytest.raises(ValidationError):
-        harness.service.rows_page(created["id"], "unknown")
-    await harness.service.close()
-
-
-@pytest.mark.anyio
-async def test_a_storage_failure_while_reading_does_not_stop_other_analyses(
+async def test_resume_pending_waits_for_a_configured_service_llm(
     tmp_path, repository, settings,
 ):
-    real = SeoRepository(tmp_path)
-    real.initialize()
-    wrapper = StorageFailingSeoRepository(real, methods=["snapshot"])
-    harness = make_harness(tmp_path, repository, settings, seo_repository=wrapper)
+    harness = make_harness(
+        tmp_path,
+        repository,
+        settings,
+        checkpoint_probe=lambda _analysis_id: True,
+        llm_settings=FakeSeoSettingsService(None),
+    )
     analysis_id = harness.repository.create_analysis(stored_input(), ESTIMATE)
+    harness.service.recover()
 
-    with pytest.raises(StorageError):
-        harness.service.snapshot(analysis_id)
+    harness.service.resume_pending()
 
-    wrapper.failing_methods.clear()
+    assert harness.runtime.resumes == []
+    assert harness.service.tasks == {}
     assert harness.service.snapshot(analysis_id)["status"] == "running"
-    await harness.service.close()
-
-
-# -- document titles travel into the search rows ------------------------------
-
-
-@pytest.mark.anyio
-async def test_candidate_titles_come_from_the_serp_documents(tmp_path, repository, settings):
-    harness = make_harness(tmp_path, repository, settings)
-
-    created = await harness.service.start(payload())
-    snapshot = await wait_for(harness.service, created["id"])
-
-    assert snapshot["candidates"][0]["title"] == DEFAULT_SEO_DOCUMENTS[0].title
     await harness.service.close()
 
 
 # -- runtime wiring -----------------------------------------------------------
 
 
-def test_the_container_builds_the_seo_service_over_the_shared_client(tmp_path):
+def test_the_container_builds_the_service_over_the_agent_runtime(tmp_path):
     from app.api.deps import build_container
     from app.core.config import Settings
+    from app.domain.seo_tools import SeoBudget
     from app.integrations.site_fetcher import HttpxSiteFetcher
+    from app.service.seo_agents import SeoAgentRuntime, checkpoint_path
 
     container = build_container(Settings(config_dir=tmp_path), secrets=MemorySecrets())
 
     try:
-        assert isinstance(container.seo_service, SeoService)
-        assert container.seo_service.repository is container.seo
-        assert container.seo_service.yandex_settings is container.search_settings
-        assert container.seo_service.connections is container.connections
-        fetcher = container.seo_service.fetcher
-        assert isinstance(fetcher, HttpxSiteFetcher)
-        assert fetcher.client is container.search_client
-        # Nothing is configured in this temporary directory, so no client is built.
-        assert container.seo_service.llm_factory() is None
+        service = container.seo_service
+        assert isinstance(service, SeoService)
+        assert service.repository is container.seo
+        assert service.yandex_settings is container.search_settings
+        assert service.connections is container.connections
+        assert service.llm_settings is container.seo_settings
+        assert isinstance(service.runtime, SeoAgentRuntime)
+        assert callable(service.runtime.checkpointer)
+        assert service.checkpoint_probe is not None
+        assert service.checkpoint_probe("нет такого") is False
+
+        # Nothing is configured in this temporary directory, so the container
+        # still builds and no run could start.
+        assert container.seo_settings.build_agent_model() is None
+        assert not checkpoint_path(tmp_path).exists()
+
+        toolbox = service.runtime.toolbox_factory(
+            "analysis", stored_input(), SeoBudget.for_connections(1),
+        )
+        assert isinstance(toolbox.fetcher, HttpxSiteFetcher)
+        assert toolbox.fetcher.client is container.search_client
+        assert toolbox.gateway is None
+        assert toolbox.model_name == "seo-llm"
+    finally:
+        asyncio.run(container.search_client.aclose())
+
+
+def test_the_injected_runtime_and_model_replace_the_built_ones(tmp_path):
+    from app.api.deps import build_container
+    from app.core.config import Settings
+
+    fake_runtime = FakeSeoAgentRuntime()
+    injected_settings = tool_calling_settings("injected-model")
+    container = build_container(
+        Settings(config_dir=tmp_path),
+        secrets=MemorySecrets(),
+        seo_agent_runtime=fake_runtime,
+        seo_settings_service=injected_settings,
+    )
+
+    try:
+        assert container.seo_service.runtime is fake_runtime
+        assert container.seo_service.llm_settings is injected_settings
+        assert container.seo_settings is injected_settings
     finally:
         asyncio.run(container.search_client.aclose())

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from app.core.config import ConnectionPreset
 from app.core.errors import ProviderError, StorageError
 from app.domain.search import SearchDocument
+from app.domain.seo import SeoInput
 from app.domain.seo_llm import AgentMessage, AgentTurn, ToolCall, ToolSchema
 from app.domain.site_fetch import FetchedPage
 from app.integrations.yandex_search import RESULT_FAILED, SUBMIT_FAILED
@@ -413,3 +415,81 @@ class StorageFailingSeoRepository:
             return attribute(*args, **kwargs)
 
         return failing
+
+
+# -- the agent runtime seam ---------------------------------------------------
+
+
+class FakeSeoAgentRuntime:
+    """A scripted `SeoAgentRuntime` for the service and API tests.
+
+    One background `run` follows `mode`: `complete` closes the analysis as
+    completed, `hold` keeps it running until the service cancels the task, and
+    `crash` raises a storage error that must stay inside the task. Every call is
+    recorded, so a test can prove what the service delegated without a graph.
+    """
+
+    def __init__(self, repository: Any = None, *, mode: str = "complete") -> None:
+        self.repository = repository
+        self.mode = mode
+        self.runs: list[tuple[str, SeoInput]] = []
+        self.resumes: list[str] = []
+        self.cancels: list[str] = []
+        # A held run waits here; the service cancels the task on `close`.
+        self.hold = asyncio.Event()
+
+    async def run(self, analysis_id: str, input: SeoInput) -> None:
+        self.runs.append((analysis_id, input))
+        if self.mode == "complete":
+            self.repository.finish_analysis(analysis_id)
+        elif self.mode == "crash":
+            raise StorageError("storage unavailable")
+        elif self.mode == "hold":
+            await self.hold.wait()
+
+    async def resume(self, analysis_id: str) -> bool:
+        self.resumes.append(analysis_id)
+        if self.mode == "complete" and self.repository is not None:
+            self.repository.finish_analysis(analysis_id)
+        return True
+
+    def cancel(self, analysis_id: str) -> None:
+        self.cancels.append(analysis_id)
+        if self.repository is not None:
+            self.repository.cancel(analysis_id)
+
+
+class FakeSeoSettingsService:
+    """A `SeoSettingsService` stand-in with one scripted agent model.
+
+    `build_agent_model` answers `None` when `model` is `None`, which is exactly
+    the "service LLM is not configured" case a run creation must refuse.
+    """
+
+    def __init__(self, model: Any = None, *, model_name: str = "seo-model") -> None:
+        self.model = model
+        self.model_name = model_name
+        self.builds = 0
+
+    def build_agent_model(self) -> Any:
+        self.builds += 1
+        return self.model
+
+    def public(self) -> dict[str, object]:
+        return {
+            "endpoint": ENDPOINT,
+            "model": self.model_name,
+            "has_api_key": self.model is not None,
+            "endpoint_source": "ui",
+            "model_source": "ui",
+            "api_key_source": "ui",
+        }
+
+
+def tool_calling_settings(model_name: str = "seo-model") -> FakeSeoSettingsService:
+    """Settings whose model answers the tool probe with one tool call."""
+    return FakeSeoSettingsService(
+        FakeAgentModel(tool_call_turn("check_connection", {"status": "OK"})),
+        model_name=model_name,
+    )
+

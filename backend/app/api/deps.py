@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, Request
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatResult
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.core.config import Settings
+from app.core.errors import ConfigurationError
 from app.db.connections import ConnectionRepository
 from app.db.runs import RunRepository
 from app.db.search_settings import SearchSettingsRepository
@@ -19,9 +26,11 @@ from app.db.seo import SeoRepository
 from app.db.seo_settings import SeoSettingsRepository
 from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
+from app.domain.seo import SeoInput
+from app.domain.seo_llm import AgentModel
+from app.domain.seo_tools import SeoBudget
 from app.domain.site_fetch import SiteFetcher
 from app.integrations.factory import build_provider
-from app.integrations.seo_llm import SeoLlmClient
 from app.integrations.site_fetcher import HttpxSiteFetcher
 from app.service.checks import CheckService
 from app.service.connections import ConnectionService
@@ -30,11 +39,66 @@ from app.service.provider_settings import ProviderSettingsService
 from app.service.runs import RunService
 from app.service.search import SearchService
 from app.service.search_settings import SearchSettingsService
-from app.service.seo import SeoService
+from app.service.seo import LLM_NOT_CONFIGURED, SeoService
+from app.service.seo_agents import (
+    CheckpointFactory,
+    SeoAgentRuntime,
+    checkpoint_exists,
+    checkpoint_path,
+    secure_checkpoint,
+)
 from app.service.seo_settings import SeoSettingsService
+from app.service.seo_tools import SeoToolbox
 
 CONNECT_TIMEOUT = 20
 READ_TIMEOUT = 60
+
+
+class UnconfiguredAgentModel(BaseChatModel):
+    """The stand-in chat model of a container without a configured service LLM.
+
+    The application must start while the SEO LLM settings are empty, but
+    `SeoAgentRuntime` resolves its chat model when it is built. This model is
+    never called: `SeoService.start` refuses such a run with a safe configuration
+    error before any analysis row or paid call exists.
+    """
+
+    @property
+    def _llm_type(self) -> str:
+        return "seo-unconfigured"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise ConfigurationError(LLM_NOT_CONFIGURED)
+
+
+def agent_checkpointer(config_dir: Path) -> CheckpointFactory:
+    """Return the factory of the owner-only graph checkpoint file.
+
+    Graph state lives beside `runs.sqlite3`, never inside it, and one file holds
+    the thread of every analysis: the runtime passes the analysis id as the
+    `thread_id`, so a restart finds exactly the run it needs.
+    """
+    path = checkpoint_path(config_dir)
+
+    @asynccontextmanager
+    async def open_checkpointer(_analysis_id: str):
+        secure_checkpoint(path)
+        async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
+            yield saver
+
+    return open_checkpointer
+
+
+def checkpoint_probe(config_dir: Path) -> Callable[[str], bool]:
+    """Return the synchronous restart probe over one config directory."""
+    path = checkpoint_path(config_dir)
+    return lambda analysis_id: checkpoint_exists(path, analysis_id)
 
 
 @dataclass(frozen=True)
@@ -68,8 +132,11 @@ def build_container(
     seo_settings_repository: SeoSettingsRepository | None = None,
     seo_settings_service: SeoSettingsService | None = None,
     seo_service: SeoService | None = None,
+    seo_agent_runtime: SeoAgentRuntime | None = None,
+    seo_agent_model: BaseChatModel | AgentModel | None = None,
+    seo_toolbox_factory: Callable[[str, SeoInput, SeoBudget], SeoToolbox] | None = None,
+    seo_checkpointer: BaseCheckpointSaver | CheckpointFactory | None = None,
     fetcher: SiteFetcher | None = None,
-    llm_factory: Callable[[], SeoLlmClient | None] | None = None,
 ) -> Container:
     secret_store = secrets or KeyringSecrets()
     if repository is None:
@@ -120,21 +187,55 @@ def build_container(
         # values lazily, so a settings change is visible to the next run.
         seo_settings_service = SeoSettingsService(seo_settings_repository, search_client)
 
-    def resolved_llm_factory() -> SeoLlmClient | None:
-        return seo_settings_service.build_client()
+    resolved_fetcher = fetcher if fetcher is not None else HttpxSiteFetcher(search_client)
 
-    if seo_service is None:
-        # The orchestrator owns the six stages. It captures the gateway and the
-        # service-LLM client once per run, so a settings change made while a run
-        # is in flight never swaps a collaborator underneath it.
-        seo_service = SeoService(
+    def agent_toolbox(analysis_id: str, run_input: SeoInput, budget: SeoBudget) -> SeoToolbox:
+        """Build one run's toolbox over the settings resolved when it starts.
+
+        The gateway and the model name are read here, not at container build, so
+        a settings change reaches the next run; the connections, the fetcher, and
+        the provider factory are the app's own shared collaborators.
+        """
+        return SeoToolbox(
             seo_repository,
-            seo_settings_repository,
-            llm_factory or resolved_llm_factory,
-            fetcher if fetcher is not None else HttpxSiteFetcher(search_client),
-            search_settings,
+            resolved_fetcher,
+            search_settings.gateway_snapshot(),
             connections,
             factory,
+            analysis_id=analysis_id,
+            input=run_input,
+            connection_ids=run_input.connection_ids,
+            budget=budget,
+            model_name=str(seo_settings_service.public()["model"] or ""),
+        )
+
+    if seo_agent_runtime is None:
+        # The runtime resolves its chat model once, at build time. Without a
+        # configured service LLM it gets a stand-in that is never called, because
+        # `SeoService.start` refuses such a run first.
+        agent_model = (
+            seo_agent_model if seo_agent_model is not None
+            else seo_settings_service.build_agent_model()
+        )
+        seo_agent_runtime = SeoAgentRuntime(
+            seo_repository,
+            seo_toolbox_factory if seo_toolbox_factory is not None else agent_toolbox,
+            agent_model if agent_model is not None else UnconfiguredAgentModel(),
+            checkpointer=(
+                seo_checkpointer if seo_checkpointer is not None
+                else agent_checkpointer(Path(settings.config_dir))
+            ),
+        )
+    if seo_service is None:
+        # The service owns the configuration refusals and the background tasks;
+        # the restart policy below defers a checkpointed run until a loop exists.
+        seo_service = SeoService(
+            seo_repository,
+            seo_agent_runtime,
+            search_settings,
+            seo_settings_service,
+            connections,
+            checkpoint_probe=checkpoint_probe(Path(settings.config_dir)),
         )
         seo_service.recover()
     return Container(

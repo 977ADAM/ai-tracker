@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
@@ -672,6 +673,31 @@ def checkpoint_path(config_dir: Path | str) -> Path:
     return Path(config_dir) / CHECKPOINT_FILE_NAME
 
 
+def checkpoint_exists(path: Path | str, analysis_id: str) -> bool:
+    """Return whether one analysis has a stored graph checkpoint.
+
+    Restart recovery runs while the container is built, before any event loop
+    exists, so the file is read directly instead of through the async saver: the
+    graph tables are `checkpoints(thread_id, ...)`, and a missing file or table
+    means there is nothing to resume.
+    """
+    target = Path(path)
+    if not target.exists():
+        return False
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(str(target))
+        row = connection.execute(
+            "SELECT 1 FROM checkpoints WHERE thread_id=? LIMIT 1", (analysis_id,),
+        ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 def secure_checkpoint(path: Path | str) -> None:
     """Give the checkpoint file and its directory owner-only permissions."""
     import os
@@ -726,10 +752,19 @@ class SeoAgentRuntime:
         self.recursion_limit = recursion_limit or (
             max_supervisor_turns * RECURSION_STEPS_PER_TURN + RECURSION_HEADROOM
         )
-        self.chat_model = _chat_model(model)
+        # The concrete chat model is resolved on first use: a container may hold
+        # an agent model that only a real run turns into a graph, and building a
+        # container must not fail for a model that is never used.
+        self._chat_model_cache: BaseChatModel | None = None
         # One event per live analysis: `cancel` sets it, the tool bridge and the
         # graph read it before every further step and paid call.
         self._cancel_events: dict[str, asyncio.Event] = {}
+
+    @property
+    def chat_model(self) -> BaseChatModel:
+        if self._chat_model_cache is None:
+            self._chat_model_cache = _chat_model(self.model)
+        return self._chat_model_cache
 
     def cancel(self, analysis_id: str) -> None:
         """Stop a live run before its next step and end it as `cancelled`.
@@ -1002,6 +1037,7 @@ __all__ = [
     "SeoAgentRuntime",
     "SeoPrompts",
     "build_agent_graph",
+    "checkpoint_exists",
     "checkpoint_path",
     "langchain_tools",
     "secure_checkpoint",

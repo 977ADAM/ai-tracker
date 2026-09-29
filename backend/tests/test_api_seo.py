@@ -2,12 +2,13 @@
 
 Every collaborator is a fake injected through the container, so the suite proves
 the `202` estimate, the safe projections, and the "no paid call inside the HTTP
-request or before validation" guarantees without reaching a paid API.
+request or before validation" guarantees without reaching a paid API. The agent
+runtime is a fake as well: the graph itself is covered by
+`test_service_seo_agents.py`.
 """
 
 from __future__ import annotations
 
-import json
 import time
 
 from app.db.search_settings import SearchSettingsRepository
@@ -23,33 +24,20 @@ from app.service.search import DISABLED_ENGINE
 from app.service.seo import LLM_NOT_CONFIGURED
 from tests.fakes import (
     ENDPOINT,
-    FakeSiteFetcher,
+    FakeSeoAgentRuntime,
+    FakeSeoSettingsService,
     ScriptedSeoGateway,
-    ScriptedSeoLlmFactory,
     SeoProviderFactorySpy,
+    tool_calling_settings,
 )
 
 SEEDS = ("букет цветов", "доставка цветов", "розы")
-SITE_FACTS = json.dumps({"company_name": "Ромашка", "services": ["Свадьбы"]}, ensure_ascii=False)
 QUERY_TEXTS = (
     "купить букет недорого",
     "Ромашка доставка цветов",
     "rival.ru отзывы",
     "как выбрать букет",
     "сравнение конкурентов букеты",
-)
-QUERIES = json.dumps(
-    {
-        "queries": [
-            {
-                "query": text,
-                "category": "comparative" if "сравнение" in text else "commercial",
-                "service": "Букеты",
-            }
-            for text in QUERY_TEXTS
-        ]
-    },
-    ensure_ascii=False,
 )
 SUMMARY = "Итог: сайт виден в Яндексе и упоминается моделями."
 MODEL_ANSWER = "Модель советует «Ромашка» и https://example.ru/"
@@ -62,10 +50,6 @@ SNAPSHOT_FIELDS = {
 COUNTERS = {
     "queries": 0, "search_rows": 0, "model_rows": 0, "search_errors": 0, "model_errors": 0,
 }
-
-
-def llm_factory() -> ScriptedSeoLlmFactory:
-    return ScriptedSeoLlmFactory([SITE_FACTS, QUERIES, SUMMARY])
 
 
 def create_provider(client, name: str = "Модель") -> str:
@@ -99,14 +83,20 @@ def make_repository(settings) -> SeoRepository:
     return repository
 
 
-def run_container(settings, *, gateway=None, factory=None, spy=None, repository=None):
+def run_container(settings, *, gateway=None, spy=None, repository=None,
+                  runtime=None, settings_service=None):
     """Override the SEO collaborators with fakes; nothing here reaches a paid API."""
+    repository = repository if repository is not None else make_repository(settings)
     return {
-        "seo_repository": repository if repository is not None else make_repository(settings),
-        "fetcher": FakeSiteFetcher(),
+        "seo_repository": repository,
         "search_gateway": gateway if gateway is not None else ScriptedSeoGateway(),
         "provider_factory": spy if spy is not None else SeoProviderFactorySpy(),
-        "llm_factory": factory if factory is not None else llm_factory(),
+        "seo_settings_service": (
+            settings_service if settings_service is not None else tool_calling_settings()
+        ),
+        "seo_agent_runtime": (
+            runtime if runtime is not None else FakeSeoAgentRuntime(repository)
+        ),
     }
 
 
@@ -165,9 +155,9 @@ def test_create_answers_202_with_the_upper_estimate_and_finishes_in_the_backgrou
     repository = make_repository(settings)
     gateway = ScriptedSeoGateway()
     spy = SeoProviderFactorySpy()
-    factory = llm_factory()
+    runtime = FakeSeoAgentRuntime(repository)
     with make_client(**run_container(
-        settings, gateway=gateway, factory=factory, spy=spy, repository=repository,
+        settings, gateway=gateway, spy=spy, repository=repository, runtime=runtime,
     )) as client:
         first = create_provider(client, "Модель 1")
         second = create_provider(client, "Модель 2")
@@ -183,20 +173,21 @@ def test_create_answers_202_with_the_upper_estimate_and_finishes_in_the_backgrou
 
         snapshot = wait_terminal(client, body["id"])
         assert snapshot["status"] == "completed"
-        assert snapshot["company_name"] == "Ромашка"
-        assert snapshot["services"][0] == "Букеты"
-        assert snapshot["aggregates"]["counts"]["queries"] == len(QUERY_TEXTS)
-        assert len(gateway.submitted) == len(SEEDS) + len(QUERY_TEXTS)
-        assert len(spy.calls) == len(QUERY_TEXTS) * 2
+        # The graph is the only paid work of a run, and the HTTP request never
+        # waits for it: the answer above came back while the analysis ran.
+        assert runtime.runs[0][0] == body["id"]
+        assert runtime.runs[0][1].connection_ids == (first, second)
+        assert gateway.submitted == []
+        assert spy.keys == []
 
 
 def test_invalid_input_is_rejected_before_any_paid_call(make_client, settings):
     gateway = ScriptedSeoGateway()
     spy = SeoProviderFactorySpy()
-    factory = llm_factory()
+    settings_service = tool_calling_settings()
     unknown = request_body(["нет такого"])
     with make_client(**run_container(
-        settings, gateway=gateway, factory=factory, spy=spy,
+        settings, gateway=gateway, spy=spy, settings_service=settings_service,
     )) as client:
         provider = create_provider(client)
         for payload in (
@@ -216,7 +207,8 @@ def test_invalid_input_is_rejected_before_any_paid_call(make_client, settings):
 
     assert gateway.submitted == []
     assert spy.keys == []
-    assert factory.calls == []
+    # A refused request never reached the model probe either.
+    assert settings_service.model.steps == []
 
 
 def test_disabled_yandex_is_rejected_before_any_paid_call(make_client, settings, secrets):
@@ -227,10 +219,10 @@ def test_disabled_yandex_is_rejected_before_any_paid_call(make_client, settings,
     search_repository.update({"enabled": False})
     gateway = ScriptedSeoGateway()
     spy = SeoProviderFactorySpy()
-    factory = llm_factory()
+    settings_service = tool_calling_settings()
     with make_client(
         search_settings_repository=search_repository,
-        **run_container(settings, gateway=gateway, factory=factory, spy=spy),
+        **run_container(settings, gateway=gateway, spy=spy, settings_service=settings_service),
     ) as client:
         provider = create_provider(client)
         response = client.post("/api/seo/analyses", json=request_body([provider]))
@@ -239,14 +231,15 @@ def test_disabled_yandex_is_rejected_before_any_paid_call(make_client, settings,
     assert response.json() == {"detail": DISABLED_ENGINE}
     assert gateway.submitted == []
     assert spy.keys == []
-    assert factory.calls == []
+    assert settings_service.model.steps == []
 
 
 def test_a_missing_llm_configuration_is_rejected_before_any_paid_call(make_client, settings):
     gateway = ScriptedSeoGateway()
     spy = SeoProviderFactorySpy()
-    overrides = run_container(settings, gateway=gateway, spy=spy)
-    del overrides["llm_factory"]
+    overrides = run_container(
+        settings, gateway=gateway, spy=spy, settings_service=FakeSeoSettingsService(None),
+    )
     with make_client(**overrides) as client:
         provider = create_provider(client)
         response = client.post("/api/seo/analyses", json=request_body([provider]))
@@ -404,12 +397,8 @@ def test_rows_are_filtered_and_paginated_without_operation_ids(make_client, sett
 
 def test_cancel_stops_a_running_analysis_and_terminal_states_are_deleted(make_client, settings):
     repository = make_repository(settings)
-    gateway = ScriptedSeoGateway(never_finishing=QUERY_TEXTS)
-    spy = SeoProviderFactorySpy()
-    factory = llm_factory()
-    with make_client(**run_container(
-        settings, gateway=gateway, factory=factory, spy=spy, repository=repository,
-    )) as client:
+    runtime = FakeSeoAgentRuntime(repository, mode="hold")
+    with make_client(**run_container(settings, repository=repository, runtime=runtime)) as client:
         provider = create_provider(client)
         created = client.post("/api/seo/analyses", json=request_body([provider]))
         analysis_id = created.json()["id"]
@@ -422,6 +411,7 @@ def test_cancel_stops_a_running_analysis_and_terminal_states_are_deleted(make_cl
         assert cancelled.status_code == 200
         assert cancelled.json()["status"] == "cancelled"
         assert cancelled.json()["finished_at"] is not None
+        assert runtime.cancels == [analysis_id]
         # Cancellation is final: the analysis can never be cancelled again.
         assert client.post(f"/api/seo/analyses/{analysis_id}/cancel").status_code == 409
 
