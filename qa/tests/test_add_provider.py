@@ -52,12 +52,20 @@ def _create_with_second_model(settings_page: SettingsPage) -> None:
 # -- the dialog itself --------------------------------------------------------
 
 
-def test_configuration_file_button_opens_its_own_window(settings_page: SettingsPage) -> None:
-    settings_page.show_configuration_file()
-    expect(settings_page.configuration_dialog.get_by_text("providers.json")).to_be_visible()
-    expect(settings_page.configuration_dialog).not_to_contain_text(KEY)
+def test_configuration_button_opens_every_stored_setting(settings_page: SettingsPage) -> None:
+    """One document: the providers, the search settings, and the SEO settings."""
+    _create(settings_page, key=KEY)
+
+    settings_page.show_config()
+    document = settings_page.config_document
+    expect(document).to_contain_text('"providers"')
+    expect(document).to_contain_text('"search"')
+    expect(document).to_contain_text('"seo"')
+    expect(document).to_contain_text(NAME)
+    # The stored document never carries a key: those live in the keyring.
+    expect(settings_page.config_dialog).not_to_contain_text(KEY)
     expect(settings_page.dialog.get_by_role("heading", name="Модели")).to_be_visible()
-    settings_page.close_configuration_file()
+    settings_page.close_config()
     expect(settings_page.dialog.get_by_role("heading", name="Модели")).to_be_visible()
 
 

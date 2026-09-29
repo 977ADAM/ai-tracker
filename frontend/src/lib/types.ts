@@ -1,4 +1,5 @@
 export type ApiPath =
+  | '/api/config'
   | '/api/providers' | '/api/check' | '/api/form' | '/api/providers/settings'
   | '/api/search' | '/api/search/regions' | '/api/search/settings' | '/api/search/settings/credentials'
   | '/api/runs' | `/api/runs?cursor=${string}` | `/api/runs/${string}`

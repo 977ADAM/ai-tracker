@@ -110,8 +110,9 @@ def test_openapi_documents_every_operation(client):
     spec = client.get("/openapi.json").json()
 
     assert set(spec["paths"]) == {
+        "/api/config",
         "/api/form", "/api/providers", "/api/providers/{connection_id}", "/api/check",
-        "/api/providers/settings", "/api/providers/settings/file", "/api/providers/settings/{group_id}",
+        "/api/providers/settings", "/api/providers/settings/{group_id}",
         "/api/search", "/api/search/regions", "/api/search/{job_id}",
         "/api/search/settings", "/api/search/settings/credentials",
         "/api/runs", "/api/runs/{run_id}", "/api/runs/{run_id}/export.csv",

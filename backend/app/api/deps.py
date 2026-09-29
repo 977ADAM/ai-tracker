@@ -33,6 +33,7 @@ from app.domain.site_fetch import SiteFetcher
 from app.integrations.factory import build_provider
 from app.integrations.site_fetcher import HttpxSiteFetcher
 from app.service.checks import CheckService
+from app.service.config import ConfigService
 from app.service.connections import ConnectionService
 from app.service.form import FormService
 from app.service.provider_settings import ProviderSettingsService
@@ -111,6 +112,7 @@ class Container:
     checks: CheckService
     form: FormService
     provider_settings: ProviderSettingsService
+    config: ConfigService
     search: SearchService
     runs: RunService
     search_settings: SearchSettingsService
@@ -245,6 +247,7 @@ def build_container(
         checks=checks,
         form=FormService(connections),
         provider_settings=ProviderSettingsService(repository),
+        config=ConfigService(Path(settings.config_dir)),
         search=search,
         runs=RunService(run_repository, checks, search),
         search_settings=search_settings,
@@ -278,6 +281,10 @@ def get_provider_settings_service(container: ContainerDep) -> ProviderSettingsSe
     return container.provider_settings
 
 
+def get_config_service(container: ContainerDep) -> ConfigService:
+    return container.config
+
+
 def get_search_service(container: ContainerDep) -> SearchService:
     return container.search
 
@@ -302,6 +309,7 @@ ConnectionServiceDep = Annotated[ConnectionService, Depends(get_connection_servi
 CheckServiceDep = Annotated[CheckService, Depends(get_check_service)]
 FormServiceDep = Annotated[FormService, Depends(get_form_service)]
 ProviderSettingsServiceDep = Annotated[ProviderSettingsService, Depends(get_provider_settings_service)]
+ConfigServiceDep = Annotated[ConfigService, Depends(get_config_service)]
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
 SearchSettingsServiceDep = Annotated[SearchSettingsService, Depends(get_search_settings_service)]
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]

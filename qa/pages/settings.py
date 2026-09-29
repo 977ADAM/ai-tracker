@@ -57,21 +57,26 @@ class SettingsPage:
         return self.rail.get_by_role("tab")
 
     @property
-    def configuration_file_button(self) -> Locator:
-        return self.dialog.get_by_role("button", name="Открыть файл конфигурации")
+    def config_button(self) -> Locator:
+        return self.dialog.get_by_role("button", name="Открыть конфигурацию")
 
     @property
-    def configuration_dialog(self) -> Locator:
-        return self.page.get_by_role("dialog", name="Файл конфигурации")
+    def config_dialog(self) -> Locator:
+        return self.page.get_by_role("dialog", name="Конфигурация")
 
-    def show_configuration_file(self) -> SettingsPage:
-        self.configuration_file_button.click()
-        expect(self.configuration_dialog).to_be_visible()
+    @property
+    def config_document(self) -> Locator:
+        """The stored settings document: providers, search, and SEO together."""
+        return self.config_dialog.locator("pre")
+
+    def show_config(self) -> SettingsPage:
+        self.config_button.click()
+        expect(self.config_dialog).to_be_visible()
         return self
 
-    def close_configuration_file(self) -> SettingsPage:
-        self.configuration_dialog.get_by_role("button", name="Закрыть файл конфигурации").click()
-        expect(self.configuration_dialog).to_have_count(0)
+    def close_config(self) -> SettingsPage:
+        self.config_dialog.get_by_role("button", name="Закрыть конфигурацию").click()
+        expect(self.config_dialog).to_have_count(0)
         expect(self.dialog).to_be_visible()
         return self
 

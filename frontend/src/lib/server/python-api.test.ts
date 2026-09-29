@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  apiOrigin, apiTimeoutMs, DEFAULT_TIMEOUT_MS, loadPageData, proxyJson, publicConfigurationFile, publicSearchRegions,
+  apiOrigin, apiTimeoutMs, DEFAULT_TIMEOUT_MS, loadPageData, proxyJson, publicConfig, publicSearchRegions,
   publicSearchSnapshot, publicSettingsProvider, publicSearchSettings, searchPath, settingsProviderPath,
   publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv,
   publicSeoAnalysisCreated, publicSeoHistory, publicSeoRows, publicSeoSettings, publicSeoSettingsTest,
@@ -188,29 +188,31 @@ describe('provider settings BFF', () => {
     })).toThrow();
   });
 
-  it('returns the configuration file text and drops anything else', () => {
-    expect(publicConfigurationFile({
-      path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n', api_key: 'secret'
-    })).toEqual({ path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n' });
-    expect(publicConfigurationFile({
-      path: '/tmp/ai-tracker/providers.json', exists: false, content: null
-    })).toEqual({ path: '/tmp/ai-tracker/providers.json', exists: false, content: null });
-    expect(() => publicConfigurationFile({ path: '/tmp/providers.json', exists: true, content: null })).toThrow();
+  it('returns the configuration document and drops anything else', () => {
+    expect(publicConfig({
+      directory: '/tmp/ai-tracker', exists: true,
+      content: '{\n  "providers": null\n}', api_key: 'secret'
+    })).toEqual({
+      directory: '/tmp/ai-tracker', exists: true, content: '{\n  "providers": null\n}'
+    });
+    expect(publicConfig({ directory: '/tmp/ai-tracker', exists: false, content: null }))
+      .toEqual({ directory: '/tmp/ai-tracker', exists: false, content: null });
+    expect(() => publicConfig({ directory: '/tmp/ai-tracker', exists: true, content: null })).toThrow();
+    expect(() => publicConfig({ directory: '/tmp/ai-tracker', exists: true, content: '' })).toThrow();
   });
 
-  it('projects the configuration file from Python without provider fields', async () => {
+  it('projects the configuration document from Python without provider fields', async () => {
+    const document = '{\n  "providers": {\n    "groups": []\n  },\n  "search": null,\n  "seo": null\n}';
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n', api_key: 'secret'
+      directory: '/tmp/ai-tracker', exists: true, content: document, api_key: 'secret'
     }), { headers: { 'content-type': 'application/json' } })));
     const response = await proxyJson(
-      new Request('http://127.0.0.1:5173/api/providers/settings/file'),
-      '/api/providers/settings/file',
+      new Request('http://127.0.0.1:5173/api/config'),
+      '/api/config',
       'GET'
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      path: '/tmp/ai-tracker/providers.json', exists: true, content: '{"version":2}\n'
-    });
+    expect(await response.json()).toEqual({ directory: '/tmp/ai-tracker', exists: true, content: document });
   });
 
   it('projects settings list responses from Python', async () => {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import '../app.css';
-  import ConfigsPanel from '$lib/components/ConfigsPanel.svelte';
+  import ConfigPanel from '$lib/components/ConfigPanel.svelte';
   import SettingsPanel from '$lib/components/SettingsPanel.svelte';
   import SearchSettingsPanel from '$lib/components/SearchSettingsPanel.svelte';
   import SeoSettingsPanel from '$lib/components/SeoSettingsPanel.svelte';
@@ -67,7 +67,7 @@
     configButton?.focus();
   }
 
-  function showConfigurationFile() {
+  function showConfig() {
     configWindow = true;
   }
 
@@ -165,11 +165,11 @@
               type="button"
               class="inline-flex min-h-10 items-center rounded-full border border-shell-line px-3.5 text-sm font-medium text-shell-ink transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent disabled:opacity-60"
               aria-expanded={configWindow}
-              aria-controls="configuration-file"
+              aria-controls="config"
               aria-haspopup="dialog"
               bind:this={configButton}
-              onclick={showConfigurationFile}
-            >Открыть файл конфигурации</button>
+              onclick={showConfig}
+            >Открыть конфигурацию</button>
             <button
               type="button"
               class="grid size-10 shrink-0 place-items-center rounded-lg text-shell-muted transition hover:bg-white/5 hover:text-shell-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent"
@@ -248,6 +248,6 @@
       </div>
     </div>
 
-    <ConfigsPanel bind:panel={configPanel} open={configWindow} onclose={closeConfig} />
+    <ConfigPanel bind:panel={configPanel} open={configWindow} onclose={closeConfig} />
   {/if}
 </div>

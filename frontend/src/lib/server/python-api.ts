@@ -224,6 +224,7 @@ function validPath(path: ApiPath): boolean {
     try { return seoAnalysisPath(suffix) === path; }
     catch { return false; }
   }
+  if (path === '/api/config') return true;
   if (path === '/api/providers' || path === '/api/check' || path === '/api/form' || path === '/api/providers/settings') return true;
   // The static catalog comes before the dynamic job route, exactly as in Python.
   if (path === '/api/search' || path === '/api/search/regions' || path === '/api/search/settings' ||
@@ -315,17 +316,22 @@ export function publicRunList(value: unknown): RunHistoryPage {
   }), next_cursor };
 }
 
-export function publicConfigurationFile(value: unknown): { path: string; exists: boolean; content: string | null } {
+/**
+ * The configuration document: the directory it comes from, whether anything is
+ * stored there, and the JSON text with the providers, the search settings, and
+ * the SEO settings. A key is never part of it — the keyring holds those.
+ */
+export function publicConfig(value: unknown): { directory: string; exists: boolean; content: string | null } {
   const item = record(value);
   const exists = item.exists;
-  if (typeof exists !== 'boolean') throw new Error('Invalid configuration file');
+  if (typeof exists !== 'boolean') throw new Error('Invalid configuration');
   const content = item.content;
   if (exists) {
-    if (typeof content !== 'string') throw new Error('Invalid configuration file');
-    return { path: requiredString(item.path), exists, content };
+    if (typeof content !== 'string' || content.length === 0) throw new Error('Invalid configuration');
+    return { directory: requiredString(item.directory), exists, content };
   }
-  if (content !== null) throw new Error('Invalid configuration file');
-  return { path: requiredString(item.path), exists, content: null };
+  if (content !== null) throw new Error('Invalid configuration');
+  return { directory: requiredString(item.directory), exists, content: null };
 }
 
 export function publicSettingsProvider(value: unknown): SettingsProvider {
@@ -976,7 +982,7 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       if (!Array.isArray(value)) throw new Error('Invalid settings providers');
       return json(value.map(publicSettingsProvider), upstream.status);
     }
-    if (path === '/api/providers/settings/file' && method === 'GET') return json(publicConfigurationFile(value), upstream.status);
+    if (path === '/api/config' && method === 'GET') return json(publicConfig(value), upstream.status);
     if (path.startsWith('/api/providers/settings/') && method === 'DELETE') return json({ deleted: record(value).deleted === true }, upstream.status);
     if (path.startsWith('/api/providers/settings') && method !== 'DELETE') return json(publicSettingsProvider(value), upstream.status);
     if (path === '/api/form' && method === 'GET') return json(publicForm(value), upstream.status);

@@ -26,9 +26,3 @@ class SettingsProviderResponse(BaseModel):
     endpoint: str
     configured: bool
     models: list[SettingsModelResponse]
-
-
-class ConfigurationFileResponse(BaseModel):
-    path: str
-    exists: bool
-    content: str | None = None
