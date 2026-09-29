@@ -52,7 +52,7 @@ services:
       AI_TRACKER_API_HOSTS: ${AI_TRACKER_API_HOSTS:-backend}
       # adapter-node checks the Origin of state-changing requests against this
       # value: set it to the address you open the interface from.
-      ORIGIN: ${AI_TRACKER_ORIGIN:-http://localhost:3000}
+      ORIGIN: http://localhost:3000
       HOST: 0.0.0.0
       PORT: 3000
     ports:
