@@ -183,6 +183,23 @@
     </section>
   {/if}
 
+  {#if snapshot.conclusions}
+    <section class="mt-6 rounded-xl border border-l-4 border-violet-200 bg-violet-50/70 px-5 py-4" aria-labelledby="seo-conclusions-title" data-report-conclusions>
+      <h3 id="seo-conclusions-title" class="text-base font-semibold text-ink">Выводы и рекомендации</h3>
+      <p class="mt-1 text-xs font-semibold tracking-wide text-violet-800 uppercase">
+        Текст модели{snapshot.conclusions.model ? `: ${snapshot.conclusions.model}` : ''}
+      </p>
+      <p class="mt-3 whitespace-pre-wrap text-sm leading-6 text-ink" data-conclusions-summary>{snapshot.conclusions.summary}</p>
+      {#if snapshot.conclusions.recommendations}
+        <h4 class="mt-4 text-sm font-semibold text-ink">Рекомендации</h4>
+        <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink" data-conclusions-recommendations>{snapshot.conclusions.recommendations}</p>
+      {/if}
+      <p class="mt-3 text-xs leading-5 text-muted">
+        Это текст языковой модели, а не расчёт. Он не заменяет и не изменяет числа отчёта.
+      </p>
+    </section>
+  {/if}
+
   <section class="mt-8" aria-labelledby="seo-site-title">
     <h3 id="seo-site-title" class="text-xl font-bold tracking-tight">Сайт в Яндексе</h3>
     <p class="mt-1 text-sm text-muted">Доля сгенерированных запросов, где сайт попал в первую десятку, и средняя позиция среди находок.</p>

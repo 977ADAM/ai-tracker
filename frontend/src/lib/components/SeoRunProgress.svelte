@@ -1,9 +1,36 @@
 <script lang="ts">
-  import type { SeoAnalysisSnapshot, SeoStageStatus } from '$lib/types';
+  import type { SeoAnalysisSnapshot, SeoStageStatus, SeoTraceStep } from '$lib/types';
   import { actualConnectionCount, actualQueryCount, queriesGenerated, SEO_STAGE_LABELS, snapshotActualEstimate } from '$lib/seo-form';
+  import { hasAgentState } from '$lib/seo-agents';
+  import SeoAgentPanel from './SeoAgentPanel.svelte';
+  import SeoTraceFeed from './SeoTraceFeed.svelte';
 
-  let { snapshot, cancelling = false, onCancel }:
-    { snapshot: SeoAnalysisSnapshot; cancelling?: boolean; onCancel: () => void } = $props();
+  let {
+    snapshot,
+    cancelling = false,
+    onCancel,
+    trace = [],
+    traceCursor = null,
+    traceLoading = false,
+    traceError = '',
+    onTraceMore = () => {}
+  }: {
+    snapshot: SeoAnalysisSnapshot;
+    cancelling?: boolean;
+    onCancel: () => void;
+    trace?: SeoTraceStep[];
+    traceCursor?: string | null;
+    traceLoading?: boolean;
+    traceError?: string;
+    onTraceMore?: () => void;
+  } = $props();
+
+  /**
+   * Analyses from before the agent runtime carry six `pending` agents with a
+   * null `updated_at`; their real progress is in `stages`, so the old list is
+   * the honest screen for them.
+   */
+  const agentRun = $derived(hasAgentState(snapshot.agents));
 
   function stageStatusLabel(status: SeoStageStatus): string {
     if (status === 'running') return 'Выполняется';
@@ -59,19 +86,23 @@
     </span>
   </div>
 
-  <ol class="mt-6 space-y-3" aria-label="Этапы анализа">
-    {#each stages as stage (stage.number)}
-      <li class="rounded-xl border border-line bg-canvas/40 px-4 py-3" data-stage={stage.number}>
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="text-sm font-semibold text-ink">{stage.number}. {stage.name}</span>
-          <span class={`text-sm font-medium ${stageStatusClass(stage.status)}`}>{stageStatusLabel(stage.status)}</span>
-        </div>
-        {#if stage.error}
-          <p class="mt-2 text-xs leading-5 text-rose-700">{stage.error}</p>
-        {/if}
-      </li>
-    {/each}
-  </ol>
+  {#if agentRun}
+    <SeoAgentPanel {snapshot} />
+  {:else}
+    <ol class="mt-6 space-y-3" aria-label="Этапы анализа">
+      {#each stages as stage (stage.number)}
+        <li class="rounded-xl border border-line bg-canvas/40 px-4 py-3" data-stage={stage.number}>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-sm font-semibold text-ink">{stage.number}. {stage.name}</span>
+            <span class={`text-sm font-medium ${stageStatusClass(stage.status)}`}>{stageStatusLabel(stage.status)}</span>
+          </div>
+          {#if stage.error}
+            <p class="mt-2 text-xs leading-5 text-rose-700">{stage.error}</p>
+          {/if}
+        </li>
+      {/each}
+    </ol>
+  {/if}
 
   <div class="mt-6 rounded-xl border border-line bg-canvas/40 px-4 py-3 text-sm leading-6 text-ink" aria-label="Счётчики строк">
     <p class="font-semibold">Готовые строки</p>
@@ -93,6 +124,14 @@
       {stage.name}: {stage.error}
     </p>
   {/each}
+
+  <SeoTraceFeed
+    steps={trace}
+    nextCursor={traceCursor}
+    loading={traceLoading}
+    error={traceError}
+    onMore={onTraceMore}
+  />
 
   {#if terminal}
     <p class="mt-6 border-t border-line pt-6 text-sm leading-6 text-muted">

@@ -2,7 +2,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Page from '../../routes/+page.svelte';
-import type { FormConfig, PublicProvider, SeoAnalysisSnapshot, SeoHistoryPage, SeoMetric } from '$lib/types';
+import type {
+  FormConfig, PublicProvider, SeoAgent, SeoAnalysisSnapshot, SeoHistoryPage, SeoMetric, SeoTraceStep
+} from '$lib/types';
 
 const form: FormConfig = {
   limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 200, max_domain_length: 253 },
@@ -99,6 +101,39 @@ const savedRows = {
   }]
 };
 
+/** The six pending rows the backend answers with for a pre-agent analysis. */
+const legacyAgents: SeoAgent[] = ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report']
+  .map((agent) => ({ agent, status: 'pending' as const, error: null, updated_at: null }));
+
+/** A live agent run: the supervisor works while the specialists wait. */
+const agentRows: SeoAgent[] = [
+  { agent: 'supervisor', status: 'running', error: null, updated_at: '2026-09-28T00:05:00Z' },
+  { agent: 'site', status: 'done', error: null, updated_at: '2026-09-28T00:03:00Z' },
+  { agent: 'competitors', status: 'waiting', error: null, updated_at: '2026-09-28T00:04:00Z' },
+  { agent: 'queries', status: 'pending', error: null, updated_at: null },
+  { agent: 'checks', status: 'pending', error: null, updated_at: null },
+  { agent: 'report', status: 'pending', error: null, updated_at: null }
+];
+
+const agentBudget = {
+  pages: { used: 2, limit: 20 }, searches: { used: 4, limit: 43 },
+  model_answers: { used: 0, limit: 40 }, tool_calls: { used: 5, limit: 120 },
+  handoffs: { used: 2, limit: 15 }, seed_searches: 3, model_rows: 0, steps: 7,
+  agent_steps: { supervisor: 3, site: 4 }
+};
+
+const traceSteps: SeoTraceStep[] = [{
+  step_index: 1, agent: 'supervisor', kind: 'handoff', name: 'handoff_to',
+  arguments: { agent: 'site' }, result_summary: '{"status":"accepted"}', status: 'done',
+  error: null, created_at: '2026-09-28T00:01:00Z'
+}];
+
+const traceTail: SeoTraceStep[] = [{
+  step_index: 2, agent: 'site', kind: 'tool', name: 'fetch_site',
+  arguments: { max_pages: 2 }, result_summary: '{"pages":2}', status: 'done',
+  error: null, created_at: '2026-09-28T00:02:00Z'
+}];
+
 function stubFetch(handler: (input: string, init?: RequestInit) => unknown) {
   const fetch = vi.fn(async (input: string, init?: RequestInit) => {
     const value = handler(input, init);
@@ -116,6 +151,20 @@ function stubRunning() {
     if (input === '/api/seo/analyses' && init?.method === 'POST')
       return response({ id: 'seo-1', status: 'running', estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 } });
     if (input === '/api/seo/analyses/seo-1') return response(snapshot('running'));
+    throw new Error(`Unexpected request: ${input}`);
+  });
+}
+
+/** A running agent analysis whose trace has a second page behind a cursor. */
+function stubRunningWithAgents() {
+  return stubFetch((input, init) => {
+    if (input === '/api/seo/analyses' && !init) return response(emptyHistory);
+    if (input === '/api/seo/analyses' && init?.method === 'POST')
+      return response({ id: 'seo-1', status: 'running', estimate: { search_upper: 43, model_upper: 40, generated_limit: 40, connections: 1 } });
+    if (input === '/api/seo/analyses/seo-1')
+      return response(snapshot('running', { agents: agentRows, budget: agentBudget, budget_exhausted: false }));
+    if (input === '/api/seo/analyses/seo-1/trace') return response({ items: traceSteps, next_cursor: 'cur_1' });
+    if (input === '/api/seo/analyses/seo-1/trace?cursor=cur_1') return response({ items: traceTail, next_cursor: null });
     throw new Error(`Unexpected request: ${input}`);
   });
 }
@@ -220,6 +269,43 @@ describe('SEO run page', () => {
     expect(screen.getByText('Анализ seo-1')).toBeTruthy();
     expect(fetch.mock.calls.filter(([path]) => path === '/api/seo/analyses/seo-1')).toHaveLength(1);
     expect(fetch.mock.calls.some(([path, init]) => path === '/api/seo/analyses' && init?.method === 'POST')).toBe(false);
+    // A pre-agent analysis has no steps, so no trace resource is requested for it.
+    expect(fetch.mock.calls.filter(([path]) => String(path).endsWith('/trace'))).toHaveLength(0);
+  });
+
+  it('loads the agent trace and pages it through the cursor', async () => {
+    const fetch = stubRunningWithAgents();
+    render(Page, { props: { data } });
+    await fillForm();
+    await fireEvent.click(screen.getByRole('button', { name: /Запустить анализ/ }));
+
+    await waitFor(() => expect(document.querySelector('[data-agent-panel]')).toBeTruthy());
+    await waitFor(() => expect(document.querySelector('[data-trace-step="1"]')?.textContent).toContain('handoff_to'));
+    expect(document.querySelector('[data-agent-status="supervisor"]')?.textContent?.trim()).toBe('Выполняется');
+    expect(document.querySelector('[data-budget-used="tool_calls"]')?.textContent?.trim()).toBe('5 / 120');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));
+    await waitFor(() => expect(document.querySelector('[data-trace-step="2"]')?.textContent).toContain('fetch_site'));
+    expect(fetch.mock.calls.some(([path]) => path === '/api/seo/analyses/seo-1/trace?cursor=cur_1')).toBe(true);
+  });
+
+  it('keeps the run screen when the agent trace fails', async () => {
+    stubFetch((input, init) => {
+      if (input === '/api/seo/analyses' && !init) return response(emptyHistory);
+      if (input === '/api/seo/analyses' && init?.method === 'POST')
+        return response({ id: 'seo-1', status: 'running', estimate: { search_upper: 43, model_upper: 40, generated_limit: 40, connections: 1 } });
+      if (input === '/api/seo/analyses/seo-1')
+        return response(snapshot('running', { agents: agentRows, budget: agentBudget, budget_exhausted: false }));
+      if (input === '/api/seo/analyses/seo-1/trace') return response({ detail: 'Некорректная страница трассы' }, false);
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    render(Page, { props: { data } });
+    await fillForm();
+    await fireEvent.click(screen.getByRole('button', { name: /Запустить анализ/ }));
+
+    await waitFor(() => expect(screen.getByText('Некорректная страница трассы')).toBeTruthy());
+    expect(document.querySelector('[data-agent-panel]')).toBeTruthy();
+    expect(screen.getByText('Прогон SEO-анализа')).toBeTruthy();
   });
 
   it('ignores a terminal analysis found in the history', async () => {

@@ -458,7 +458,9 @@ export function publicSeoSettingsTest(value: unknown): SeoSettingsTest {
   return {
     ok: requiredBoolean(item.ok),
     model: optionalString(item.model),
-    error: optionalString(item.error)
+    error: optionalString(item.error),
+    // Omitted when the probe failed or the model cannot call tools at all.
+    tools: optionalBoolean(item.tools)
   };
 }
 

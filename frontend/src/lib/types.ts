@@ -141,7 +141,8 @@ export type SeoSettings = {
   api_key_source: SeoSource;
 };
 
-export type SeoSettingsTest = { ok: boolean; model: string | null; error: string | null };
+/** The availability probe: whether the model answered and whether it can call tools. */
+export type SeoSettingsTest = { ok: boolean; model: string | null; error: string | null; tools: boolean | null };
 
 export type SeoAnalysisStatus = 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled';
 export type SeoStageStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';

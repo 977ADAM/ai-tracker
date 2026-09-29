@@ -228,4 +228,31 @@ describe('SeoReport', () => {
     expect(screen.getByText('Повторяющихся кандидатов нет: не хватило успешных ключевых выдач.')).toBeTruthy();
     expect(screen.getByText('Ответы моделей не сохранены.')).toBeTruthy();
   });
+
+  it('shows the conclusions as labelled model text beside the untouched numbers', () => {
+    render(SeoReport, { props: {
+      snapshot: snapshot({
+        conclusions: {
+          summary: 'Сайт виден в половине поисковых выдач.',
+          recommendations: 'Добавить страницы под коммерческие запросы.',
+          model: 'seo-model'
+        }
+      })
+    } });
+    const block = document.querySelector('[data-report-conclusions]');
+    expect(block).toBeTruthy();
+    expect(block?.textContent).toContain('Выводы и рекомендации');
+    expect(block?.textContent).toContain('Текст модели: seo-model');
+    expect(block?.textContent).toContain('не заменяет и не изменяет числа отчёта');
+    expect(content('[data-conclusions-summary]')).toBe('Сайт виден в половине поисковых выдач.');
+    expect(content('[data-conclusions-recommendations]')).toBe('Добавить страницы под коммерческие запросы.');
+    // The model text never changes a metric.
+    expect(content('[data-metric="site-overall"]')).toBe('50 %');
+  });
+
+  it('omits the conclusions block when the report agent saved nothing', () => {
+    render(SeoReport, { props: { snapshot: snapshot({ conclusions: null }) } });
+    expect(document.querySelector('[data-report-conclusions]')).toBeNull();
+    expect(content('[data-metric="site-overall"]')).toBe('50 %');
+  });
 });

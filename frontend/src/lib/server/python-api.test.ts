@@ -466,9 +466,13 @@ describe('SEO BFF', () => {
   });
 
   it('projects the connection probe result without leaking an upstream secret', () => {
-    expect(publicSeoSettingsTest({ ok: true, model: 'seo-model' })).toEqual({ ok: true, model: 'seo-model', error: null });
+    expect(publicSeoSettingsTest({ ok: true, model: 'seo-model', tools: true }))
+      .toEqual({ ok: true, model: 'seo-model', error: null, tools: true });
+    // `tools` is omitted when the probe failed or the model cannot call tools.
+    expect(publicSeoSettingsTest({ ok: true, model: 'seo-model' }))
+      .toEqual({ ok: true, model: 'seo-model', error: null, tools: null });
     expect(publicSeoSettingsTest({ ok: false, error: 'Модель недоступна', api_key: 'secret' }))
-      .toEqual({ ok: false, model: null, error: 'Модель недоступна' });
+      .toEqual({ ok: false, model: null, error: 'Модель недоступна', tools: null });
     expect(() => publicSeoSettingsTest({ ok: 'yes' })).toThrow();
   });
 
@@ -539,7 +543,7 @@ describe('SEO BFF', () => {
 
   it('proxies the bodyless connection probe and reports a safe failure', async () => {
     const fetchSpy = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, model: 'seo-model' }),
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, model: 'seo-model', tools: true }),
         { headers: { 'content-type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, error: 'Модель недоступна' }),
         { headers: { 'content-type': 'application/json' } }));
@@ -547,11 +551,11 @@ describe('SEO BFF', () => {
     const request = new Request('http://127.0.0.1:5173/api/seo/settings/test', { method: 'POST' });
     const ok = await proxyJson(request, '/api/seo/settings/test', 'POST');
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ ok: true, model: 'seo-model', error: null });
+    expect(await ok.json()).toEqual({ ok: true, model: 'seo-model', error: null, tools: true });
     expect(fetchSpy).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/seo/settings/test',
       expect.objectContaining({ method: 'POST', body: undefined }));
     const failed = await proxyJson(request, '/api/seo/settings/test', 'POST');
-    expect(await failed.json()).toEqual({ ok: false, model: null, error: 'Модель недоступна' });
+    expect(await failed.json()).toEqual({ ok: false, model: null, error: 'Модель недоступна', tools: null });
   });
 
   it('turns SEO settings failures into a fixed safe error without the upstream text', async () => {

@@ -4,11 +4,12 @@
   import SeoHistory from '$lib/components/SeoHistory.svelte';
   import SeoReport from '$lib/components/SeoReport.svelte';
   import SeoRunProgress from '$lib/components/SeoRunProgress.svelte';
+  import { hasAgentState } from '$lib/seo-agents';
   import { validateSeoForm } from '$lib/seo-form';
   import type { SeoFormInput } from '$lib/seo-form';
   import type {
     FormConfig, PublicProvider, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoHistoryItem, SeoHistoryPage,
-    SeoModelRow, SeoRowsKind, SeoRowsPage, SeoSearchRow
+    SeoModelRow, SeoRowsKind, SeoRowsPage, SeoSearchRow, SeoTracePage, SeoTraceStep
   } from '$lib/types';
 
   type Data = {
@@ -38,6 +39,17 @@
   let reportCursors = $state<{ model: string | null; search: string | null }>({ model: null, search: null });
   let rowsLoading = $state<SeoRowsKind | null>(null);
   let rowsError = $state('');
+
+  // The agent trace is its own paginated resource. An analysis from before the
+  // agent runtime has no steps at all, so nothing is requested for it; once a
+  // run does have agents, the first page is kept fresh while the run lasts and
+  // the user's own paging is never thrown away by a poll.
+  let trace = $state<SeoTraceStep[]>([]);
+  let traceCursor = $state<string | null>(null);
+  let traceLoading = $state(false);
+  let traceError = $state('');
+  let traceId = $state<string | null>(null);
+  let tracePaged = $state(false);
 
   const terminal = $derived(!!snapshot && snapshot.status !== 'running');
   const connectionNames = $derived(Object.fromEntries(data.providers.map((provider) => [provider.id, provider.name])));
@@ -101,12 +113,57 @@
     ]);
   }
 
+  function resetTrace() {
+    trace = [];
+    traceCursor = null;
+    traceError = '';
+    traceId = null;
+    tracePaged = false;
+    traceLoading = false;
+  }
+
+  /** One trace page: the first page replaces the feed, later pages append to it. */
+  async function loadTrace(id: string, cursor: string | null, append: boolean) {
+    traceLoading = true;
+    try {
+      const query = cursor === null ? '' : `?cursor=${encodeURIComponent(cursor)}`;
+      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}/trace${query}`);
+      const value = await payload(response);
+      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить трассу агентов'));
+      if (destroyed || activeId !== id) return;
+      const page = value as SeoTracePage;
+      trace = append ? [...trace, ...page.items] : page.items;
+      traceCursor = page.next_cursor;
+      traceId = id;
+      traceError = '';
+      if (append) tracePaged = true;
+    } catch (cause) {
+      if (destroyed || activeId !== id) return;
+      traceError = cause instanceof Error ? cause.message : 'Не удалось загрузить трассу агентов';
+    } finally {
+      if (!destroyed && activeId === id) traceLoading = false;
+    }
+  }
+
+  /** A trace failure must never break the run screen, so it is only best-effort. */
+  async function syncTrace(id: string, current: SeoAnalysisSnapshot) {
+    if (!hasAgentState(current.agents)) return;
+    if (tracePaged && traceId === id) return;
+    await loadTrace(id, null, false);
+  }
+
+  function loadMoreTrace() {
+    if (!snapshot) return;
+    void loadTrace(snapshot.id, traceCursor, true);
+  }
+
   async function loadAnalysis(id: string) {
     activeId = id;
     runError = '';
     reportRows = EMPTY_ROWS;
     reportCursors = EMPTY_CURSORS;
     rowsError = '';
+    resetTrace();
     try {
       const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}`);
       const value = await payload(response);
@@ -116,6 +173,7 @@
       snapshot = current;
       if (current.status === 'running') { pendingId = id; schedulePoll(id); }
       else { pendingId = null; stopPolling(); }
+      await syncTrace(id, current);
       await loadReport(id, current.status);
     } catch (cause) {
       if (destroyed) return;
@@ -133,6 +191,7 @@
       const current = value as SeoAnalysisSnapshot;
       snapshot = current;
       runError = '';
+      await syncTrace(id, current);
       if (current.status === 'running') schedulePoll(id);
       else {
         pendingId = null;
@@ -218,6 +277,7 @@
       snapshot = current;
       pendingId = null;
       stopPolling();
+      await syncTrace(current.id, current);
       await loadReport(current.id, current.status);
       await loadHistory();
     } catch (cause) {
@@ -253,6 +313,7 @@
         reportRows = EMPTY_ROWS;
         reportCursors = EMPTY_CURSORS;
         rowsError = '';
+        resetTrace();
       }
     } catch (cause) {
       if (destroyed) return;
@@ -299,7 +360,16 @@
 
     {#if snapshot}
         <div class="scroll-mt-8" id="seo-run">
-            <SeoRunProgress {snapshot} {cancelling} onCancel={() => void cancel()} />
+            <SeoRunProgress
+                {snapshot}
+                {cancelling}
+                onCancel={() => void cancel()}
+                {trace}
+                traceCursor={traceCursor}
+                traceLoading={traceLoading}
+                traceError={traceError}
+                onTraceMore={loadMoreTrace}
+            />
         </div>
     {:else}
         <section class="mt-8 rounded-3xl border border-dashed border-line bg-white px-6 py-14 text-center shadow-sm">

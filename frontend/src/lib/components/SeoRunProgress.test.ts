@@ -2,11 +2,31 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import SeoRunProgress from './SeoRunProgress.svelte';
-import type { SeoAnalysisSnapshot, SeoStage } from '$lib/types';
+import type { SeoAgent, SeoAnalysisSnapshot, SeoStage, SeoTraceStep } from '$lib/types';
 
 function stage(stageNumber: number, status: SeoStage['status'], error: string | null = null): SeoStage {
   return { stage: stageNumber, status, error, counters: {}, updated_at: '2026-09-28T00:00:00Z' };
 }
+
+/** The six pending rows the backend answers with for a pre-agent analysis. */
+const legacyAgents: SeoAgent[] = ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report']
+  .map((agent) => ({ agent, status: 'pending' as const, error: null, updated_at: null }));
+
+const agentRows: SeoAgent[] = [
+  { agent: 'supervisor', status: 'running', error: null, updated_at: '2026-09-28T00:05:00Z' },
+  { agent: 'site', status: 'done', error: null, updated_at: '2026-09-28T00:03:00Z' },
+  { agent: 'competitors', status: 'waiting', error: null, updated_at: '2026-09-28T00:04:00Z' },
+  { agent: 'queries', status: 'pending', error: null, updated_at: null },
+  { agent: 'checks', status: 'pending', error: null, updated_at: null },
+  { agent: 'report', status: 'pending', error: null, updated_at: null }
+];
+
+const budget = {
+  pages: { used: 2, limit: 20 }, searches: { used: 4, limit: 43 },
+  model_answers: { used: 0, limit: 40 }, tool_calls: { used: 5, limit: 120 },
+  handoffs: { used: 2, limit: 15 }, seed_searches: 3, model_rows: 0, steps: 7,
+  agent_steps: { supervisor: 3, site: 4 }
+};
 
 function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
   return {
@@ -101,5 +121,55 @@ describe('SeoRunProgress', () => {
       expect(screen.getByText(note)).toBeTruthy();
       view.unmount();
     }
+  });
+
+  it('keeps the six-stage list for a pre-agent analysis with six pending agents', () => {
+    render(SeoRunProgress, { props: {
+      snapshot: snapshot({ agents: legacyAgents, budget: budget, budget_exhausted: false }),
+      onCancel: vi.fn()
+    } });
+    expect(document.querySelector('[data-agent-panel]')).toBeNull();
+    const stages = document.querySelectorAll('[data-stage]');
+    expect(stages).toHaveLength(6);
+    expect(stages[0].textContent).toContain('Анализ сайта');
+    expect(stages[0].textContent).toContain('Готово');
+    expect(stages[2].textContent).toContain('Выполняется');
+    expect(document.querySelector('[data-stage="2"]')?.textContent).toContain('Ключевые выдачи недоступны');
+  });
+
+  it('shows the agent panel and the budget once any agent has real state', () => {
+    render(SeoRunProgress, { props: {
+      snapshot: snapshot({ agents: agentRows, budget: budget, budget_exhausted: false }),
+      onCancel: vi.fn()
+    } });
+    expect(document.querySelector('[data-agent-panel]')).toBeTruthy();
+    expect(document.querySelectorAll('[data-stage]')).toHaveLength(0);
+    expect(document.querySelector('[data-agent-status="supervisor"]')?.textContent?.trim()).toBe('Выполняется');
+    expect(document.querySelector('[data-budget-used="tool_calls"]')?.textContent?.trim()).toBe('5 / 120');
+  });
+
+  it('renders the trace feed and loads the next trace page through the cursor', async () => {
+    const onTraceMore = vi.fn();
+    const trace: SeoTraceStep[] = [{
+      step_index: 1, agent: 'supervisor', kind: 'handoff', name: 'handoff_to', arguments: { agent: 'site' },
+      result_summary: '{"status":"accepted"}', status: 'done', error: null, created_at: '2026-09-28T00:01:00Z'
+    }];
+    render(SeoRunProgress, { props: {
+      snapshot: snapshot({ agents: legacyAgents }),
+      trace, traceCursor: 'cur_1', onTraceMore, onCancel: vi.fn()
+    } });
+    expect(document.querySelector('[data-trace-step="1"]')?.textContent).toContain('handoff_to');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));
+    expect(onTraceMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the empty trace state and a safe trace error', () => {
+    render(SeoRunProgress, { props: {
+      snapshot: snapshot({ agents: legacyAgents }),
+      traceError: 'Не удалось загрузить трассу', onCancel: vi.fn()
+    } });
+    expect(screen.getByText('Шаги трассы пока не записаны.')).toBeTruthy();
+    expect(screen.getByText('Не удалось загрузить трассу')).toBeTruthy();
   });
 });

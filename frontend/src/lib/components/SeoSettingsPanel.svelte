@@ -76,17 +76,19 @@
     try {
       const response = await fetch('/api/seo/settings/test', { method: 'POST' });
       if (!response.ok) throw new Error('request failed');
-      const value = (await response.json()) as { ok?: unknown; model?: unknown; error?: unknown };
+      const value = (await response.json()) as { ok?: unknown; model?: unknown; error?: unknown; tools?: unknown };
+      // The SEO run needs tool calling, so the probe result always names it.
+      const tools = value.tools === true
+        ? 'Инструменты: поддерживаются.'
+        : 'Инструменты: не поддерживаются.';
       if (value.ok === true) {
-        feedback = {
-          kind: 'notice',
-          text: typeof value.model === 'string' && value.model ? `Подключение работает: ${value.model}` : 'Подключение работает'
-        };
+        const model = typeof value.model === 'string' && value.model ? `: ${value.model}` : '';
+        feedback = { kind: 'notice', text: `Подключение работает${model}. ${tools}` };
       } else {
-        feedback = {
-          kind: 'error',
-          text: typeof value.error === 'string' && value.error ? value.error : 'Не удалось подключиться к служебной LLM'
-        };
+        const reason = typeof value.error === 'string' && value.error
+          ? value.error
+          : 'Не удалось подключиться к служебной LLM';
+        feedback = { kind: 'error', text: `${reason} ${tools}` };
       }
     } catch {
       feedback = { kind: 'error', text: 'Не удалось проверить подключение. Попробуйте ещё раз.' };
