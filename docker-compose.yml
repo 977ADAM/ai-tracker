@@ -20,7 +20,7 @@ services:
     image: ai-tracker-frontend:local
     environment:
       AI_TRACKER_API_URL: http://backend:8000
-      AI_TRACKER_API_HOSTS: ${AI_TRACKER_API_HOSTS:-backend}
+      AI_TRACKER_API_HOSTS: backend
       ORIGIN: http://localhost:3000
       HOST: 0.0.0.0
       PORT: 3000
