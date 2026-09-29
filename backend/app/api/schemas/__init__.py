@@ -15,7 +15,7 @@ from .checks import (
     ProviderCheckSummary,
 )
 from .common import ErrorResponse
-from .form import FormLimits, FormResponse, ScopeOption
+from .form import FormLimits, FormResponse
 from .providers import DeletedResponse, ProviderResponse, ProviderWriteRequest
 from .search import (
     SearchCreatedResponse,
@@ -40,7 +40,6 @@ __all__ = [
     "ProviderCheckSummary",
     "ProviderResponse",
     "ProviderWriteRequest",
-    "ScopeOption",
     "SearchCreatedResponse",
     "SearchRegionResponse",
     "SearchRequest",

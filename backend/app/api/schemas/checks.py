@@ -10,7 +10,7 @@ CHECK_EXAMPLE = {
     "brand": "Ромашка",
     "domain": "example.ru",
     "prompts_text": "Где заказать цветы?",
-    "provider_ids": ["gigachat"],
+    "provider_ids": ["deepseek"],
 }
 
 

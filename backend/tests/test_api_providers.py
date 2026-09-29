@@ -17,8 +17,8 @@ def test_creating_a_connection_never_returns_the_key(client):
 
 def test_listing_starts_with_the_unconfigured_presets(client):
     providers = client.get("/api/providers").json()
-    assert [item["id"] for item in providers] == ["gigachat", "deepseek"]
-    assert providers[0]["editable_fields"] == ["scope", "api_key"]
+    assert [item["id"] for item in providers] == ["openai", "deepseek"]
+    assert providers[0]["editable_fields"] == ["api_key"]
     assert providers[0]["can_reset"] is True
     assert providers[1]["editable_fields"] == ["api_key"]
     assert providers[1]["can_reset"] is True
@@ -51,23 +51,24 @@ def test_deletes_a_connection(client):
     response = client.delete(f"/api/providers/{created['id']}")
     assert response.status_code == 200
     assert response.json() == {"deleted": True}
-    assert [item["id"] for item in client.get("/api/providers").json()] == ["gigachat", "deepseek"]
+    assert [item["id"] for item in client.get("/api/providers").json()] == ["openai", "deepseek"]
 
 
 def test_configuring_a_preset_keeps_its_metadata(client):
-    response = client.put("/api/providers/gigachat", json={"api_key": "abc", "scope": "GIGACHAT_API_CORP"})
+    response = client.put("/api/providers/openai", json={"api_key": "abc"})
     assert response.status_code == 200
     body = response.json()
-    assert body["model"] == "GigaChat"
-    assert body["scope"] == "GIGACHAT_API_CORP"
+    assert body["model"] == "gpt-4o-mini"
+    assert body["endpoint"] == ENDPOINT
+    assert "scope" not in body
     assert "abc" not in response.text
 
 
 def test_resetting_a_preset_keeps_it_listed(client):
-    client.put("/api/providers/gigachat", json={"api_key": "abc"})
-    assert client.delete("/api/providers/gigachat").status_code == 200
+    client.put("/api/providers/openai", json={"api_key": "abc"})
+    assert client.delete("/api/providers/openai").status_code == 200
     providers = client.get("/api/providers").json()
-    assert [item["id"] for item in providers] == ["gigachat", "deepseek"]
+    assert [item["id"] for item in providers] == ["openai", "deepseek"]
     assert all(item["configured"] is False for item in providers)
 
 

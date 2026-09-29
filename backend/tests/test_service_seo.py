@@ -58,7 +58,7 @@ def payload(**overrides: object) -> dict[str, object]:
         "sphere": "Цветочный магазин",
         "seeds": list(SEEDS),
         "services": ["Букеты", "Доставка"],
-        "connection_ids": ["gigachat"],
+        "connection_ids": ["openai"],
     }
     data.update(overrides)
     return data
@@ -87,7 +87,7 @@ def make_harness(
     gateway: ScriptedSeoGateway | None = None,
     yandex_enabled: bool = True,
     yandex_configured: bool = True,
-    configured_connections: tuple[tuple[str, str], ...] = (("gigachat", "test-key"),),
+    configured_connections: tuple[tuple[str, str], ...] = (("openai", "test-key"),),
     seo_repository: Any = None,
     llm_settings: Any = None,
     runtime: Any = None,
@@ -177,16 +177,16 @@ async def test_the_estimate_counts_every_selected_connection(tmp_path, repositor
         tmp_path,
         repository,
         settings,
-        configured_connections=(("gigachat", "key-1"), ("deepseek", "key-2")),
+        configured_connections=(("openai", "key-1"), ("deepseek", "key-2")),
     )
 
-    created = await harness.service.start(payload(connection_ids=["gigachat", "deepseek"]))
+    created = await harness.service.start(payload(connection_ids=["openai", "deepseek"]))
 
     assert created["estimate"] == {
         "search_upper": 43, "model_upper": 80, "generated_limit": 40, "connections": 2,
     }
     await asyncio.sleep(0)
-    assert harness.runtime.runs[0][1].connection_ids == ("gigachat", "deepseek")
+    assert harness.runtime.runs[0][1].connection_ids == ("openai", "deepseek")
     await harness.service.close()
 
 

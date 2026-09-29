@@ -22,12 +22,12 @@ ENDPOINT = "https://api.example.com/v1/chat/completions"
 
 # The app ships no presets, so the tests inject their own to cover the
 # built-in-template code paths.
-GIGACHAT_PRESET = ConnectionPreset(
-    id="gigachat",
-    name="GigaChat",
-    kind="gigachat",
-    model="GigaChat",
-    scope="GIGACHAT_API_PERS",
+OPENAI_PRESET = ConnectionPreset(
+    id="openai",
+    name="OpenAI",
+    kind="openai",
+    endpoint=ENDPOINT,
+    model="gpt-4o-mini",
 )
 DEEPSEEK_PRESET = ConnectionPreset(
     id="deepseek",
@@ -37,7 +37,7 @@ DEEPSEEK_PRESET = ConnectionPreset(
     model="deepseek-flash",
     thinking_disabled=True,
 )
-TEST_PRESETS = (GIGACHAT_PRESET, DEEPSEEK_PRESET)
+TEST_PRESETS = (OPENAI_PRESET, DEEPSEEK_PRESET)
 
 
 class MemorySecrets:

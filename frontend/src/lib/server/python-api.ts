@@ -372,7 +372,7 @@ export function publicSettingsProvider(value: unknown): SettingsProvider {
 
 export function publicProvider(value: unknown): Record<string, unknown> {
   const item = record(value);
-  const allowed = ['id', 'name', 'kind', 'endpoint', 'model', 'scope', 'configured', 'editable_fields', 'can_reset', 'can_delete', 'status_label', 'delete_label', 'delete_prompt', 'delete_success'] as const;
+  const allowed = ['id', 'name', 'kind', 'endpoint', 'model', 'configured', 'editable_fields', 'can_reset', 'can_delete', 'status_label', 'delete_label', 'delete_prompt', 'delete_success'] as const;
   return Object.fromEntries(allowed.filter((key) => key in item).map((key) => [key, item[key]]));
 }
 
@@ -845,13 +845,10 @@ export function publicSeoTracePage(value: unknown): SeoTracePage {
 
 export function publicForm(value: unknown): Record<string, unknown> {  const item = record(value);
   const limits = record(item.limits);
-  if (!Array.isArray(item.scope_options) || !Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids)) throw new Error('Invalid form');
+  if (!Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids)) throw new Error('Invalid form');
   return { limits: { max_prompts: limits.max_prompts, max_providers: limits.max_providers, max_prompt_length: limits.max_prompt_length,
     max_brand_length: limits.max_brand_length, max_domain_length: limits.max_domain_length },
-    new_provider_fields: item.new_provider_fields, default_provider_ids: item.default_provider_ids, scope_options: item.scope_options.map((option) => {
-      const entry = record(option);
-      return { value: entry.value, label: entry.label };
-    }) };
+    new_provider_fields: item.new_provider_fields, default_provider_ids: item.default_provider_ids };
 }
 
 /**

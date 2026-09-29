@@ -12,8 +12,7 @@ RESULT_ERROR = "error"
 ResultStatus = Literal["mentioned", "absent", "error"]
 
 KIND_OPENAI = "openai"
-KIND_GIGACHAT = "gigachat"
-SUPPORTED_KINDS = (KIND_OPENAI, KIND_GIGACHAT)
+SUPPORTED_KINDS = (KIND_OPENAI,)
 
 
 @dataclass(frozen=True)
@@ -25,7 +24,6 @@ class Connection:
     kind: str
     model: str
     endpoint: str | None = None
-    scope: str | None = None
     thinking_disabled: bool = False
     preset: bool = False
 
@@ -37,7 +35,6 @@ class Connection:
             "kind": self.kind,
             "endpoint": self.endpoint,
             "model": self.model,
-            **({"scope": self.scope} if self.scope is not None else {}),
         }
 
 

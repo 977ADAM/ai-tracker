@@ -18,7 +18,7 @@ from tests.test_service_search import FakeGateway
 
 def make_runs(tmp_path, connection_repository, settings, gateway=None):
     connections = ConnectionService(connection_repository, settings)
-    connections.save({"api_key": "test-key"}, "gigachat")
+    connections.save({"api_key": "test-key"}, "openai")
     factory = ProviderFactorySpy()
     repository = RunRepository(tmp_path)
     repository.initialize()
@@ -36,7 +36,7 @@ async def finished(runs, run_id):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("providers,regions", [(["gigachat"], []), ([], [1]), (["gigachat"], [1])])
+@pytest.mark.parametrize("providers,regions", [(["openai"], []), ([], [1]), (["openai"], [1])])
 async def test_run_modes_are_durable(tmp_path, repository, settings, providers, regions):
     runs, factory, search = make_runs(tmp_path, repository, settings, FakeGateway(polls_before_answer=0))
     created = await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
@@ -57,7 +57,7 @@ async def test_run_modes_are_durable(tmp_path, repository, settings, providers, 
 async def test_unknown_provider_and_region_rejected_before_paid_calls(tmp_path, repository, settings):
     gateway = FakeGateway()
     runs, factory, search = make_runs(tmp_path, repository, settings, gateway)
-    for provider_ids, regions in [(["missing"], [1]), (["gigachat"], [999999])]:
+    for provider_ids, regions in [(["missing"], [1]), (["openai"], [999999])]:
         with pytest.raises(ValidationError):
             await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
                               "provider_ids": provider_ids, "regions": regions})
@@ -72,7 +72,7 @@ async def test_unknown_provider_and_region_rejected_before_paid_calls(tmp_path, 
 async def test_missing_search_credentials_marks_branch_error_and_models_continue(tmp_path, repository, settings):
     runs, _factory, search = make_runs(tmp_path, repository, settings)
     created = await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-                                "provider_ids": ["gigachat"], "regions": [1]})
+                                "provider_ids": ["openai"], "regions": [1]})
     saved = await finished(runs, created["id"])
     assert saved["models"][0]["status"] == "mentioned"
     assert saved["search"][0]["status"] == "error"
@@ -91,7 +91,7 @@ async def test_storage_failure_prevents_external_calls(tmp_path, repository, set
     runs.repository.create = fail
     with pytest.raises(StorageError):
         await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-                          "provider_ids": ["gigachat"], "regions": [1]})
+                          "provider_ids": ["openai"], "regions": [1]})
     assert factory.keys == []
     assert search.gateway.submitted == []
     await runs.close()
@@ -120,7 +120,7 @@ async def test_storage_failure_stops_paid_work_and_reports_unavailable(
         runs.repository.save_search = fail
     payload = {"brand": "Ромашка", "domain": "example.ru",
                "prompts_text": "\n".join(f"вопрос {index}" for index in range(20)),
-               "provider_ids": ["gigachat"], "regions": [1, 213, 2, 54, 65]}
+               "provider_ids": ["openai"], "regions": [1, 213, 2, 54, 65]}
     created = await runs.start(payload)
     for _ in range(200):
         if runs.stopping.is_set():
@@ -149,7 +149,7 @@ async def test_branch_error_write_failure_degrades_the_run_service(tmp_path, rep
 
     runs.repository.fail_pending_branch = fail
     payload = {"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-               "provider_ids": ["gigachat"], "regions": [1]}
+               "provider_ids": ["openai"], "regions": [1]}
     with pytest.raises(StorageError):
         await runs.start(payload)
     assert runs.stopping.is_set()

@@ -111,8 +111,8 @@ describe('SeoReport', () => {
   });
 
   it('renders the name, host and combined AI shares of every connection split by brand', () => {
-    render(SeoReport, { props: { snapshot: snapshot(), connectionNames: { 'model-1': 'GigaChat' } } });
-    const table = screen.getByRole('table', { name: 'Упоминания: GigaChat' });
+    render(SeoReport, { props: { snapshot: snapshot(), connectionNames: { 'model-1': 'DeepSeek' } } });
+    const table = screen.getByRole('table', { name: 'Упоминания: DeepSeek' });
     expect(table).toBeTruthy();
     expect(content('[data-metric="ai-model-1-all-name"]')).toBe('50 %');
     expect(content('[data-metric="ai-model-1-all-host"]')).toBe('25 %');

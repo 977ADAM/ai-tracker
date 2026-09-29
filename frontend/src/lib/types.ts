@@ -22,7 +22,6 @@ export type FormConfig = {
   limits: { max_prompts: number; max_providers: number; max_prompt_length: number; max_brand_length: number; max_domain_length: number };
   new_provider_fields: string[];
   default_provider_ids: string[];
-  scope_options: { value: string; label: string }[];
 };
 
 export type PublicProvider = {
@@ -31,7 +30,6 @@ export type PublicProvider = {
   kind: string;
   endpoint: string | null;
   model: string;
-  scope?: string;
   configured: boolean;
   editable_fields: string[];
   can_reset: boolean;

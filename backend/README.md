@@ -14,7 +14,7 @@ app/
 │                    runs.sqlite3 и хранилище ключей
 ├── service/         сценарии: подключения, проверка моделей, поиск, сохранённые прогоны,
 │                    агентный рантайм SEO (LangGraph), серверные инструменты и настройки LLM
-├── integrations/    исходящие адаптеры: GigaChat, OpenAI-совместимый API, Яндекс, служебная LLM
+├── integrations/    исходящие адаптеры: OpenAI-совместимый API, Яндекс, служебная LLM
 │                    и SSRF-безопасный обход публичных страниц
 └── api/             входящий HTTP: роутеры, зависимости, отображение ошибок
     └── deps/        композиция: container (сборка сервисов), dependencies (доступ из
@@ -63,9 +63,7 @@ uv run pytest
 | --- | --- |
 | `AI_TRACKER_CONFIG_DIR` | Каталог с `providers.json`, `search-settings.json`, `seo-settings.json`, `runs.sqlite3` и чекпойнтом агентов `seo-agents.sqlite3`. По умолчанию `~/.config/ai-tracker` |
 | `AI_TRACKER_ALLOWED_HOSTS` | Имена, по которым принимается API, через запятую. По умолчанию `localhost,127.0.0.1`; контейнеру нужно добавить своё имя (`backend`) |
-| `GIGACHAT_AUTH_KEY` | Запасной ключ для подключения с ID `gigachat` |
 | `DEEPSEEK_API_KEY` | Запасной ключ для подключения с ID `deepseek` |
-| `GIGACHAT_SCOPE` | Область доступа GigaChat по умолчанию |
 | `YANDEX_SEARCH_API_KEY` | API-ключ Yandex Search API; запасное имя — `API_KEY` |
 | `YANDEX_SEARCH_FOLDER_ID` | Каталог Yandex Cloud; запасное имя — `FOLDER_ID` |
 | `SEO_LLM_ENDPOINT` | Адрес OpenAI-совместимого Chat Completions служебной LLM |
@@ -98,8 +96,8 @@ loopback: это отдельный валидатор `validate_seo_endpoint`, 
 
 `core/config.py:BUILTIN_PRESETS` пуст: приложение не поставляет предустановленных подключений,
 и все подключения создаёт пользователь на экране настроек. Чтобы вернуть шаблоны, достаточно
-заполнить этот кортеж — код пресетов (область доступа GigaChat, сброс ключа, только
-редактируемый ключ) уже покрыт тестами.
+заполнить этот кортеж — код пресетов (сброс ключа и единственное редактируемое поле `api_key`)
+уже покрыт тестами.
 
 ## Группы провайдеров и их модели
 

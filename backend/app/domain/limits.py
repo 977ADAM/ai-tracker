@@ -1,4 +1,4 @@
-"""Input limits and GigaChat scope options exposed to the browser."""
+"""Input limits exposed to the browser."""
 
 from __future__ import annotations
 
@@ -15,11 +15,3 @@ MAX_API_KEY_LENGTH = 10_000
 MAX_NAME_LENGTH = 100
 MAX_MODEL_LENGTH = 100
 MAX_ENDPOINT_LENGTH = 2048
-
-SCOPE_OPTIONS = [
-    {"value": "GIGACHAT_API_PERS", "label": "Персональный"},
-    {"value": "GIGACHAT_API_B2B", "label": "Бизнес"},
-    {"value": "GIGACHAT_API_CORP", "label": "Корпоративный"},
-]
-
-SCOPE_VALUES = frozenset(option["value"] for option in SCOPE_OPTIONS)

@@ -9,7 +9,7 @@ import time
 from tests.fakes import FakeSearchGateway, ProviderFactorySpy
 
 BODY = {"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы\nподарки",
-        "provider_ids": ["gigachat"], "regions": [1]}
+        "provider_ids": ["openai"], "regions": [1]}
 
 
 def wait_done(client, run_id):
@@ -31,7 +31,7 @@ def test_combined_run_history_snapshot_and_csv(make_client):
         run_id = created.json()["id"]
         snapshot = wait_done(client, run_id)
         assert len(snapshot["summary_rows"]) == 4
-        assert [row["source"] for row in snapshot["summary_rows"]] == ["Яндекс", "Яндекс", "GigaChat", "GigaChat"]
+        assert [row["source"] for row in snapshot["summary_rows"]] == ["Яндекс", "Яндекс", "OpenAI", "OpenAI"]
         assert set(snapshot) == {"id", "created_at", "finished_at", "status", "brand", "domain",
                                  "prompts", "provider_ids", "regions", "models", "search", "summary_rows"}
         history = client.get("/api/runs").json()

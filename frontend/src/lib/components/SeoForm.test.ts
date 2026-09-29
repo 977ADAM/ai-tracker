@@ -6,7 +6,7 @@ import type { FormConfig, PublicProvider } from '$lib/types';
 
 const form: FormConfig = {
   limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 200, max_domain_length: 253 },
-  new_provider_fields: [], default_provider_ids: ['model-1'], scope_options: []
+  new_provider_fields: [], default_provider_ids: ['model-1']
 };
 
 const ready: PublicProvider = {

@@ -24,7 +24,7 @@ def service(repository, settings) -> ConnectionService:
 
 def test_lists_presets_as_unconfigured(service):
     public = service.list_public()
-    assert [item["id"] for item in public] == ["gigachat", "deepseek"]
+    assert [item["id"] for item in public] == ["openai", "deepseek"]
     assert all(item["configured"] is False for item in public)
     assert all(item["status_label"] == "Нужен API-ключ" for item in public)
 
@@ -36,19 +36,19 @@ def test_creates_a_custom_connection_without_echoing_the_key(service):
     assert created["can_delete"] is True
     assert "api_key" not in created
     assert "secret-value" not in str(created)
-    assert [item["id"] for item in service.list_public()] == ["gigachat", "deepseek", created["id"]]
+    assert [item["id"] for item in service.list_public()] == ["openai", "deepseek", created["id"]]
 
 
-def test_configures_a_preset_key_and_scope(service):
-    configured = service.save({"api_key": "abc", "scope": "GIGACHAT_API_CORP"}, "gigachat")
-    assert configured["scope"] == "GIGACHAT_API_CORP"
+def test_configures_a_preset_key(service):
+    configured = service.save({"api_key": "abc"}, "openai")
     assert configured["configured"] is True
     assert configured["can_reset"] is True
+    assert "scope" not in configured
 
 
 def test_preset_rejects_fields_it_does_not_own(service):
     with pytest.raises(ValidationError):
-        service.save({"name": "Другое", "api_key": "abc"}, "gigachat")
+        service.save({"name": "Другое", "api_key": "abc"}, "openai")
 
 
 def test_rejects_a_non_object_payload(service):
@@ -64,7 +64,7 @@ def test_rejects_an_unknown_connection_on_update(service):
 def test_deletes_a_connection(service):
     created = service.save(CUSTOM_PAYLOAD)
     service.delete(created["id"])
-    assert [item["id"] for item in service.list_public()] == ["gigachat", "deepseek"]
+    assert [item["id"] for item in service.list_public()] == ["openai", "deepseek"]
 
 
 def test_deleting_an_unknown_connection_is_rejected(service):
@@ -90,6 +90,6 @@ def test_a_write_failure_becomes_a_configuration_error(service, repository, monk
 
 def test_a_key_lookup_failure_marks_the_connection_unconfigured(service, secrets):
     secrets.fail = True
-    assert service.is_configured("gigachat") is False
+    assert service.is_configured("openai") is False
     with pytest.raises(ConfigurationError):
-        service.api_key("gigachat")
+        service.api_key("openai")

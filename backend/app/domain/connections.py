@@ -12,11 +12,8 @@ from app.domain.limits import (
     MAX_API_KEY_LENGTH,
     MAX_MODEL_LENGTH,
     MAX_NAME_LENGTH,
-    SCOPE_VALUES,
 )
-from app.domain.models import KIND_GIGACHAT, KIND_OPENAI, Connection
-
-PRESET_SCOPE_FIELD = "scope"
+from app.domain.models import KIND_OPENAI, Connection
 
 CUSTOM_FIELDS = ("name", "endpoint", "model", "api_key")
 NEW_PROVIDER_FIELDS = ["name", "endpoint", "model", "api_key"]
@@ -29,15 +26,12 @@ def connection_from_preset(preset: ConnectionPreset) -> Connection:
         kind=preset.kind,
         model=preset.model,
         endpoint=preset.endpoint,
-        scope=preset.scope,
         thinking_disabled=preset.thinking_disabled,
         preset=True,
     )
 
 
 def editable_fields(connection: Connection) -> list[str]:
-    if connection.kind == KIND_GIGACHAT:
-        return [PRESET_SCOPE_FIELD, "api_key"]
     if connection.preset:
         return ["api_key"]
     return list(CUSTOM_FIELDS)
@@ -83,8 +77,6 @@ def public_view(connection: Connection, configured: bool) -> dict[str, Any]:
         "can_delete": can_delete(connection),
         "status_label": "Готово к проверке" if configured else "Нужен API-ключ",
     }
-    if connection.scope is not None:
-        view["scope"] = connection.scope
     view.update(_delete_copy(connection))
     return view
 
@@ -142,23 +134,16 @@ def updated_custom_connection(previous: Connection, payload: dict[str, Any]) -> 
     )
 
 
-def updated_preset(previous: Connection, payload: dict[str, Any], default_scope: str) -> Connection:
-    """Apply the only two fields a built-in template may change: its key and its scope."""
-    allowed = {PRESET_SCOPE_FIELD, "api_key"} if previous.kind == KIND_GIGACHAT else {"api_key"}
-    if any(field not in allowed for field in payload):
-        raise ValidationError("У встроенного подключения можно изменить только ключ и область доступа")
-    scope = previous.scope or default_scope
-    if PRESET_SCOPE_FIELD in payload:
-        scope = payload[PRESET_SCOPE_FIELD]
-        if scope not in SCOPE_VALUES:
-            raise ValidationError("Некорректная область доступа GigaChat")
+def updated_preset(previous: Connection, payload: dict[str, Any]) -> Connection:
+    """Apply the only field a built-in template may change: its key."""
+    if any(field != "api_key" for field in payload):
+        raise ValidationError("У встроенного подключения можно изменить только ключ")
     return Connection(
         id=previous.id,
         name=previous.name,
         kind=previous.kind,
         model=previous.model,
         endpoint=previous.endpoint,
-        scope=scope,
         thinking_disabled=previous.thinking_disabled,
         preset=True,
     )

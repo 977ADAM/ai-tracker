@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
-from app.domain.seo_settings import SeoSettings, validate_seo_endpoint
 
 from app.core.errors import ValidationError
+from app.domain.seo_settings import SeoSettings, validate_seo_endpoint
 
 CHAT_PATH = "/v1/chat/completions"
 

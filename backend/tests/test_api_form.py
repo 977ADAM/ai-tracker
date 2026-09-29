@@ -1,4 +1,4 @@
-"""The form endpoint: limits, options, and the default selection."""
+"""The form endpoint: limits and the default selection."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ def test_form_publishes_the_limits_and_options(client):
         "max_domain_length": 253,
     }
     assert form["new_provider_fields"] == ["name", "endpoint", "model", "api_key"]
-    assert form["scope_options"][0] == {"value": "GIGACHAT_API_PERS", "label": "Персональный"}
     assert form["default_provider_ids"] == []
 
 

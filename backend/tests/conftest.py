@@ -22,7 +22,6 @@ from tests.fakes import TEST_PRESETS, MemorySecrets
 TEST_BASE_URL = "http://127.0.0.1"
 
 ENV_KEY_VARIABLES = (
-    "GIGACHAT_AUTH_KEY",
     "DEEPSEEK_API_KEY",
     "YANDEX_SEARCH_API_KEY",
     "YANDEX_SEARCH_FOLDER_ID",

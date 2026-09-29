@@ -55,7 +55,7 @@ from tests.fakes import (
 SEEDS = ("букет цветов", "доставка цветов", "розы")
 SPHERE = "Цветочный магазин"
 SERVICES = ["Букеты", "Доставка"]
-CONNECTION_ID = "gigachat"
+CONNECTION_ID = "openai"
 ANALYSIS_QUERIES = [
     {"query": f"купить букет {index}", "category": "commercial", "service": "Букеты"}
     for index in range(5)

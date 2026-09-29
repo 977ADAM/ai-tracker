@@ -61,7 +61,7 @@ def test_unknown_or_duplicate_selection_is_rejected(make_client):
 def test_a_missing_key_becomes_a_provider_error_row(make_client):
     client = make_client(provider_factory=ProviderFactorySpy())
 
-    response = client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    response = client.post("/api/check", json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert response.status_code == 200
     body = response.json()
@@ -71,13 +71,13 @@ def test_a_missing_key_becomes_a_provider_error_row(make_client):
 
 
 def test_one_failure_does_not_erase_the_other_connection(make_client):
-    client = make_client(provider_factory=ProviderFactorySpy(explode_ids=("gigachat",)))
-    client.put("/api/providers/gigachat", json={"api_key": "one"})
+    client = make_client(provider_factory=ProviderFactorySpy(explode_ids=("openai",)))
+    client.put("/api/providers/openai", json={"api_key": "one"})
     connection_id = configure(client)
 
     response = client.post(
         "/api/check",
-        json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat", connection_id]},
+        json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai", connection_id]},
     )
 
     assert response.status_code == 200
@@ -109,7 +109,7 @@ def test_check_reports_an_unreadable_configuration(client, config_dir):
 
     response = client.post(
         "/api/check",
-        json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]},
+        json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]},
     )
 
     assert response.status_code == 400

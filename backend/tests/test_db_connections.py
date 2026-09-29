@@ -28,13 +28,13 @@ def metadata_text(config_dir: Path) -> str:
 
 def test_presets_come_first_and_a_custom_connection_survives_a_restart(config_dir, secrets, settings):
     repository = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
-    assert [item.id for item in repository.all()] == ["gigachat", "deepseek"]
+    assert [item.id for item in repository.all()] == ["openai", "deepseek"]
 
     saved = custom()
     repository.save(saved, SECRET)
 
     second = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
-    assert [item.id for item in second.all()] == ["gigachat", "deepseek", saved.id]
+    assert [item.id for item in second.all()] == ["openai", "deepseek", saved.id]
     assert second.find(saved.id).model == "example-model"
     assert second.key(saved.id) == SECRET
 
@@ -96,7 +96,7 @@ def test_an_unreachable_credential_store_cannot_read_a_key(config_dir, settings)
     secrets.fail = True
     repository = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
     with pytest.raises(ConfigurationError) as error:
-        repository.key("gigachat")
+        repository.key("openai")
     assert str(error.value) == "Системное хранилище ключей недоступно"
 
 
@@ -119,22 +119,25 @@ def test_a_failed_metadata_write_restores_the_previous_key(config_dir, secrets, 
     assert repository.find(saved.id).model == "example-model"
 
 
-def test_a_preset_scope_override_is_persisted(config_dir, secrets, settings):
+def test_saving_a_preset_key_changes_nothing_on_disk(config_dir, secrets, settings):
+    """A template keeps its metadata forever: only its key is stored."""
     repository = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
-    preset = repository.find("gigachat")
-    repository.save(replace(preset, scope="GIGACHAT_API_CORP"), "abc")
+    preset = repository.find("openai")
+    repository.save(preset, "abc")
 
-    assert repository.find("gigachat").scope == "GIGACHAT_API_CORP"
-    assert json.loads(metadata_text(config_dir))["presets"] == {"gigachat": {"scope": "GIGACHAT_API_CORP"}}
+    assert repository.key("openai") == "abc"
+    assert repository.find("openai") == preset
+    assert json.loads(metadata_text(config_dir))["presets"] == {}
 
 
-def test_a_legacy_top_level_preset_entry_is_absorbed(config_dir, secrets, settings):
+def test_a_legacy_top_level_preset_entry_is_ignored(config_dir, secrets, settings):
+    """The old per-preset layout is gone: the template comes from the code."""
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "providers.json").write_text(
-        json.dumps({"gigachat": {"scope": "GIGACHAT_API_B2B"}}), encoding="utf-8"
+        json.dumps({"openai": {"scope": "legacy-value"}}), encoding="utf-8"
     )
     repository = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
-    assert repository.find("gigachat").scope == "GIGACHAT_API_B2B"
+    assert repository.find("openai").endpoint == ENDPOINT
 
 
 def test_corrupted_metadata_is_reported_as_a_storage_error(config_dir, secrets, settings):
@@ -152,7 +155,7 @@ def test_malformed_custom_entries_are_skipped(config_dir, secrets, settings):
         encoding="utf-8",
     )
     repository = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
-    assert [item.id for item in repository.all()] == ["gigachat", "deepseek"]
+    assert [item.id for item in repository.all()] == ["openai", "deepseek"]
 
 
 def test_a_saved_key_wins_over_the_environment(config_dir, secrets, settings, monkeypatch):
@@ -168,7 +171,7 @@ def test_the_environment_fallback_applies_without_a_saved_key(config_dir, secret
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
     repository = ConnectionRepository(config_dir, secrets, presets=settings.presets, env_api_key=settings.env_api_key)
     assert repository.key("deepseek") == "env-key"
-    assert repository.key("gigachat") is None
+    assert repository.key("openai") is None
 
 
 def test_a_broken_store_still_uses_the_environment_fallback(config_dir, settings, monkeypatch):

@@ -177,7 +177,7 @@ describe('search settings BFF', () => {
       if (String(url).endsWith('/api/providers/settings')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
       if (String(url).endsWith('/api/form')) return Promise.resolve(new Response(JSON.stringify({
         limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 100, max_domain_length: 253 },
-        new_provider_fields: [], default_provider_ids: [], scope_options: []
+        new_provider_fields: [], default_provider_ids: []
       }), { headers: { 'content-type': 'application/json' } }));
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'p1', name: 'Demo', kind: 'openai', endpoint: 'https://api.example.com/chat/completions', model: 'm', configured: true }
@@ -468,7 +468,7 @@ describe('search BFF', () => {
       if (String(url).endsWith('/api/providers/settings')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
       if (String(url).endsWith('/api/form')) return Promise.resolve(new Response(JSON.stringify({
         limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 100, max_domain_length: 253 },
-        new_provider_fields: [], default_provider_ids: [], scope_options: []
+        new_provider_fields: [], default_provider_ids: []
       }), { headers: { 'content-type': 'application/json' } }));
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'p1', name: 'Demo', kind: 'openai', endpoint: 'https://api.example.com/chat/completions', model: 'm', configured: true }
@@ -906,7 +906,7 @@ describe('SEO BFF', () => {
       if (String(url).endsWith('/api/providers/settings')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
       if (String(url).endsWith('/api/form')) return Promise.resolve(new Response(JSON.stringify({
         limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 100, max_domain_length: 253 },
-        new_provider_fields: [], default_provider_ids: [], scope_options: []
+        new_provider_fields: [], default_provider_ids: []
       }), { headers: { 'content-type': 'application/json' } }));
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'p1', name: 'Demo', kind: 'openai', endpoint: 'https://api.example.com/chat/completions', model: 'm', configured: true }

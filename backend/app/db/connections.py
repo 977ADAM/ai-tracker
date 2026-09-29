@@ -51,9 +51,7 @@ class ConnectionRepository:
 
     def all(self) -> list[Connection]:
         data = self._read()
-        overrides = data[PRESET_OVERRIDES_KEY]
-        connections = [self._apply_override(self._preset_connection(preset), overrides.get(preset.id))
-                       for preset in self.presets]
+        connections = [self._preset_connection(preset) for preset in self.presets]
         if data.get("version") == CURRENT_VERSION:
             for group in self.groups():
                 connections.extend(
@@ -234,19 +232,10 @@ class ConnectionRepository:
             return {"version": CURRENT_VERSION, GROUPS_KEY: groups, PRESET_OVERRIDES_KEY: overrides}
         custom = raw.get(CUSTOM_KEY)
         overrides = raw.get(PRESET_OVERRIDES_KEY)
-        normalized: dict[str, Any] = {
+        return {
             CUSTOM_KEY: list(custom) if isinstance(custom, list) else [],
             PRESET_OVERRIDES_KEY: dict(overrides) if isinstance(overrides, dict) else {},
         }
-        for preset in self.presets:
-            legacy = raw.get(preset.id)
-            if (
-                preset.id not in normalized[PRESET_OVERRIDES_KEY]
-                and isinstance(legacy, dict)
-                and isinstance(legacy.get("scope"), str)
-            ):
-                normalized[PRESET_OVERRIDES_KEY][preset.id] = {"scope": legacy["scope"]}
-        return normalized
 
     @staticmethod
     def _group_from_metadata(item: object) -> ProviderGroup:
@@ -287,15 +276,6 @@ class ConnectionRepository:
         return connection_from_preset(preset)
 
     @staticmethod
-    def _apply_override(connection: Connection, override: object) -> Connection:
-        if not isinstance(override, dict):
-            return connection
-        scope = override.get("scope")
-        if not isinstance(scope, str):
-            return connection
-        return replace(connection, scope=scope)
-
-    @staticmethod
     def _custom_connection(item: object) -> Connection | None:
         if not isinstance(item, dict):
             return None
@@ -315,13 +295,9 @@ class ConnectionRepository:
 
     def _with_connection(self, data: dict[str, Any], connection: Connection) -> dict[str, Any]:
         if connection.preset:
-            if connection.scope is None:
-                return data
-            overrides = dict(data[PRESET_OVERRIDES_KEY])
-            if overrides.get(connection.id) == {"scope": connection.scope}:
-                return data
-            overrides[connection.id] = {"scope": connection.scope}
-            return {**data, PRESET_OVERRIDES_KEY: overrides}
+            # A template keeps its metadata forever and its key lives in the
+            # credential store, so a saved key changes nothing on disk.
+            return data
         others = [item for item in data[CUSTOM_KEY] if item.get("id") != connection.id]
         return {**data, CUSTOM_KEY: [*others, connection.metadata()]}
 

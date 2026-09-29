@@ -17,7 +17,7 @@ from app.domain.connections import (
     updated_preset,
 )
 from app.domain.models import Connection
-from tests.fakes import DEEPSEEK_PRESET, ENDPOINT, GIGACHAT_PRESET
+from tests.fakes import DEEPSEEK_PRESET, ENDPOINT, OPENAI_PRESET
 
 SECRET_MARKER = "secret-value"
 
@@ -61,22 +61,21 @@ def test_unconfigured_view_asks_for_a_key():
     assert view["status_label"] == "Нужен API-ключ"
 
 
-def test_gigachat_preset_can_change_its_scope_and_key():
-    connection = connection_from_preset(GIGACHAT_PRESET)
-    assert editable_fields(connection) == ["scope", "api_key"]
+def test_a_builtin_template_changes_only_its_key():
+    connection = connection_from_preset(OPENAI_PRESET)
+    assert editable_fields(connection) == ["api_key"]
     assert can_reset(connection) is True
     assert can_delete(connection) is False
     view = public_view(connection, configured=False)
-    assert view["scope"] == "GIGACHAT_API_PERS"
+    assert "scope" not in view
     assert view["delete_label"] == "Сбросить ключ"
     assert "Ключ из переменной среды" in view["delete_prompt"]
     assert view["delete_success"] == "Сохранённый ключ сброшен"
 
 
-def test_openai_preset_only_edits_its_key_and_hides_scope():
-    connection = connection_from_preset(DEEPSEEK_PRESET)
-    assert editable_fields(connection) == ["api_key"]
-    assert "scope" not in public_view(connection, configured=False)
+def test_every_template_shows_the_same_editable_field():
+    for preset in (OPENAI_PRESET, DEEPSEEK_PRESET):
+        assert editable_fields(connection_from_preset(preset)) == ["api_key"]
 
 
 @pytest.mark.parametrize(
@@ -105,29 +104,16 @@ def test_update_merges_the_previous_connection():
 
 
 def test_preset_update_rejects_fields_it_does_not_own():
-    connection = connection_from_preset(GIGACHAT_PRESET)
+    connection = connection_from_preset(OPENAI_PRESET)
     with pytest.raises(ValidationError):
-        updated_preset(connection, {"name": "Другое"}, "GIGACHAT_API_PERS")
+        updated_preset(connection, {"name": "Другое"})
 
 
-def test_preset_update_keeps_model_and_changes_scope():
-    connection = connection_from_preset(GIGACHAT_PRESET)
-    updated = updated_preset(connection, {"scope": "GIGACHAT_API_CORP"}, "GIGACHAT_API_PERS")
-    assert updated.model == "GigaChat"
-    assert updated.scope == "GIGACHAT_API_CORP"
+def test_preset_update_keeps_its_metadata_and_changes_nothing_but_the_key():
+    connection = connection_from_preset(OPENAI_PRESET)
+    updated = updated_preset(connection, {"api_key": "k"})
+    assert updated == connection
     assert updated.preset is True
-
-
-def test_preset_update_rejects_an_unknown_scope():
-    connection = connection_from_preset(GIGACHAT_PRESET)
-    with pytest.raises(ValidationError):
-        updated_preset(connection, {"scope": "OTHER"}, "GIGACHAT_API_PERS")
-
-
-def test_preset_update_falls_back_to_the_default_scope():
-    connection = Connection(id="gigachat", name="GigaChat", kind="gigachat", model="GigaChat", preset=True)
-    updated = updated_preset(connection, {"api_key": "k"}, "GIGACHAT_API_B2B")
-    assert updated.scope == "GIGACHAT_API_B2B"
 
 
 @pytest.mark.parametrize(

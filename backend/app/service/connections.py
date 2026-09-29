@@ -72,5 +72,5 @@ class ConnectionService:
             return new_custom_connection(payload)
         previous = self.require(connection_id)
         if previous.preset:
-            return updated_preset(previous, payload, self.settings.default_scope)
+            return updated_preset(previous, payload)
         return updated_custom_connection(previous, payload)

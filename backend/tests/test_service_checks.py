@@ -26,19 +26,19 @@ def check_service(connections: ConnectionService, factory=None) -> tuple[CheckSe
 
 
 def test_runs_the_same_prompts_against_every_selected_connection(connections):
-    configure(connections, "gigachat", "deepseek")
+    configure(connections, "openai", "deepseek")
     service, spy = check_service(connections)
 
     report = service.run(
         {"brand": " Ромашка ", "domain": " example.ru ", "prompts": ["успех", "другой"],
-         "provider_ids": ["gigachat", "deepseek"]}
+         "provider_ids": ["openai", "deepseek"]}
     )
 
     assert report["brand"] == "Ромашка"
     assert report["domain"] == "example.ru"
-    assert [check["provider_id"] for check in report["checks"]] == ["gigachat", "deepseek"]
+    assert [check["provider_id"] for check in report["checks"]] == ["openai", "deepseek"]
     assert spy.prompts == [
-        ("gigachat", "успех"), ("gigachat", "другой"),
+        ("openai", "успех"), ("openai", "другой"),
         ("deepseek", "успех"), ("deepseek", "другой"),
     ]
     assert report["summary"] == {
@@ -48,10 +48,10 @@ def test_runs_the_same_prompts_against_every_selected_connection(connections):
 
 
 def test_a_failing_connection_does_not_erase_another_one(connections):
-    configure(connections, "gigachat", "deepseek")
-    service, _spy = check_service(connections, ProviderFactorySpy(explode_ids=("gigachat",)))
+    configure(connections, "openai", "deepseek")
+    service, _spy = check_service(connections, ProviderFactorySpy(explode_ids=("openai",)))
 
-    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat", "deepseek"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai", "deepseek"]})
 
     assert report["checks"][0]["summary"] == {"successful": 0, "failed": 1, "mentioned": 0}
     assert report["checks"][1]["summary"] == {"successful": 1, "failed": 0, "mentioned": 1}
@@ -59,10 +59,10 @@ def test_a_failing_connection_does_not_erase_another_one(connections):
 
 
 def test_a_failed_prompt_is_not_a_negative_mention(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
     service, _ = check_service(connections)
 
-    report = service.run({"brand": "Ромашка", "prompts": ["успех", "ошибка"], "provider_ids": ["gigachat"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["успех", "ошибка"], "provider_ids": ["openai"]})
 
     assert report["summary"]["successful"] == 1
     assert report["summary"]["failed"] == 1
@@ -77,10 +77,10 @@ def test_a_failed_prompt_is_not_a_negative_mention(connections):
 
 
 def test_an_absent_mention_is_reported_separately(connections):
-    configure(connections, "gigachat")
-    service, _ = check_service(connections, ProviderFactorySpy(failing_ids=("gigachat",)))
+    configure(connections, "openai")
+    service, _ = check_service(connections, ProviderFactorySpy(failing_ids=("openai",)))
 
-    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert report["checks"][0]["results"][0] == {
         "prompt": "вопрос",
@@ -94,7 +94,7 @@ def test_an_absent_mention_is_reported_separately(connections):
 def test_a_missing_key_fails_every_prompt_without_building_a_provider(connections):
     service, spy = check_service(connections)
 
-    report = service.run({"brand": "Ромашка", "prompts": ["раз", "два"], "provider_ids": ["gigachat"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["раз", "два"], "provider_ids": ["openai"]})
 
     assert spy.keys == []
     assert report["checks"][0]["summary"] == {"successful": 0, "failed": 2, "mentioned": 0}
@@ -106,22 +106,22 @@ def test_a_key_lookup_failure_becomes_a_provider_error(connections, secrets):
     service, _ = check_service(connections)
     secrets.fail = True
 
-    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert report["checks"][0]["results"][0]["error"] == "Системное хранилище ключей недоступно"
 
 
 def test_clients_are_closed_after_a_run(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
     service, spy = check_service(connections)
 
-    service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]})
 
-    assert spy.providers["gigachat"].closed is True
+    assert spy.providers["openai"].closed is True
 
 
 def test_a_failing_close_does_not_break_the_report(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
 
     class RudeClose(ProviderFactorySpy):
         def __call__(self, connection, key):
@@ -134,7 +134,7 @@ def test_a_failing_close_does_not_break_the_report(connections):
             return provider
 
     service, _ = check_service(connections, RudeClose())
-    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert report["checks"][0]["summary"]["successful"] == 1
 
@@ -147,16 +147,16 @@ def test_an_unknown_connection_is_rejected_before_any_call(connections):
 
 
 def test_duplicate_or_oversized_selection_is_rejected(connections):
-    configure(connections, "gigachat", "deepseek")
+    configure(connections, "openai", "deepseek")
     service, spy = check_service(connections)
-    for ids in (["gigachat", "gigachat"], ["gigachat"] * 6, [], None):
+    for ids in (["openai", "openai"], ["openai"] * 6, [], None):
         with pytest.raises(ValidationError):
             service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ids})
     assert spy.keys == []
 
 
 def test_a_non_string_answer_is_reported_as_an_error(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
 
     class Broken(ProviderFactorySpy):
         def __call__(self, connection, key):
@@ -165,17 +165,17 @@ def test_a_non_string_answer_is_reported_as_an_error(connections):
             return provider
 
     service, _ = check_service(connections, Broken())
-    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert report["checks"][0]["results"][0]["status"] == "error"
     assert report["checks"][0]["results"][0]["error"] == "Не удалось получить ответ API модели"
 
 
 def test_rows_carry_the_provider_name(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
     service, _ = check_service(connections)
 
-    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    report = service.run({"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert report["rows"] == [{
         "prompt": "вопрос",
@@ -183,12 +183,12 @@ def test_rows_carry_the_provider_name(connections):
         "mentioned": True,
         "error": None,
         "status": "mentioned",
-        "provider_name": "GigaChat",
+        "provider_name": "OpenAI",
     }]
 
 
 def test_callback_publishes_each_answer_before_the_next_call(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
     service, spy = check_service(connections)
     seen = []
 
@@ -196,19 +196,19 @@ def test_callback_publishes_each_answer_before_the_next_call(connections):
         seen.append((provider_id, index, result.status, list(spy.prompts)))
 
     report = service.run(
-        {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["gigachat"]},
+        {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["openai"]},
         on_result=publish,
     )
 
     assert seen == [
-        ("gigachat", 0, "mentioned", [("gigachat", "успех")]),
-        ("gigachat", 1, "mentioned", [("gigachat", "успех"), ("gigachat", "другой")]),
+        ("openai", 0, "mentioned", [("openai", "успех")]),
+        ("openai", 1, "mentioned", [("openai", "успех"), ("openai", "другой")]),
     ]
     assert report["summary"]["successful"] == 2
 
 
 def test_storage_failure_stops_model_calls(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
     service, spy = check_service(connections)
 
     def fail(_provider_id, _index, _result):
@@ -216,15 +216,15 @@ def test_storage_failure_stops_model_calls(connections):
 
     with pytest.raises(StorageError, match="disk failure"):
         service.run(
-            {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["gigachat"]},
+            {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["openai"]},
             on_result=fail,
         )
-    assert spy.prompts == [("gigachat", "успех")]
-    assert spy.providers["gigachat"].closed is True
+    assert spy.prompts == [("openai", "успех")]
+    assert spy.providers["openai"].closed is True
 
 
 def test_external_stop_is_checked_before_each_model_call(connections):
-    configure(connections, "gigachat")
+    configure(connections, "openai")
     service, spy = check_service(connections)
     stopped = False
 
@@ -234,7 +234,7 @@ def test_external_stop_is_checked_before_each_model_call(connections):
 
     with pytest.raises(StorageError):
         service.run(
-            {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["gigachat"]},
+            {"brand": "Ромашка", "prompts": ["успех", "другой"], "provider_ids": ["openai"]},
             on_result=publish, should_stop=lambda: stopped,
         )
-    assert spy.prompts == [("gigachat", "успех")]
+    assert spy.prompts == [("openai", "успех")]

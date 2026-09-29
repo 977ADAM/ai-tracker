@@ -18,7 +18,7 @@ BROWSER_PROVIDER_FIELDS = {
     "editable_fields", "can_reset", "can_delete",
     "status_label", "delete_label", "delete_prompt", "delete_success",
 }
-BROWSER_FORM_FIELDS = {"limits", "new_provider_fields", "scope_options", "default_provider_ids"}
+BROWSER_FORM_FIELDS = {"limits", "new_provider_fields", "default_provider_ids"}
 BROWSER_CHECK_FIELDS = {"brand", "domain", "checks", "summary", "rows"}
 
 
@@ -31,18 +31,18 @@ def test_provider_payload_carries_exactly_the_documented_fields(client):
         assert set(payload) <= set(ProviderResponse.model_fields)
 
 
-def test_optional_fields_are_serialized_as_explicit_nulls(client):
-    """A typed response keeps every declared key, so absent values arrive as null.
+def test_a_provider_payload_carries_every_declared_key(client):
+    """A typed response keeps every declared key, and never one that was dropped.
 
-    The BFF reads them through `??`, so `null` and a missing key behave the same
-    for the browser, while the API stays fully typed.
+    The BFF reads the payload field by field, so a key that left the schema must
+    leave the payload with it, and a declared one must always arrive.
     """
     providers = client.get("/api/providers").json()
 
     assert set(providers[0]) == set(ProviderResponse.model_fields)
     assert set(providers[1]) == set(ProviderResponse.model_fields)
-    assert providers[0]["endpoint"] is None
-    assert providers[1]["scope"] is None
+    assert "scope" not in providers[0]
+    assert providers[0]["endpoint"] == ENDPOINT
 
 
 def test_form_payload_carries_exactly_the_documented_fields(client):
@@ -51,7 +51,6 @@ def test_form_payload_carries_exactly_the_documented_fields(client):
     assert BROWSER_FORM_FIELDS <= set(form)
     assert set(form) == set(FormResponse.model_fields)
     assert set(form["limits"]) == set(FormResponse.model_fields["limits"].annotation.model_fields)
-    assert set(form["scope_options"][0]) == {"value", "label"}
 
 
 def test_check_payload_carries_exactly_the_documented_fields(make_client):
@@ -75,7 +74,7 @@ def test_check_payload_carries_exactly_the_documented_fields(make_client):
 def test_a_wrong_typed_body_is_rejected_as_400_not_422(client):
     response = client.post(
         "/api/check",
-        json={"brand": "Ромашка", "prompts": "не список", "provider_ids": ["gigachat"]},
+        json={"brand": "Ромашка", "prompts": "не список", "provider_ids": ["openai"]},
     )
 
     assert response.status_code == 400
@@ -83,7 +82,7 @@ def test_a_wrong_typed_body_is_rejected_as_400_not_422(client):
 
 
 def test_a_missing_required_field_is_rejected_as_400(client):
-    response = client.post("/api/check", json={"prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    response = client.post("/api/check", json={"prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Некорректное поле «brand»"}
@@ -101,7 +100,7 @@ def test_a_rejected_schema_never_reaches_the_service(make_client):
     client = make_client(provider_factory=spy)
     client.post("/api/providers", json=CUSTOM_BODY)
 
-    client.post("/api/check", json={"prompts": ["вопрос"], "provider_ids": ["gigachat"]})
+    client.post("/api/check", json={"prompts": ["вопрос"], "provider_ids": ["openai"]})
 
     assert spy.keys == []
 

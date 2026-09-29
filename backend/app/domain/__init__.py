@@ -3,7 +3,7 @@
 Nothing in this package performs I/O or imports a web framework.
 """
 
-from .limits import LIMITS, SCOPE_OPTIONS
+from .limits import LIMITS
 from .models import (
     RESULT_ABSENT,
     RESULT_ERROR,
@@ -21,7 +21,6 @@ __all__ = [
     "RESULT_ABSENT",
     "RESULT_ERROR",
     "RESULT_MENTIONED",
-    "SCOPE_OPTIONS",
     "CheckInput",
     "CheckReport",
     "CheckSummary",

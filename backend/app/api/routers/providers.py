@@ -43,7 +43,7 @@ def add_provider(
     connections: ConnectionServiceDep,
     payload: ProviderWriteRequest,
 ) -> dict[str, Any]:
-    """Create a connection, or set the key and scope of a built-in one."""
+    """Create a connection, or set the key of a built-in one."""
     return connections.save(payload.model_dump(exclude_unset=True))
 
 

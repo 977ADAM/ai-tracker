@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "ai-tracker"
 DEFAULT_SERVICE_NAME = "ai-tracker"
 DEFAULT_ALLOWED_HOSTS = ("localhost", "127.0.0.1")
-DEFAULT_SCOPE = "GIGACHAT_API_PERS"
 
 # The host guard of the API. The default keeps the app reachable only from the
 # machine it runs on; a deployment lists every name it is reached by, comma
@@ -36,7 +35,6 @@ SEO_LLM_API_KEY_VARIABLES = ("SEO_LLM_API_KEY",)
 # Environment variable that may hold a key per saved connection ID. It is only a
 # fallback: a key saved in the settings screen always wins.
 DEFAULT_ENV_API_KEYS = {
-    "gigachat": "GIGACHAT_AUTH_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
 }
 
@@ -82,7 +80,6 @@ class ConnectionPreset:
     kind: str
     model: str
     endpoint: str | None = None
-    scope: str | None = None
     thinking_disabled: bool = False
 
 
@@ -93,7 +90,6 @@ class Settings:
     config_dir: Path = DEFAULT_CONFIG_DIR
     service_name: str = DEFAULT_SERVICE_NAME
     allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS
-    default_scope: str = DEFAULT_SCOPE
     env_api_keys: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_ENV_API_KEYS))
     presets: tuple[ConnectionPreset, ...] = BUILTIN_PRESETS
     yandex_search_api_key: str | None = None
@@ -108,7 +104,6 @@ class Settings:
         return cls(
             config_dir=Path(source.get("AI_TRACKER_CONFIG_DIR") or DEFAULT_CONFIG_DIR),
             allowed_hosts=parse_allowed_hosts(source.get(ALLOWED_HOSTS_VARIABLE)),
-            default_scope=source.get("GIGACHAT_SCOPE") or DEFAULT_SCOPE,
             yandex_search_api_key=first_value(source, YANDEX_SEARCH_API_KEY_VARIABLES),
             yandex_search_folder_id=first_value(source, YANDEX_SEARCH_FOLDER_ID_VARIABLES),
             seo_llm_endpoint=first_value(source, SEO_LLM_ENDPOINT_VARIABLES),

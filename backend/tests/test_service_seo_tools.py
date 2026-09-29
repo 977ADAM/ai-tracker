@@ -68,7 +68,7 @@ def payload(**overrides: object) -> dict[str, object]:
         "sphere": "Цветочный магазин",
         "seeds": list(SEEDS),
         "services": ["Букеты", "Доставка"],
-        "connection_ids": ["gigachat"],
+        "connection_ids": ["openai"],
     }
     data.update(overrides)
     return data
@@ -95,8 +95,8 @@ def make_env(
     settings,
     *,
     input_overrides: dict[str, object] | None = None,
-    connection_ids: tuple[str, ...] = ("gigachat",),
-    configured: tuple[tuple[str, str], ...] = (("gigachat", "key-1"),),
+    connection_ids: tuple[str, ...] = ("openai",),
+    configured: tuple[tuple[str, str], ...] = (("openai", "key-1"),),
     fetcher: FakeSiteFetcher | None = None,
     gateway: ScriptedSeoGateway | None = None,
     provider_factory: Any = None,
@@ -789,22 +789,22 @@ async def test_ask_models_answers_every_pair_and_isolates_a_broken_connection(tm
     factory = SeoProviderFactorySpy(failing_ids=("deepseek",))
     env = make_env(
         tmp_path, repository, settings, provider_factory=factory,
-        connection_ids=("gigachat", "deepseek"),
-        configured=(("gigachat", "key-1"), ("deepseek", "key-2")),
+        connection_ids=("openai", "deepseek"),
+        configured=(("openai", "key-1"), ("deepseek", "key-2")),
     )
     await ready(env, count=5)
 
     answer = result(await env.toolbox.call("ask_models", {}))
 
     assert answer["connections"] == {
-        "gigachat": {"found": 5, "absent": 0, "error": 0, "skipped": 0, "budget": 0},
+        "openai": {"found": 5, "absent": 0, "error": 0, "skipped": 0, "budget": 0},
         "deepseek": {"found": 0, "absent": 0, "error": 5, "skipped": 0, "budget": 0},
     }
     assert answer["found"] == 5 and answer["error"] == 5
     assert {item["connection_id"] for item in answer["errors"]} == {"deepseek"}
     rows = env.repository.rows_page(env.analysis_id, "model")["items"]
     assert len(rows) == 10
-    assert all(row["answer"] == SEO_MENTION_ANSWER for row in rows if row["connection_id"] == "gigachat")
+    assert all(row["answer"] == SEO_MENTION_ANSWER for row in rows if row["connection_id"] == "openai")
     assert all(row["error"] for row in rows if row["connection_id"] == "deepseek")
 
 
@@ -838,7 +838,7 @@ async def test_ask_models_requires_queries_and_respects_the_answer_budget(tmp_pa
     answer = result(await env.toolbox.call("ask_models", {}))
 
     assert answer["found"] == 2 and answer["budget_exhausted"] is True
-    assert answer["connections"]["gigachat"]["budget"] == 3
+    assert answer["connections"]["openai"]["budget"] == 3
     assert env.toolbox.exhausted is True
 
 
@@ -920,8 +920,8 @@ async def test_ask_models_never_runs_more_than_the_connection_cap_at_once(tmp_pa
     spy = _ConcurrencySpy()
     env = make_env(
         tmp_path, repository, settings, provider_factory=spy,
-        connection_ids=("gigachat", "deepseek"),
-        configured=(("gigachat", "key-1"), ("deepseek", "key-2")),
+        connection_ids=("openai", "deepseek"),
+        configured=(("openai", "key-1"), ("deepseek", "key-2")),
         max_model_concurrency=1,
     )
     await ready(env, count=5)

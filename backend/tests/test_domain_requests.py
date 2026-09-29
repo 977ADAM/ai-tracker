@@ -43,7 +43,7 @@ def test_rejects_invalid_request(payload):
 
 
 def test_provider_ids_accept_a_distinct_selection():
-    assert normalize_provider_ids({"provider_ids": ["gigachat", "deepseek"]}) == ["gigachat", "deepseek"]
+    assert normalize_provider_ids({"provider_ids": ["openai", "deepseek"]}) == ["openai", "deepseek"]
 
 
 @pytest.mark.parametrize(
@@ -51,9 +51,9 @@ def test_provider_ids_accept_a_distinct_selection():
     [
         {},
         {"provider_ids": []},
-        {"provider_ids": "gigachat"},
-        {"provider_ids": ["gigachat", "gigachat"]},
-        {"provider_ids": ["gigachat"] * 6},
+        {"provider_ids": "openai"},
+        {"provider_ids": ["openai", "openai"]},
+        {"provider_ids": ["openai"] * 6},
         {"provider_ids": [1]},
         {"provider_ids": [""]},
         {"provider_ids": [None]},
