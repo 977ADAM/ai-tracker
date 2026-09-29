@@ -51,8 +51,16 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     },
     estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 },
     company_name: 'Ромашка', services: ['Доставка цветов', 'Букеты'], pages: [],
-    stages: [], candidates: [], queries: [],
+    stages: [], agents: [],
+    budget: {
+      pages: { used: 1, limit: 20 }, searches: { used: 5, limit: 43 },
+      model_answers: { used: 4, limit: 40 }, tool_calls: { used: 9, limit: 120 },
+      handoffs: { used: 5, limit: 15 }, seed_searches: 3, model_rows: 4, steps: 12, agent_steps: {}
+    },
+    budget_exhausted: false,
+    candidates: [], queries: [],
     summary: 'Ромашка упоминается в половине успешных ответов.',
+    conclusions: null,
     counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 1, model_errors: 0 },
     readiness: {
       report_ready: true, summary_ready: true, queries_ready: true, has_submitted_search_rows: false,

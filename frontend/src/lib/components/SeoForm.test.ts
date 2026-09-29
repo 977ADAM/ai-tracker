@@ -46,10 +46,10 @@ describe('SeoForm', () => {
 
   it('shows the upper estimate for the selected connections and the paid-run notices', async () => {
     render(SeoForm, { props: { providers, form, onSubmit: vi.fn() } });
-    expect(screen.getByText('23')).toBeTruthy();
-    expect(screen.getByText('20')).toBeTruthy();
-    await fireEvent.click(screen.getByRole('checkbox', { name: /Модель 2/ }));
+    expect(screen.getByText('43')).toBeTruthy();
     expect(screen.getByText('40')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('checkbox', { name: /Модель 2/ }));
+    expect(screen.getByText('80')).toBeTruthy();
     expect(screen.getByText(/служебные шаги/i)).toBeTruthy();
     expect(screen.getByText(/платные вызовы/i)).toBeTruthy();
     expect(screen.getByText(/отложенном режиме/i)).toBeTruthy();

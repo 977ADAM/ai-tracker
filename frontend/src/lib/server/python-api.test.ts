@@ -4,8 +4,8 @@ import {
   publicSearchSnapshot, publicSettingsProvider, publicSearchSettings, searchPath, settingsProviderPath,
   publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv,
   publicSeoAnalysisCreated, publicSeoHistory, publicSeoRows, publicSeoSettings, publicSeoSettingsTest,
-  publicSeoSnapshot, seoAnalysisCancelPath, seoAnalysisListPath, seoAnalysisPath, seoAnalysisRowsPath,
-  SEO_SETTINGS_TEST_TIMEOUT_MS
+  publicSeoSnapshot, publicSeoTracePage, seoAnalysisCancelPath, seoAnalysisListPath, seoAnalysisPath,
+  seoAnalysisRowsPath, seoAnalysisTracePath, SEO_SETTINGS_TEST_TIMEOUT_MS
 } from './python-api';
 import type { ApiPath } from '$lib/types';
 
@@ -418,10 +418,24 @@ describe('SEO BFF', () => {
     company_name: 'Ромашка', services: ['Букеты'],
     pages: [{ url: 'https://example.ru/', title: 'Ромашка' }],
     stages: [{ stage: 1, status: 'done', error: null, counters: { pages: 1 }, updated_at: '2026-09-28T10:01:00Z', api_key: 'secret' }],
+    agents: [
+      { agent: 'supervisor', status: 'done', error: null, updated_at: '2026-09-28T10:20:00Z', api_key: 'secret' },
+      { agent: 'site', status: 'error', error: 'Сайт недоступен', updated_at: '2026-09-28T10:03:00Z' }
+    ],
+    budget: {
+      pages: { used: 3, limit: 20 }, searches: { used: 5, limit: 43 },
+      model_answers: { used: 4, limit: 40 }, tool_calls: { used: 9, limit: 120 },
+      handoffs: { used: 5, limit: 15 }, seed_searches: 3, model_rows: 4, steps: 12,
+      agent_steps: { supervisor: 4, site: 3, competitors: 2, queries: 1, checks: 1, report: 1 },
+      operation_id: 'secret'
+    },
+    budget_exhausted: true,
     candidates: [{ host: 'rival.ru', title: 'Rival', occurrences: 2, average_position: 3.5, seed_indexes: [0, 1], recurring: true }],
     queries: [{ index: 0, text: 'букеты с доставкой', category: 'commercial', service: 'Букеты',
       flags: { mentions_company_name: false, mentions_company_host: false, mentions_candidate_host: false, branded: false } }],
     summary: 'Итог',
+    conclusions: { summary: 'Выводы', recommendations: 'Рекомендации', model: 'seo-model',
+      created_at: '2026-09-28T10:20:00Z', operation_id: 'secret' },
     counters: { queries: 1, search_rows: 1, model_rows: 1, search_errors: 0, model_errors: 0 },
     readiness: { report_ready: true, summary_ready: true, queries_ready: true, has_submitted_search_rows: false,
       has_unsubmitted_search_rows: false, has_unfinished_model_rows: false, search_rows: 1, model_rows: 1 },
@@ -463,11 +477,16 @@ describe('SEO BFF', () => {
     expect(seoAnalysisCancelPath('seo-1_X')).toBe('/api/seo/analyses/seo-1_X/cancel');
     expect(seoAnalysisRowsPath('seo-1_X', 'model', null)).toBe('/api/seo/analyses/seo-1_X/rows?kind=model');
     expect(seoAnalysisRowsPath('seo-1_X', 'search', 'cur_1')).toBe('/api/seo/analyses/seo-1_X/rows?kind=search&cursor=cur_1');
+    expect(seoAnalysisTracePath('seo-1_X', null)).toBe('/api/seo/analyses/seo-1_X/trace');
+    expect(seoAnalysisTracePath('seo-1_X', 'cur_1')).toBe('/api/seo/analyses/seo-1_X/trace?cursor=cur_1');
     expect(seoAnalysisListPath(null)).toBe('/api/seo/analyses');
     expect(seoAnalysisListPath('cur_1')).toBe('/api/seo/analyses?cursor=cur_1');
     for (const id of ['../settings', 'a/b', 'a'.repeat(129), '']) expect(() => seoAnalysisPath(id)).toThrow();
     expect(() => seoAnalysisRowsPath('seo-1', 'answers' as 'model', null)).toThrow();
     expect(() => seoAnalysisRowsPath('seo-1', 'model', 'a/b')).toThrow();
+    expect(() => seoAnalysisTracePath('seo-1', 'a/b')).toThrow();
+    expect(() => seoAnalysisTracePath('a/b', null)).toThrow();
+    expect(() => seoAnalysisTracePath('seo-1', 'a'.repeat(257))).toThrow();
     expect(() => seoAnalysisListPath('x&limit=1000')).toThrow();
   });
 
@@ -476,7 +495,9 @@ describe('SEO BFF', () => {
     vi.stubGlobal('fetch', fetchSpy);
     for (const path of [
       '/api/seo/settings/other', '/api/seo/analyses/', '/api/seo/analyses/a/b/rows?kind=model',
-      '/api/seo/analyses/seo-1/rows?kind=answers', '/api/seo/analyses/seo-1/rows', '/api/seo/analyses/../settings'
+      '/api/seo/analyses/seo-1/rows?kind=answers', '/api/seo/analyses/seo-1/rows', '/api/seo/analyses/../settings',
+      '/api/seo/analyses/seo-1/trace?cursor=a b', '/api/seo/analyses/seo-1/trace?limit=10',
+      '/api/seo/analyses/a/b/trace', '/api/seo/analyses/seo-1/trace/'
     ] as const) {
       expect((await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses'), path as ApiPath, 'GET')).status).toBe(400);
     }
@@ -580,12 +601,27 @@ describe('SEO BFF', () => {
     expect(projected.stages[0]).not.toHaveProperty('api_key');
     expect(projected.stages[0]).toEqual({ stage: 1, status: 'done', error: null, counters: { pages: 1 },
       updated_at: '2026-09-28T10:01:00Z' });
+    expect(projected.agents).toEqual([
+      { agent: 'supervisor', status: 'done', error: null, updated_at: '2026-09-28T10:20:00Z' },
+      { agent: 'site', status: 'error', error: 'Сайт недоступен', updated_at: '2026-09-28T10:03:00Z' }
+    ]);
+    expect(projected.agents[0]).not.toHaveProperty('api_key');
+    expect(projected.budget.pages).toEqual({ used: 3, limit: 20 });
+    expect(projected.budget.searches).toEqual({ used: 5, limit: 43 });
+    expect(projected.budget.model_answers).toEqual({ used: 4, limit: 40 });
+    expect(projected.budget.agent_steps.supervisor).toBe(4);
+    expect(projected.budget).not.toHaveProperty('operation_id');
+    expect(projected.budget_exhausted).toBe(true);
+    expect(projected.conclusions).toEqual({ summary: 'Выводы', recommendations: 'Рекомендации', model: 'seo-model' });
+    expect(projected.conclusions).not.toHaveProperty('operation_id');
     expect(projected.candidates[0]).toEqual({ host: 'rival.ru', title: 'Rival', occurrences: 2,
       average_position: 3.5, seed_indexes: [0, 1], recurring: true });
     expect(projected.aggregates.site.ai.p1.combined.share).toBe(0.5);
     expect(projected.aggregates.competitors[0].ai.p1.host.average_position).toBe(3.5);
     expect(projected.queries[0].flags.branded).toBe(false);
     expect(projected.summary).toBe('Итог');
+    // An analysis without the report agent's block keeps it null, not invented.
+    expect(publicSeoSnapshot({ ...seoSnapshot, conclusions: null }).conclusions).toBeNull();
   });
 
   it('refuses a malformed snapshot instead of inventing values', () => {
@@ -596,6 +632,12 @@ describe('SEO BFF', () => {
       aggregates: { ...seoSnapshot.aggregates, site: { search: searchMetrics, ai: { p1: siteAiMetrics } } }
     })).toThrow();
     expect(() => publicSeoSnapshot({ ...seoSnapshot, stages: [{ stage: 1, status: 'thinking', error: null, counters: {}, updated_at: 'x' }] })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, agents: [{ agent: 'site', status: 'thinking', error: null, updated_at: null }] })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, agents: [{ agent: 'site' }] })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, budget: { ...seoSnapshot.budget, searches: { used: 5 } } })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, budget: { ...seoSnapshot.budget, agent_steps: { supervisor: 'many' } } })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, budget_exhausted: 'yes' })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, conclusions: { summary: 'a', model: 'm' } })).toThrow();
   });
 
   it('projects history items and pagination cursors', () => {
@@ -639,10 +681,51 @@ describe('SEO BFF', () => {
     expect(() => publicSeoRows({ items: [], next_cursor: 'a b' }, 'search')).toThrow();
   });
 
-  it('serves snapshots, rows, cancel and delete through their exact SEO paths', async () => {
+  it('projects trace pages step by step and drops secrets and unknown fields', () => {
+    const page = publicSeoTracePage({
+      items: [
+        { step_index: 1, agent: 'supervisor', kind: 'handoff', name: 'handoff_to',
+          arguments: { agent: 'site' }, result_summary: '{"status":"accepted"}', status: 'done',
+          error: null, created_at: '2026-09-28T10:01:00Z', api_key: 'secret', operation_id: 'secret' },
+        { step_index: 2, agent: 'site', kind: 'tool', name: 'fetch_site',
+          arguments: { max_pages: 2 }, result_summary: null, status: 'rejected',
+          error: 'Лимит прогона исчерпан', created_at: '2026-09-28T10:02:00Z' }
+      ],
+      next_cursor: 'cur_1', api_key: 'secret'
+    });
+    expect(page.next_cursor).toBe('cur_1');
+    expect(page.items[0]).toEqual({ step_index: 1, agent: 'supervisor', kind: 'handoff', name: 'handoff_to',
+      arguments: { agent: 'site' }, result_summary: '{"status":"accepted"}', status: 'done', error: null,
+      created_at: '2026-09-28T10:01:00Z' });
+    expect(page.items[0]).not.toHaveProperty('api_key');
+    expect(page.items[0]).not.toHaveProperty('operation_id');
+    expect(page.items[1].arguments).toEqual({ max_pages: 2 });
+    expect(page.items[1].error).toBe('Лимит прогона исчерпан');
+    expect(publicSeoTracePage({ items: [], next_cursor: null })).toEqual({ items: [], next_cursor: null });
+  });
+
+  it('refuses structurally broken trace pages and cursors', () => {
+    const step = { step_index: 1, agent: 'site', kind: 'tool', name: 'fetch_site',
+      arguments: {}, result_summary: null, status: 'done', error: null, created_at: 'x' };
+    expect(() => publicSeoTracePage({ items: [{ ...step, kind: 'thinking' }], next_cursor: null })).toThrow();
+    expect(() => publicSeoTracePage({ items: [{ ...step, status: 'thinking' }], next_cursor: null })).toThrow();
+    expect(() => publicSeoTracePage({ items: [{ ...step, arguments: 'nope' }], next_cursor: null })).toThrow();
+    expect(() => publicSeoTracePage({ items: [{ ...step, step_index: '1' }], next_cursor: null })).toThrow();
+    expect(() => publicSeoTracePage({ items: [{ ...step, name: '' }], next_cursor: null })).toThrow();
+    expect(() => publicSeoTracePage({ items: [], next_cursor: 'a b' })).toThrow();
+    expect(() => publicSeoTracePage({ next_cursor: null })).toThrow();
+  });
+
+  it('serves snapshots, rows, trace, cancel and delete through their exact SEO paths', async () => {
     const snapshotBody = JSON.stringify({ ...seoSnapshot, api_key: 'secret' });
     const fetchSpy = vi.fn().mockImplementation((url: string, init: RequestInit) => {
       if (init.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }));
+      if (String(url).includes('/trace')) return Promise.resolve(new Response(JSON.stringify({
+        items: [{ step_index: 1, agent: 'site', kind: 'tool', name: 'fetch_site', arguments: { max_pages: 2 },
+          result_summary: '{"used_pages":1}', status: 'done', error: null,
+          created_at: '2026-09-28T10:01:00Z', operation_id: 'secret', api_key: 'secret' }],
+        next_cursor: null, api_key: 'secret'
+      }), { headers: { 'content-type': 'application/json' } }));
       if (String(url).includes('/rows?kind=')) return Promise.resolve(new Response(JSON.stringify({
         items: [{ query_index: 0, query: 'букеты', category: 'commercial', service: 'Букеты', status: 'found',
           site_position: 2, site_url: 'https://example.ru/', error: null, operation_id: 'secret' }],
@@ -654,12 +737,23 @@ describe('SEO BFF', () => {
     const snapshot = await proxyJson(new Request(`http://127.0.0.1:5173${seoAnalysisPath('seo-1_X')}`),
       seoAnalysisPath('seo-1_X'), 'GET');
     expect(snapshot.status).toBe(200);
-    expect((await snapshot.json() as Record<string, unknown>)).not.toHaveProperty('api_key');
+    const snapshotJson = await snapshot.json() as Record<string, unknown>;
+    expect(snapshotJson).not.toHaveProperty('api_key');
+    expect(snapshotJson).toHaveProperty('budget_exhausted', true);
 
     const rows = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses/seo-1_X/rows?kind=search'),
       seoAnalysisRowsPath('seo-1_X', 'search', null), 'GET');
     expect(await rows.json()).toEqual({ items: [{ query_index: 0, query: 'букеты', category: 'commercial',
       service: 'Букеты', status: 'found', site_position: 2, site_url: 'https://example.ru/', error: null }], next_cursor: null });
+
+    const trace = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses/seo-1_X/trace?cursor=cur_1'),
+      seoAnalysisTracePath('seo-1_X', 'cur_1'), 'GET');
+    expect(trace.status).toBe(200);
+    expect(await trace.json()).toEqual({ items: [{ step_index: 1, agent: 'site', kind: 'tool', name: 'fetch_site',
+      arguments: { max_pages: 2 }, result_summary: '{"used_pages":1}', status: 'done', error: null,
+      created_at: '2026-09-28T10:01:00Z' }], next_cursor: null });
+    expect(fetchSpy).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/seo/analyses/seo-1_X/trace?cursor=cur_1',
+      expect.objectContaining({ method: 'GET' }));
 
     const cancel = await proxyJson(new Request(`http://127.0.0.1:5173${seoAnalysisCancelPath('seo-1_X')}`, { method: 'POST' }),
       seoAnalysisCancelPath('seo-1_X'), 'POST');
@@ -680,6 +774,23 @@ describe('SEO BFF', () => {
       seoAnalysisPath('seo-1_X'), 'GET');
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ detail: 'Анализ не найден' });
+  });
+
+  it('passes a safe trace detail through for a rejected cursor and an unknown analysis', async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Некорректный курсор', operation_id: 'secret' }),
+        { status: 400, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Анализ не найден' }),
+        { status: 404, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const badCursor = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses/seo-1_X/trace?cursor=cur_1'),
+      seoAnalysisTracePath('seo-1_X', 'cur_1'), 'GET');
+    expect(badCursor.status).toBe(400);
+    expect(await badCursor.json()).toEqual({ detail: 'Некорректный курсор' });
+    const missing = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/analyses/seo-1_X/trace'),
+      seoAnalysisTracePath('seo-1_X', null), 'GET');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ detail: 'Анализ не найден' });
   });
 
   it('loads SEO settings independently from the model configuration', async () => {

@@ -4,6 +4,7 @@ export type ApiPath =
   | '/api/runs' | `/api/runs?cursor=${string}` | `/api/runs/${string}`
   | '/api/seo/settings' | '/api/seo/settings/credentials' | '/api/seo/settings/test'
   | '/api/seo/analyses' | `/api/seo/analyses?cursor=${string}` | `/api/seo/analyses/${string}`
+  | `/api/seo/analyses/${string}/trace` | `/api/seo/analyses/${string}/trace?cursor=${string}`
   | `/api/providers/settings/${string}` | `/api/providers/${string}` | `/api/search/${string}`;
 
 export type SettingsModel = { id: string; model: string; name: string };
@@ -255,6 +256,50 @@ export type SeoAggregates = {
   counts: SeoCounts;
 };
 
+export type SeoAgentStatus = 'pending' | 'running' | 'waiting' | 'done' | 'error' | 'skipped';
+
+/** One agent of the run, in the fixed supervisor-to-report order. */
+export type SeoAgent = {
+  agent: string;
+  status: SeoAgentStatus;
+  error: string | null;
+  updated_at: string | null;
+};
+
+/** One metered resource of the run: what it used against its per-run cap. */
+export type SeoBudgetItem = { used: number; limit: number };
+
+/** The spent budgets of a run plus the raw counters they are derived from. */
+export type SeoBudgetView = {
+  pages: SeoBudgetItem;
+  searches: SeoBudgetItem;
+  model_answers: SeoBudgetItem;
+  tool_calls: SeoBudgetItem;
+  handoffs: SeoBudgetItem;
+  seed_searches: number;
+  model_rows: number;
+  steps: number;
+  agent_steps: Record<string, number>;
+};
+
+/** The report agent's text: labeled as model output and never a metric. */
+export type SeoConclusions = { summary: string; recommendations: string; model: string };
+
+/** One traced step: safe arguments and a short result, never a secret. */
+export type SeoTraceStep = {
+  step_index: number;
+  agent: string;
+  kind: 'model' | 'tool' | 'handoff' | 'system';
+  name: string;
+  arguments: Record<string, unknown>;
+  result_summary: string | null;
+  status: 'pending' | 'running' | 'done' | 'error' | 'rejected' | 'skipped';
+  error: string | null;
+  created_at: string;
+};
+
+export type SeoTracePage = { items: SeoTraceStep[]; next_cursor: string | null };
+
 /** Saved analysis without model answers and without Yandex operation IDs. */
 export type SeoAnalysisSnapshot = {
   id: string;
@@ -268,9 +313,13 @@ export type SeoAnalysisSnapshot = {
   services: string[];
   pages: SeoPage[];
   stages: SeoStage[];
+  agents: SeoAgent[];
+  budget: SeoBudgetView;
+  budget_exhausted: boolean;
   candidates: SeoCandidate[];
   queries: SeoQuery[];
   summary: string | null;
+  conclusions: SeoConclusions | null;
   counters: SeoCounts;
   readiness: SeoReadiness;
   aggregates: SeoAggregates;

@@ -2,11 +2,12 @@ import type {
   ApiPath, FormConfig, PublicProvider, SearchCreated, SearchRegion, SearchRow, SearchRowStatus,
   SearchSnapshot, SettingsProvider, RunCreated, RunHistoryPage, RunSnapshot, RunSummaryRow,
   RunModelRow, RunSearchRow, YandexSearchSettings,
-  SeoAggregates, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoAnalysisStatus, SeoCategoryAggregates,
-  SeoCandidate, SeoCompetitorAggregates, SeoCounts, SeoEstimate, SeoHistoryPage, SeoMetric,
-  SeoModelRow, SeoQuery, SeoQueryFlags, SeoReadiness, SeoRow, SeoRowsKind, SeoRowsPage, SeoRowStatus,
-  SeoSearchMetrics, SeoSearchRow, SeoSettings, SeoSettingsTest, SeoSiteAggregates, SeoSiteAiBlock,
-  SeoSiteAiMetrics, SeoSource, SeoStage, SeoStageStatus
+  SeoAggregates, SeoAgent, SeoAgentStatus, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoAnalysisStatus,
+  SeoBudgetItem, SeoBudgetView, SeoCategoryAggregates, SeoCandidate, SeoCompetitorAggregates,
+  SeoConclusions, SeoCounts, SeoEstimate, SeoHistoryPage, SeoMetric, SeoModelRow, SeoQuery,
+  SeoQueryFlags, SeoReadiness, SeoRow, SeoRowsKind, SeoRowsPage, SeoRowStatus, SeoSearchMetrics,
+  SeoSearchRow, SeoSettings, SeoSettingsTest, SeoSiteAggregates, SeoSiteAiBlock, SeoSiteAiMetrics,
+  SeoSource, SeoStage, SeoStageStatus, SeoTracePage, SeoTraceStep
 } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
@@ -152,12 +153,18 @@ export function seoAnalysisRowsPath(id: string, kind: SeoRowsKind, cursor: strin
   return `${seoAnalysisPath(id)}/rows?${query}` as ApiPath;
 }
 
+export function seoAnalysisTracePath(id: string, cursor: string | null): ApiPath {
+  const suffix = cursor === null ? '' : `?cursor=${seoCursor(cursor)}`;
+  return `${seoAnalysisPath(id)}/trace${suffix}` as ApiPath;
+}
+
 export function seoAnalysisListPath(cursor: string | null): ApiPath {
   if (cursor === null) return '/api/seo/analyses';
   return `/api/seo/analyses?cursor=${seoCursor(cursor)}`;
 }
 
 const SEO_ROWS_SUFFIX = /^([^/]+)\/rows\?kind=(model|search)(?:&cursor=([A-Za-z0-9_-]{1,256}))?$/;
+const SEO_TRACE_SUFFIX = /^([^/]+)\/trace(?:\?cursor=([A-Za-z0-9_-]{1,256}))?$/;
 
 function validPath(path: ApiPath): boolean {
   if (path === '/api/runs') return true;
@@ -190,6 +197,11 @@ function validPath(path: ApiPath): boolean {
     const rows = SEO_ROWS_SUFFIX.exec(suffix);
     if (rows) {
       try { return seoAnalysisRowsPath(decodeURIComponent(rows[1]), rows[2] as SeoRowsKind, rows[3] ?? null) === path; }
+      catch { return false; }
+    }
+    const trace = SEO_TRACE_SUFFIX.exec(suffix);
+    if (trace) {
+      try { return seoAnalysisTracePath(decodeURIComponent(trace[1]), trace[2] ?? null) === path; }
       catch { return false; }
     }
     try { return seoAnalysisPath(suffix) === path; }
@@ -417,6 +429,10 @@ const SEO_ANALYSIS_STATUSES: readonly SeoAnalysisStatus[] =
 const SEO_STAGE_STATUSES: readonly SeoStageStatus[] = ['pending', 'running', 'done', 'error', 'skipped'];
 const SEO_ROW_STATUSES: readonly SeoRowStatus[] =
   ['pending', 'submitting', 'waiting', 'found', 'absent', 'error', 'interrupted', 'cancelled'];
+const SEO_AGENT_STATUSES: readonly SeoAgentStatus[] =
+  ['pending', 'running', 'waiting', 'done', 'error', 'skipped'];
+const SEO_TRACE_KINDS = ['model', 'tool', 'handoff', 'system'] as const;
+const SEO_TRACE_STATUSES = ['pending', 'running', 'done', 'error', 'rejected', 'skipped'] as const;
 
 /**
  * Project the public service-LLM settings.
@@ -603,6 +619,63 @@ function seoReadiness(value: unknown): SeoReadiness {
   };
 }
 
+/** One agent of the run: only its name, status, safe error and timestamp. */
+function seoAgent(value: unknown): SeoAgent {
+  const item = record(value);
+  return {
+    agent: requiredString(item.agent),
+    status: oneOf(item.status, SEO_AGENT_STATUSES),
+    error: optionalString(item.error),
+    updated_at: optionalString(item.updated_at)
+  };
+}
+
+function seoBudgetItem(value: unknown): SeoBudgetItem {
+  const item = record(value);
+  return { used: requiredInteger(item.used), limit: requiredInteger(item.limit) };
+}
+
+function seoBudget(value: unknown): SeoBudgetView {
+  const item = record(value);
+  return {
+    pages: seoBudgetItem(item.pages),
+    searches: seoBudgetItem(item.searches),
+    model_answers: seoBudgetItem(item.model_answers),
+    tool_calls: seoBudgetItem(item.tool_calls),
+    handoffs: seoBudgetItem(item.handoffs),
+    seed_searches: requiredInteger(item.seed_searches),
+    model_rows: requiredInteger(item.model_rows),
+    steps: requiredInteger(item.steps),
+    agent_steps: integerRecord(item.agent_steps)
+  };
+}
+
+/** The report agent's block: only the labelled text and the model name. */
+function seoConclusions(value: unknown): SeoConclusions {
+  const item = record(value);
+  return {
+    summary: stringValue(item.summary),
+    recommendations: stringValue(item.recommendations),
+    model: stringValue(item.model)
+  };
+}
+
+/** One trace step: safe arguments and a short result, never a secret. */
+function seoTraceStep(value: unknown): SeoTraceStep {
+  const item = record(value);
+  return {
+    step_index: requiredInteger(item.step_index),
+    agent: requiredString(item.agent),
+    kind: oneOf(item.kind, SEO_TRACE_KINDS),
+    name: requiredString(item.name),
+    arguments: record(item.arguments),
+    result_summary: optionalString(item.result_summary),
+    status: oneOf(item.status, SEO_TRACE_STATUSES),
+    error: optionalString(item.error),
+    created_at: requiredString(item.created_at)
+  };
+}
+
 /** Project the saved analysis; model answers and operation IDs never appear here. */
 export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
   const item = record(value);
@@ -610,7 +683,7 @@ export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
   seoAnalysisPath(id);
   const input = record(item.input);
   if (!Array.isArray(item.services) || !Array.isArray(item.pages) || !Array.isArray(item.stages) ||
-      !Array.isArray(item.candidates) || !Array.isArray(item.queries))
+      !Array.isArray(item.agents) || !Array.isArray(item.candidates) || !Array.isArray(item.queries))
     throw new Error('Invalid SEO snapshot');
   return {
     id,
@@ -634,9 +707,14 @@ export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
       return { url: requiredString(page.url), title: stringValue(page.title) };
     }),
     stages: item.stages.map(seoStage),
+    agents: item.agents.map(seoAgent),
+    budget: seoBudget(item.budget),
+    budget_exhausted: requiredBoolean(item.budget_exhausted),
     candidates: item.candidates.map(seoCandidate),
     queries: item.queries.map(seoQuery),
     summary: optionalString(item.summary),
+    conclusions: item.conclusions === null || item.conclusions === undefined
+      ? null : seoConclusions(item.conclusions),
     counters: seoCounts(item.counters),
     readiness: seoReadiness(item.readiness),
     aggregates: seoAggregates(item.aggregates)
@@ -707,6 +785,15 @@ export function publicSeoRows(value: unknown, kind: SeoRowsKind): SeoRowsPage {
   if (next_cursor !== null) seoCursor(next_cursor);
   const project = (raw: unknown): SeoRow => (kind === 'model' ? seoModelRow(raw) : seoSearchRow(raw));
   return { items: page.items.map(project), next_cursor };
+}
+
+/** Project one page of the agent trace; secrets and operation IDs never appear here. */
+export function publicSeoTracePage(value: unknown): SeoTracePage {
+  const page = record(value);
+  if (!Array.isArray(page.items)) throw new Error('Invalid SEO trace');
+  const next_cursor = optionalString(page.next_cursor);
+  if (next_cursor !== null) seoCursor(next_cursor);
+  return { items: page.items.map(seoTraceStep), next_cursor };
 }
 
 export function publicForm(value: unknown): Record<string, unknown> {  const item = record(value);
@@ -854,6 +941,8 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       return json(publicSeoHistory(value), upstream.status);
     const seoRows = /^\/api\/seo\/analyses\/[^/]+\/rows\?kind=(model|search)/.exec(path);
     if (seoRows && method === 'GET') return json(publicSeoRows(value, seoRows[1] as SeoRowsKind), upstream.status);
+    if (/^\/api\/seo\/analyses\/[^/]+\/trace(?:\?|$)/.test(path) && method === 'GET')
+      return json(publicSeoTracePage(value), upstream.status);
     if (path.startsWith('/api/seo/analyses/') && method === 'GET') return json(publicSeoSnapshot(value), upstream.status);
     if (path.endsWith('/cancel') && method === 'POST') return json(publicSeoSnapshot(value), upstream.status);
     if (path === '/api/search' && method === 'POST') return json(publicSearchCreated(value), upstream.status);

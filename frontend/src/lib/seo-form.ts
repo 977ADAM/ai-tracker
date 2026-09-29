@@ -9,7 +9,7 @@
 import type { SeoAnalysisSnapshot } from './types';
 
 /** At most this many unique queries are generated per run, and to the Yandex seeds. */
-export const GENERATED_QUERY_LIMIT = 20;
+export const GENERATED_QUERY_LIMIT = 40;
 /** Exactly three key queries are sent to Yandex in stage 2. */
 export const SEO_SEED_COUNT = 3;
 export const MAX_SPHERE_LENGTH = 200;

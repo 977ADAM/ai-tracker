@@ -19,7 +19,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     id: 'seo-1', status: 'running', created_at: '2026-09-28T00:00:00Z', updated_at: '2026-09-28T00:00:00Z',
     finished_at: null,
     input: { url: 'https://example.ru', host: 'example.ru', sphere: 'Цветы', seeds: ['а'], services: ['б'], connection_ids: ['model-1', 'model-2'] },
-    estimate: { search_upper: 23, model_upper: 40, generated_limit: 20, connections: 2 },
+    estimate: { search_upper: 43, model_upper: 40, generated_limit: 40, connections: 2 },
     company_name: '', services: [], pages: [], stages: [], candidates: [], queries: [], summary: null,
     counters: { queries: 0, search_rows: 0, model_rows: 0, search_errors: 0, model_errors: 0 },
     readiness: {
@@ -93,17 +93,18 @@ describe('validateSeoForm', () => {
 
 describe('call estimates', () => {
   it('bounds the run before generation with M connections', () => {
-    expect(estimateUpper(1)).toEqual({ searchUpper: 23, modelUpper: 20, generatedLimit: 20, connections: 1 });
-    expect(estimateUpper(3)).toEqual({ searchUpper: 23, modelUpper: 60, generatedLimit: 20, connections: 3 });
-    expect(estimateUpper(5)).toEqual({ searchUpper: 23, modelUpper: 100, generatedLimit: 20, connections: 5 });
-    expect(SEARCH_UPPER).toBe(23);
-    expect(GENERATED_QUERY_LIMIT).toBe(20);
+    expect(estimateUpper(1)).toEqual({ searchUpper: 43, modelUpper: 40, generatedLimit: 40, connections: 1 });
+    expect(estimateUpper(3)).toEqual({ searchUpper: 43, modelUpper: 120, generatedLimit: 40, connections: 3 });
+    expect(estimateUpper(5)).toEqual({ searchUpper: 43, modelUpper: 200, generatedLimit: 40, connections: 5 });
+    expect(SEARCH_UPPER).toBe(43);
+    expect(GENERATED_QUERY_LIMIT).toBe(40);
   });
 
   it('counts the actual K and K x M after generation', () => {
     expect(estimateActual(0, 3)).toEqual({ searchActual: 3, modelActual: 0 });
     expect(estimateActual(12, 3)).toEqual({ searchActual: 15, modelActual: 36 });
     expect(estimateActual(20, 1)).toEqual({ searchActual: 23, modelActual: 20 });
+    expect(estimateActual(40, 5)).toEqual({ searchActual: 43, modelActual: 200 });
   });
 });
 
