@@ -327,7 +327,7 @@
 
 <svelte:head><title>ИИ-трекинг · SEO-анализ сайта</title></svelte:head>
 
-<main class="mx-48 max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
+<main class="mx-auto w-full max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
     <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-6 text-xs font-medium text-muted">
         <a href="/" class="hover:text-accent">Инструменты</a>
         <span aria-hidden="true">/</span>
