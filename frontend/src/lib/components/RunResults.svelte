@@ -1,16 +1,9 @@
 <script lang="ts">
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
+  import { markdownHtml } from '$lib/markdown';
   import type { RunSnapshot } from '$lib/types';
   import RunSummaryTable from './RunSummaryTable.svelte';
 
   let { snapshot }: { snapshot: RunSnapshot } = $props();
-
-  marked.setOptions({ breaks: true, gfm: true });
-
-  function answerHtml(text: string): string {
-    return DOMPurify.sanitize(marked.parse(text, { async: false }) as string);
-  }
 
   function safeLink(value: string | null): string | null {
     if (!value) return null;
@@ -42,7 +35,7 @@
         <article class="rounded-2xl border border-line bg-white p-5 shadow-sm">
           <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="text-xs font-semibold text-muted">{row.provider_name}</p><h4 class="mt-1 font-semibold">{row.prompt}</h4></div><span class="text-sm font-medium">{statusLabel(row.status)}</span></div>
           {#if row.error}<p class="mt-4 text-sm text-rose-700">{row.error}</p>
-          {:else if row.answer}<div class="prose prose-sm mt-4 max-w-none text-ink/85">{@html answerHtml(row.answer)}</div>
+          {:else if row.answer}<div class="prose prose-sm mt-4 max-w-none text-ink/85">{@html markdownHtml(row.answer)}</div>
           {:else}<p class="mt-4 text-sm text-muted">{row.status === 'interrupted' ? 'Ответ не был получен до прерывания' : 'Ответ ожидается'}</p>{/if}
         </article>
       {/each}

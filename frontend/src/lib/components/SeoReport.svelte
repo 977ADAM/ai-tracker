@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { markdownHtml, plainText } from '$lib/markdown';
   import type {
     SeoAnalysisSnapshot, SeoCategoryAggregates, SeoCompetitorAggregates, SeoMetric, SeoModelRow,
     SeoRowStatus, SeoRowsKind, SeoSearchRow
@@ -32,7 +33,7 @@
 
   // A saved answer can be thousands of characters long. The table shows a short
   // preview, so one row never grows to the height of the whole answer; the full
-  // text opens in a dialog on click and stays readable there.
+  // text opens in a dialog on click and is rendered there as Markdown.
   const ANSWER_PREVIEW_CHARS = 160;
 
   let openAnswer = $state<{ query: string; provider: string; text: string } | null>(null);
@@ -41,11 +42,12 @@
 
   /** Whether the answer is longer than its preview, so the dialog is offered. */
   function answerIsLong(text: string): boolean {
-    return text.length > ANSWER_PREVIEW_CHARS;
+    return plainText(text).length > ANSWER_PREVIEW_CHARS;
   }
 
   function answerPreview(text: string): string {
-    return answerIsLong(text) ? `${text.slice(0, ANSWER_PREVIEW_CHARS).trimEnd()}…` : text;
+    const plain = plainText(text);
+    return answerIsLong(text) ? `${plain.slice(0, ANSWER_PREVIEW_CHARS).trimEnd()}…` : plain;
   }
 
   /** Open one answer; the focus moves into the dialog and comes back on close. */
@@ -216,7 +218,7 @@
   {#if snapshot.summary}
     <section class="mt-6 rounded-xl border border-line bg-accent-soft px-5 py-4" aria-labelledby="seo-summary-title">
       <h3 id="seo-summary-title" class="text-base font-semibold text-ink">Текстовое резюме</h3>
-      <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink" data-report-summary>{snapshot.summary}</p>
+      <div class="prose prose-sm mt-2 max-w-none text-ink" data-report-summary>{@html markdownHtml(snapshot.summary ?? '')}</div>
     </section>
   {/if}
 
@@ -226,10 +228,10 @@
       <p class="mt-1 text-xs font-semibold tracking-wide text-violet-800 uppercase">
         Текст модели{snapshot.conclusions.model ? `: ${snapshot.conclusions.model}` : ''}
       </p>
-      <p class="mt-3 whitespace-pre-wrap text-sm leading-6 text-ink" data-conclusions-summary>{snapshot.conclusions.summary}</p>
+      <div class="prose prose-sm mt-3 max-w-none text-ink" data-conclusions-summary>{@html markdownHtml(snapshot.conclusions.summary)}</div>
       {#if snapshot.conclusions.recommendations}
         <h4 class="mt-4 text-sm font-semibold text-ink">Рекомендации</h4>
-        <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink" data-conclusions-recommendations>{snapshot.conclusions.recommendations}</p>
+        <div class="prose prose-sm mt-2 max-w-none text-ink" data-conclusions-recommendations>{@html markdownHtml(snapshot.conclusions.recommendations)}</div>
       {/if}
       <p class="mt-3 text-xs leading-5 text-muted">
         Это текст языковой модели, а не расчёт. Он не заменяет и не изменяет числа отчёта.
@@ -599,10 +601,10 @@
             Закрыть
           </button>
         </div>
-        <p
-          class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm leading-6 whitespace-pre-wrap break-words text-ink"
+        <div
+          class="prose prose-sm min-h-0 max-w-none flex-1 overflow-y-auto px-5 py-4 text-ink"
           data-answer-full
-        >{openAnswer.text}</p>
+        >{@html markdownHtml(openAnswer.text)}</div>
       </div>
     </div>
   {/if}

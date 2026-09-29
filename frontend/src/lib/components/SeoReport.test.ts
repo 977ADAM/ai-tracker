@@ -190,25 +190,70 @@ describe('SeoReport', () => {
     expect(document.querySelector('[data-search-detail]')?.getAttribute('data-status')).toBe('error');
   });
 
-  it('keeps a long answer out of the table and opens it on click', async () => {
-    const long = 'Первая строка ответа.\n' + 'Подробности ремонта. '.repeat(60);
+  it('keeps a long answer out of the table and opens it as Markdown on click', async () => {
+    const long = 'Первая строка ответа.\n\n### Что уточнить\n- **материалы** и сроки\n'
+      + 'Подробности ремонта. '.repeat(60);
     const row: SeoModelRow = { ...modelRow, answer: long };
     render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
 
     const table = screen.getByRole('table', { name: 'Ответы моделей' });
     const preview = document.querySelector('[data-model-answer-preview]') as HTMLElement;
+    // The preview is prose: no Markdown markers, no full answer.
     expect(preview.textContent?.length).toBeLessThanOrEqual(161);
     expect(preview.textContent?.endsWith('…')).toBe(true);
+    expect(preview.textContent).toContain('материалы и сроки');
+    expect(preview.textContent).not.toContain('**');
+    expect(preview.textContent).not.toContain('###');
     expect(table.textContent).not.toContain('Подробности ремонта. '.repeat(60));
 
     await fireEvent.click(screen.getByRole('button', { name: 'Читать полностью' }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(document.querySelector('[data-answer-full]')?.textContent).toBe(long);
+
+    // The full text is rendered as Markdown, not as raw markers.
+    const body = document.querySelector('[data-answer-full]') as HTMLElement;
+    expect(body.querySelector('h3')?.textContent).toBe('Что уточнить');
+    expect(body.querySelector('strong')?.textContent).toBe('материалы');
+    expect(body.querySelector('li')?.textContent).toContain('материалы');
+    expect(body.textContent).toContain('Подробности ремонта.');
+    expect(body.textContent).not.toContain('###');
     expect(document.querySelector('[data-answer-caption]')?.textContent).toContain('Модель');
     expect(document.querySelector('[data-answer-caption]')?.textContent).toContain('купить цветы');
     // The row still shows the preview, not the whole answer.
     expect(document.querySelector('[data-model-answer-preview]')?.textContent?.endsWith('…')).toBe(true);
+  });
+
+  it('sanitizes an answer before it is rendered as Markdown', async () => {
+    const row: SeoModelRow = {
+      ...modelRow,
+      answer: '**жирный** текст ответа.\n\n<script>alert(1)</script>\n\n'
+        + '<img src=x onerror=alert(2)> ' + 'хвост '.repeat(40)
+    };
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Читать полностью' }));
+    const body = document.querySelector('[data-answer-full]') as HTMLElement;
+
+    expect(body.querySelector('script')).toBeNull();
+    expect(body.querySelector('img')?.getAttribute('onerror')).toBeNull();
+    expect(body.querySelector('strong')?.textContent).toBe('жирный');
+  });
+
+  it('renders the saved summary and conclusions as Markdown too', () => {
+    render(SeoReport, { props: { snapshot: snapshot({
+      summary: '## Итог\n- **главное**',
+      conclusions: {
+        summary: '## Выводы\n\n**Важно** для услуг',
+        recommendations: '- Первое\n- Второе',
+        model: 'seo-model'
+      }
+    }) } });
+
+    expect(document.querySelector('[data-report-summary] h2')?.textContent).toBe('Итог');
+    expect(document.querySelector('[data-report-summary] strong')?.textContent).toBe('главное');
+    expect(document.querySelector('[data-conclusions-summary] h2')?.textContent).toBe('Выводы');
+    expect(document.querySelector('[data-conclusions-summary] strong')?.textContent).toBe('Важно');
+    expect(document.querySelectorAll('[data-conclusions-recommendations] li')).toHaveLength(2);
   });
 
   it('closes the answer dialog on the button, on Escape, and on the backdrop', async () => {

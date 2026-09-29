@@ -70,8 +70,11 @@ SEEDS = ["купить цветы", "доставка букетов", "цвет
 SERVICES = ["Доставка цветов", "Букеты"]
 SUMMARY = "Ромашка упоминается в половине успешных ответов."
 SEARCH_ERROR = "Не удалось получить выдачу Яндекса"
+# The answer is Markdown, exactly as a model writes it: the table shows its
+# preview as prose and the full text is rendered as Markdown in the dialog.
 MODEL_ANSWER = (
-    "Ромашка и flower-shop.example предлагают доставку цветов. "
+    "Ромашка и flower-shop.example предлагают доставку цветов.\n\n"
+    "### Что уточнить\n- **материалы** и сроки\n- бригада и смета\n\n"
     + "Подробности заказа: сроки, бригада, смета и материалы. " * 12
 )
 
@@ -435,10 +438,18 @@ def test_saved_report_opens_from_history_and_deletes(page: Page, application: Ap
         preview = seo.model_detail_rows.first.locator("[data-model-answer-preview]")
         expect(preview).to_contain_text("flower-shop.example")
         expect(preview).not_to_contain_text("материалы. " * 8)
+        # The preview is prose: the Markdown markers never reach the table cell.
+        expect(preview).not_to_contain_text("**")
+        expect(preview).not_to_contain_text("###")
         seo.model_detail_rows.first.get_by_role("button", name="Читать полностью").click()
         dialog = page.get_by_role("dialog", name="Ответ модели")
         expect(dialog).to_be_visible()
+        # The full answer is rendered as Markdown, not as raw text.
+        expect(dialog.locator("[data-answer-full] h3")).to_contain_text("Что уточнить")
+        expect(dialog.locator("[data-answer-full] strong")).to_contain_text("материалы")
+        expect(dialog.locator("[data-answer-full] li")).to_have_count(2)
         expect(dialog.locator("[data-answer-full]")).to_contain_text("смета и материалы.")
+        expect(dialog.locator("[data-answer-full]")).not_to_contain_text("###")
         expect(dialog.locator("[data-answer-caption]")).to_contain_text("купить цветы")
         dialog.get_by_role("button", name="Закрыть").click()
         expect(page.get_by_role("dialog")).to_have_count(0)
