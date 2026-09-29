@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   apiOrigin, apiTimeoutMs, DEFAULT_TIMEOUT_MS, loadPageData, proxyJson, publicConfig, publicSearchRegions,
+  sameOriginRequest,
   publicSearchSnapshot, publicSettingsProvider, publicSearchSettings, searchPath, settingsProviderPath,
   publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv,
   publicSeoAnalysisCreated, publicSeoHistory, publicSeoRows, publicSeoSettings, publicSeoSettingsTest,
@@ -15,6 +16,47 @@ const publicSearchState = {
   yandex: { enabled: true, folder_id: 'folder-1', has_api_key: true,
     api_key_source: 'ui', folder_id_source: 'env' }
 };
+
+describe('the same-origin guard of a state-changing request', () => {
+  it('accepts the address the browser opened, not only the configured one', () => {
+    // The container is opened at 127.0.0.1:3000 while ORIGIN is localhost:3000:
+    // both are the same server, and only the request knows which one was used.
+    const request = new Request('http://localhost:3000/api/providers/settings', {
+      method: 'POST', headers: { origin: 'http://127.0.0.1:3000', host: '127.0.0.1:3000' }
+    });
+
+    expect(sameOriginRequest(request)).toBe(true);
+  });
+
+  it('falls back to the configured address when no Host header is set', () => {
+    const request = new Request('http://127.0.0.1:5173/api/search/settings', {
+      method: 'PUT', headers: { origin: 'http://127.0.0.1:5173' }
+    });
+
+    expect(sameOriginRequest(request)).toBe(true);
+    expect(sameOriginRequest(new Request('http://127.0.0.1:5173/api/search/settings', {
+      method: 'PUT', headers: { origin: 'http://localhost:5173' }
+    }))).toBe(false);
+  });
+
+  it('refuses another site and a request without a usable Origin', () => {
+    const crossSite = new Request('http://127.0.0.1:5173/api/providers/settings', {
+      method: 'POST', headers: { origin: 'https://other.example', host: '127.0.0.1:5173' }
+    });
+    const broken = new Request('http://127.0.0.1:5173/api/providers/settings', {
+      method: 'POST', headers: { origin: 'not a url', host: '127.0.0.1:5173' }
+    });
+
+    expect(sameOriginRequest(crossSite)).toBe(false);
+    expect(sameOriginRequest(broken)).toBe(false);
+  });
+
+  it('treats a request without an Origin as same-origin', () => {
+    const request = new Request('http://127.0.0.1:5173/api/providers/settings', { method: 'POST' });
+
+    expect(sameOriginRequest(request)).toBe(true);
+  });
+});
 
 describe('the Python API origin guard', () => {
   afterEach(() => vi.unstubAllEnvs());

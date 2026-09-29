@@ -120,6 +120,28 @@ export function apiOrigin(): string {
   return url.origin;
 }
 
+/**
+ * Whether a state-changing request comes from the interface itself.
+ *
+ * The browser sends `Origin` and `Host` together, and they name the same address
+ * exactly when the request is same-origin — whatever spelling the user opened.
+ * `localhost:3000` and `127.0.0.1:3000` are different origins to the browser but
+ * the same server, and `ORIGIN` can only ever be one of them, so the comparison
+ * is on the address the browser really called. A request without an `Origin`
+ * header (a plain client, a healthcheck) is not a cross-site request.
+ */
+export function sameOriginRequest(request: Request): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true;
+  let host: string;
+  try {
+    host = new URL(origin).host;
+  } catch {
+    return false;
+  }
+  return host === (request.headers.get('host') || new URL(request.url).host);
+}
+
 export function providerPath(id: string): ApiPath {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new Error('Invalid provider ID');
   return `/api/providers/${encodeURIComponent(id)}`;
@@ -925,8 +947,7 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
     (path.startsWith('/api/seo/analyses/') && path.endsWith('/cancel'));
   let body: string | undefined;
   if (method !== 'GET') {
-    const origin = request.headers.get('origin');
-    if (origin && origin !== new URL(request.url).origin) return json({ detail: 'Недопустимый источник запроса' }, 403);
+    if (!sameOriginRequest(request)) return json({ detail: 'Недопустимый источник запроса' }, 403);
     const declared = request.headers.get('content-length');
     if (declared && Number(declared) > MAX_BODY_BYTES) return json({ detail: 'Запрос слишком большой' }, 413);
     if (method === 'DELETE') {
