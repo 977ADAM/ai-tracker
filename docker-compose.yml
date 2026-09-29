@@ -1,11 +1,12 @@
 # One command brings the whole application up:
 #
-#     cp .env.example .env      # fill in what you have (everything is optional)
 #     docker compose up -d --build
 #     open http://localhost:3000
 #
-# Secrets are read from `.env` through the variables below. A value saved in the
-# settings screen wins over the environment, exactly like a local run.
+# No secret is required to start: keys and addresses are entered in the settings
+# screen and stored in the data volume. A `.env` next to this file still works if
+# you prefer the environment — the variables below read it — and a value saved in
+# the settings screen wins over it, exactly like a local run.
 
 name: ai-tracker
 
@@ -50,8 +51,9 @@ services:
       # explicitly for the BFF origin guard.
       AI_TRACKER_API_URL: http://backend:8000
       AI_TRACKER_API_HOSTS: ${AI_TRACKER_API_HOSTS:-backend}
-      # adapter-node checks the Origin of state-changing requests against this
-      # value: set it to the address you open the interface from.
+      # The base address adapter-node builds absolute links and redirects from.
+      # Writes are checked against the address the browser really called, so the
+      # interface works from localhost and 127.0.0.1 alike.
       ORIGIN: http://localhost:3000
       HOST: 0.0.0.0
       PORT: 3000
