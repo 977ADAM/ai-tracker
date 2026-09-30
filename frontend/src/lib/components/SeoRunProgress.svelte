@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { SeoAnalysisSnapshot, SeoStageStatus, SeoTraceStep } from '$lib/types';
-  import { actualConnectionCount, actualQueryCount, queriesGenerated, SEO_STAGE_LABELS, snapshotActualEstimate } from '$lib/seo-form';
+  import { actualQueryCount, queriesGenerated, SEO_STAGE_LABELS, snapshotActualEstimate } from '$lib/seo-form';
   import { hasAgentState } from '$lib/seo-agents';
   import SeoAgentPanel from './SeoAgentPanel.svelte';
   import SeoTraceFeed from './SeoTraceFeed.svelte';
@@ -69,7 +69,6 @@
   const counters = $derived(snapshot.counters);
   const actual = $derived(snapshotActualEstimate(snapshot));
   const generated = $derived(queriesGenerated(snapshot));
-  const connectionCount = $derived(actualConnectionCount(snapshot));
   const queryCount = $derived(actualQueryCount(snapshot));
   const failedStages = $derived(stages.filter((stage) => stage.error !== null));
   const terminal = $derived(snapshot.status !== 'running');
@@ -115,7 +114,7 @@
   {#if generated}
     <p class="mt-3 text-sm leading-6 text-ink" aria-label="Фактическая оценка вызовов">
       После генерации: {queryCount} запросов, то есть {actual.searchActual} поисковых вызовов
-      (3 ключевых + {queryCount}) и {actual.modelActual} модельных ({queryCount} × {connectionCount}).
+      (3 ключевых + {queryCount}) и не больше {actual.modelActual} модельных за прогон.
     </p>
   {/if}
 

@@ -77,8 +77,7 @@ describe('SeoRunProgress', () => {
     const estimate = screen.getByLabelText('Фактическая оценка вызовов').textContent ?? '';
     expect(estimate).toContain('12 запросов');
     expect(estimate).toContain('15 поисковых');
-    expect(estimate).toContain('24 модельных');
-    expect(estimate).toContain('12 × 2');
+    expect(estimate).toContain('не больше 5 модельных за прогон');
   });
 
   it('hides the actual estimate until the queries exist', () => {

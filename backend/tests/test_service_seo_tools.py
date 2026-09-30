@@ -19,7 +19,12 @@ import pytest
 from app.core.errors import ProviderError
 from app.db.seo import SeoRepository
 from app.domain.search import SearchDocument
-from app.domain.seo import SeoInput, normalize_seo_request
+from app.domain.seo import (
+    GENERATED_QUERY_LIMIT,
+    MIN_GENERATED_QUERIES,
+    SeoInput,
+    normalize_seo_request,
+)
 from app.domain.seo_tools import (
     FATAL_SITE_UNREACHABLE,
     SEARCH_REGION,
@@ -74,7 +79,7 @@ def payload(**overrides: object) -> dict[str, object]:
     return data
 
 
-def query_objects(count: int = 5, *, service: str = "Букеты") -> list[dict[str, object]]:
+def query_objects(count: int = GENERATED_QUERY_LIMIT, *, service: str = "Букеты") -> list[dict[str, object]]:
     return [
         {"query": f"купить букет {index}", "category": CATEGORY, "service": service}
         for index in range(count)
@@ -82,8 +87,8 @@ def query_objects(count: int = 5, *, service: str = "Букеты") -> list[dict
 
 
 def bounded(**overrides: int) -> SeoBudget:
-    """Build a small budget for one connection with chosen caps."""
-    budget = SeoBudget.for_connections(overrides.pop("connections", 1))
+    """Build the run budget with chosen caps."""
+    budget = SeoBudget.for_run()
     return SeoBudget(**{**{field: getattr(budget, field) for field in (
         "max_pages", "max_searches", "max_model_answers", "max_tool_calls", "max_handoffs", "max_turns",
     )}, **overrides})
@@ -113,7 +118,7 @@ def make_env(
     repository.initialize()
     request: SeoInput = normalize_seo_request(payload(connection_ids=list(connection_ids), **(input_overrides or {})))
     analysis_id = repository.create_analysis(
-        request, {"search_upper": 43, "model_upper": 40, "generated_limit": 40,
+        request, {"search_upper": 5, "model_upper": 5, "generated_limit": 2,
                   "connections": len(connection_ids)},
     )
     fetcher = fetcher if fetcher is not None else FakeSiteFetcher()
@@ -128,7 +133,7 @@ def make_env(
         analysis_id=analysis_id,
         input=request,
         connection_ids=connection_ids,
-        budget=budget if budget is not None else SeoBudget.for_connections(len(connection_ids)),
+        budget=budget if budget is not None else SeoBudget.for_run(),
         poll_interval=poll_interval,
         model_name=model_name,
         on_step=on_step,
@@ -150,7 +155,7 @@ def result(call_result: str) -> dict:
     return json.loads(call_result)
 
 
-async def ready(env: SimpleNamespace, *, count: int = 5) -> None:
+async def ready(env: SimpleNamespace, *, count: int = GENERATED_QUERY_LIMIT) -> None:
     """Take one run to the point where checks may start."""
     assert result(await env.toolbox.call("fetch_site", {}))["pages"]
     assert result(await env.toolbox.call(
@@ -525,7 +530,7 @@ async def test_yandex_search_of_a_generated_query_saves_its_row_and_candidate_hi
     assert rows[0]["status"] == "found" and rows[0]["site_position"] == 2
     assert rows[0]["site_url"] == "https://example.ru/page"
     counts = env.repository.snapshot(env.analysis_id)["aggregates"]["counts"]
-    assert counts["queries"] == 5
+    assert counts["queries"] == GENERATED_QUERY_LIMIT
 
 
 @pytest.mark.anyio
@@ -619,22 +624,26 @@ async def test_save_queries_requires_site_facts_and_validates_the_domain_rules(t
     await env.toolbox.call("fetch_site", {})
     await env.toolbox.call("save_site_facts", {"company_name": "Ромашка", "services": []})
 
-    few = result(await env.toolbox.call("save_queries", {"queries": query_objects(4)}))
-    assert "меньше 5" in few["error"]
+    few = result(await env.toolbox.call("save_queries", {"queries": query_objects(MIN_GENERATED_QUERIES - 1)}))
+    assert f"меньше {MIN_GENERATED_QUERIES}" in few["error"]
     bad = result(await env.toolbox.call(
         "save_queries",
-        {"queries": [{"query": f"запрос {index}", "category": "brand"} for index in range(5)]},
+        {"queries": [{"query": f"запрос {index}", "category": "brand"} for index in range(2)]},
     ))
     assert bad["status"] == "rejected" and "категор" in bad["error"].lower()
     assert env.repository.snapshot(env.analysis_id)["queries"] == []
 
-    saved = result(await env.toolbox.call("save_queries", {"queries": query_objects(6)}))
+    saved = result(await env.toolbox.call("save_queries", {"queries": query_objects()}))
     assert saved == {
-        "status": "saved", "saved": 6,
-        "categories": {"commercial": 6, "informational": 0, "comparative": 0},
+        "status": "saved", "saved": GENERATED_QUERY_LIMIT,
+        "categories": {"commercial": GENERATED_QUERY_LIMIT, "informational": 0, "comparative": 0},
         "branded": 0,
     }
-    assert len(env.repository.snapshot(env.analysis_id)["queries"]) == 6
+    assert len(env.repository.snapshot(env.analysis_id)["queries"]) == GENERATED_QUERY_LIMIT
+    too_many = result(await env.toolbox.call(
+        "save_queries", {"queries": query_objects(GENERATED_QUERY_LIMIT + 1)},
+    ))
+    assert too_many["status"] == "rejected"
     assert result(await env.toolbox.call("save_queries", {"queries": query_objects()}))["error"] == (
         "Сгенерированные запросы уже сохранены"
     )
@@ -649,24 +658,20 @@ async def test_save_queries_flags_brands_on_the_server_side(tmp_path, repository
     await env.toolbox.call("save_candidates", {"candidates": [{"host": "rival.ru"}]})
     queries = [
         {"query": "Ромашка доставка", "category": "commercial", "service": ""},
-        {"query": "rival.ru отзывы", "category": "commercial", "service": ""},
-        {"query": "как выбрать букет", "category": "informational", "service": ""},
-        {"query": "сравнение букетов", "category": "comparative", "service": ""},
-        {"query": "цена букета", "category": "commercial", "service": ""},
+        {"query": "rival.ru отзывы", "category": "comparative", "service": ""},
     ]
 
     saved = result(await env.toolbox.call("save_queries", {"queries": queries}))
 
     assert saved == {
-        "status": "saved", "saved": 5,
-        "categories": {"commercial": 3, "informational": 1, "comparative": 1},
+        "status": "saved", "saved": GENERATED_QUERY_LIMIT,
+        "categories": {"commercial": 1, "informational": 0, "comparative": 1},
         "branded": 1,
     }
     stored = {item["text"]: item["flags"] for item in env.repository.snapshot(env.analysis_id)["queries"]}
     assert stored["Ромашка доставка"]["branded"] is True
     assert stored["rival.ru отзывы"]["mentions_candidate_host"] is True
     assert stored["rival.ru отзывы"]["branded"] is False
-    assert stored["как выбрать букет"]["branded"] is False
 
 
 # -- check tools -------------------------------------------------------------
@@ -675,22 +680,23 @@ async def test_save_queries_flags_brands_on_the_server_side(tmp_path, repository
 @pytest.mark.anyio
 async def test_search_many_checks_a_batch_and_never_pays_for_it_twice(tmp_path, repository, settings):
     env = make_env(tmp_path, repository, settings)
-    await ready(env, count=5)
+    await ready(env)
 
     first = result(await env.toolbox.call("search_many", {}))
 
     assert first == {
-        "found": 5, "absent": 0, "error": 0, "reused": 0, "budget_exhausted": False, "errors": [],
+        "found": GENERATED_QUERY_LIMIT, "absent": 0, "error": 0, "reused": 0,
+        "budget_exhausted": False, "errors": [],
     }
-    assert len(env.gateway.submitted) == 5
+    assert len(env.gateway.submitted) == GENERATED_QUERY_LIMIT
     rows = env.repository.rows_page(env.analysis_id, "search")["items"]
-    assert [row["status"] for row in rows] == ["found"] * 5
+    assert [row["status"] for row in rows] == ["found"] * GENERATED_QUERY_LIMIT
     assert all(row["site_position"] == 2 for row in rows)
     assert env.repository.search_documents(env.analysis_id, 0)["status"] == "found"
 
     second = result(await env.toolbox.call("search_many", {}))
-    assert second["reused"] == 5 and second["found"] == 0
-    assert len(env.gateway.submitted) == 5
+    assert second["reused"] == GENERATED_QUERY_LIMIT and second["found"] == 0
+    assert len(env.gateway.submitted) == GENERATED_QUERY_LIMIT
 
 
 @pytest.mark.anyio
@@ -699,11 +705,11 @@ async def test_search_many_isolates_a_failed_row_and_reports_the_budget(tmp_path
         tmp_path, repository, settings,
         gateway=ScriptedSeoGateway(DOCUMENTS, fail_submits=(query_objects()[1]["query"],)),
     )
-    await ready(env, count=5)
+    await ready(env)
 
     answer = result(await env.toolbox.call("search_many", {}))
 
-    assert (answer["found"], answer["absent"], answer["error"]) == (4, 0, 1)
+    assert (answer["found"], answer["absent"], answer["error"]) == (1, 0, 1)
     assert answer["errors"][0]["query"] == query_objects()[1]["query"]
     assert "https://" not in answer["errors"][0]["error"]
     rows = {row["query_index"]: row["status"] for row in env.repository.rows_page(env.analysis_id, "search")["items"]}
@@ -712,20 +718,20 @@ async def test_search_many_isolates_a_failed_row_and_reports_the_budget(tmp_path
 
 @pytest.mark.anyio
 async def test_search_many_never_exceeds_the_shared_search_pool(tmp_path, repository, settings):
-    env = make_env(tmp_path, repository, settings, budget=bounded(max_searches=2))
-    await ready(env, count=5)
+    env = make_env(tmp_path, repository, settings, budget=bounded(max_searches=1))
+    await ready(env)
 
     answer = result(await env.toolbox.call("search_many", {}))
 
-    assert answer["found"] == 2 and answer["budget_exhausted"] is True
-    assert len(env.gateway.submitted) == 2
+    assert answer["found"] == 1 and answer["budget_exhausted"] is True
+    assert len(env.gateway.submitted) == 1
     assert env.toolbox.exhausted is True
 
 
 @pytest.mark.anyio
 async def test_a_duplicated_query_in_one_batch_is_paid_once(tmp_path, repository, settings):
     env = make_env(tmp_path, repository, settings)
-    await ready(env, count=5)
+    await ready(env)
 
     answer = result(await env.toolbox.call(
         "search_many", {"queries": ["купить букет 0", "КУПИТЬ БУКЕТ 0"]},
@@ -738,7 +744,7 @@ async def test_a_duplicated_query_in_one_batch_is_paid_once(tmp_path, repository
 @pytest.mark.anyio
 async def test_parallel_search_calls_pay_once_for_the_same_query(tmp_path, repository, settings):
     env = make_env(tmp_path, repository, settings, gateway=YieldingGateway(DOCUMENTS))
-    await ready(env, count=5)
+    await ready(env)
     batch = {"queries": ["купить букет 0"]}
 
     first, second = await asyncio.gather(
@@ -756,7 +762,7 @@ async def test_parallel_search_calls_pay_once_for_the_same_query(tmp_path, repos
 async def test_parallel_model_calls_ask_the_same_pair_once(tmp_path, repository, settings):
     factory = CountingProviderFactory(delay=0.02)
     env = make_env(tmp_path, repository, settings, provider_factory=factory)
-    await ready(env, count=5)
+    await ready(env)
     batch = {"queries": ["купить букет 0"]}
 
     first, second = await asyncio.gather(
@@ -776,7 +782,7 @@ async def test_search_many_requires_saved_queries_and_reports_unknown_texts(tmp_
         "Сначала сохраните сгенерированные запросы"
     )
 
-    await ready(env, count=5)
+    await ready(env)
     answer = result(await env.toolbox.call("search_many", {"queries": ["купить букет 0", "чужой запрос"]}))
 
     assert answer["found"] == 1
@@ -792,18 +798,18 @@ async def test_ask_models_answers_every_pair_and_isolates_a_broken_connection(tm
         connection_ids=("openai", "deepseek"),
         configured=(("openai", "key-1"), ("deepseek", "key-2")),
     )
-    await ready(env, count=5)
+    await ready(env)
 
     answer = result(await env.toolbox.call("ask_models", {}))
 
     assert answer["connections"] == {
-        "openai": {"found": 5, "absent": 0, "error": 0, "skipped": 0, "budget": 0},
-        "deepseek": {"found": 0, "absent": 0, "error": 5, "skipped": 0, "budget": 0},
+        "openai": {"found": 2, "absent": 0, "error": 0, "skipped": 0, "budget": 0},
+        "deepseek": {"found": 0, "absent": 0, "error": 2, "skipped": 0, "budget": 0},
     }
-    assert answer["found"] == 5 and answer["error"] == 5
+    assert answer["found"] == 2 and answer["error"] == 2
     assert {item["connection_id"] for item in answer["errors"]} == {"deepseek"}
     rows = env.repository.rows_page(env.analysis_id, "model")["items"]
-    assert len(rows) == 10
+    assert len(rows) == 4
     assert all(row["answer"] == SEO_MENTION_ANSWER for row in rows if row["connection_id"] == "openai")
     assert all(row["error"] for row in rows if row["connection_id"] == "deepseek")
 
@@ -812,15 +818,15 @@ async def test_ask_models_answers_every_pair_and_isolates_a_broken_connection(tm
 async def test_ask_models_reuses_stored_pairs_with_zero_provider_calls(tmp_path, repository, settings):
     factory = CountingProviderFactory()
     env = make_env(tmp_path, repository, settings, provider_factory=factory)
-    await ready(env, count=5)
+    await ready(env)
 
     first = result(await env.toolbox.call("ask_models", {}))
     second = result(await env.toolbox.call("ask_models", {}))
 
-    assert first["found"] == 5
-    assert second["skipped"] == 5 and second["found"] == 0
+    assert first["found"] == 2
+    assert second["skipped"] == 2 and second["found"] == 0
     # The stored pairs are reused, so the second call creates no provider call at all.
-    assert len(factory.calls_made) == 5
+    assert len(factory.calls_made) == 2
     assert result(await env.toolbox.call("ask_models", {"connection_ids": ["неизвестное"]}))["error"] == (
         "Выбрано неизвестное подключение"
     )
@@ -828,17 +834,17 @@ async def test_ask_models_reuses_stored_pairs_with_zero_provider_calls(tmp_path,
 
 @pytest.mark.anyio
 async def test_ask_models_requires_queries_and_respects_the_answer_budget(tmp_path, repository, settings):
-    env = make_env(tmp_path, repository, settings, budget=bounded(max_model_answers=2))
+    env = make_env(tmp_path, repository, settings, budget=bounded(max_model_answers=1))
 
     assert result(await env.toolbox.call("ask_models", {}))["error"] == (
         "Сначала сохраните сгенерированные запросы"
     )
 
-    await ready(env, count=5)
+    await ready(env)
     answer = result(await env.toolbox.call("ask_models", {}))
 
-    assert answer["found"] == 2 and answer["budget_exhausted"] is True
-    assert answer["connections"]["openai"]["budget"] == 3
+    assert answer["found"] == 1 and answer["budget_exhausted"] is True
+    assert answer["connections"]["openai"]["budget"] == 1
     assert env.toolbox.exhausted is True
 
 
@@ -924,12 +930,12 @@ async def test_ask_models_never_runs_more_than_the_connection_cap_at_once(tmp_pa
         configured=(("openai", "key-1"), ("deepseek", "key-2")),
         max_model_concurrency=1,
     )
-    await ready(env, count=5)
+    await ready(env)
 
     answer = result(await env.toolbox.call("ask_models", {}))
 
-    assert answer["found"] == 10
-    assert spy.calls == 10
+    assert answer["found"] == 4
+    assert spy.calls == 4
     assert spy.peak == 1
 
 
@@ -939,14 +945,14 @@ async def test_read_checks_counts_rows_and_reports_only_safe_errors(tmp_path, re
         tmp_path, repository, settings,
         gateway=ScriptedSeoGateway(DOCUMENTS, fail_submits=(query_objects()[1]["query"],)),
     )
-    await ready(env, count=5)
+    await ready(env)
     await env.toolbox.call("search_many", {})
     await env.toolbox.call("ask_models", {})
 
     checks = result(await env.toolbox.call("read_checks", {}))
 
-    assert checks["searches"] == {"found": 4, "absent": 0, "error": 1, "pending": 0}
-    assert checks["models"] == {"found": 5, "absent": 0, "error": 0, "pending": 0}
+    assert checks["searches"] == {"found": 1, "absent": 0, "error": 1, "pending": 0}
+    assert checks["models"] == {"found": 2, "absent": 0, "error": 0, "pending": 0}
     assert len(checks["errors"]) == 1
     assert checks["errors"][0]["kind"] == "search"
     assert checks["errors"][0]["query"] == query_objects()[1]["query"]
@@ -957,14 +963,14 @@ async def test_read_checks_counts_rows_and_reports_only_safe_errors(tmp_path, re
 @pytest.mark.anyio
 async def test_read_metrics_returns_only_server_aggregates(tmp_path, repository, settings):
     env = make_env(tmp_path, repository, settings)
-    await ready(env, count=5)
+    await ready(env)
     await env.toolbox.call("search_many", {})
     await env.toolbox.call("ask_models", {})
 
     metrics = result(await env.toolbox.call("read_metrics", {}))
 
-    assert metrics["site"]["search"]["overall"]["denominator"] == 5
-    assert metrics["counts"]["queries"] == 5
+    assert metrics["site"]["search"]["overall"]["denominator"] == 2
+    assert metrics["counts"]["queries"] == 2
     serialized = json.dumps(metrics, ensure_ascii=False)
     assert SEO_MENTION_ANSWER not in serialized
     assert "https://example.ru/page" not in serialized
@@ -973,7 +979,7 @@ async def test_read_metrics_returns_only_server_aggregates(tmp_path, repository,
 @pytest.mark.anyio
 async def test_save_report_stores_the_model_text_beside_the_numbers(tmp_path, repository, settings):
     env = make_env(tmp_path, repository, settings)
-    await ready(env, count=5)
+    await ready(env)
 
     saved = result(await env.toolbox.call(
         "save_report", {"summary": "Сводка по числам", "recommendations": "Рекомендации модели"},
@@ -1065,7 +1071,7 @@ async def test_finish_run_only_flags_the_end_for_the_runtime(tmp_path, repositor
 @pytest.mark.anyio
 async def test_read_status_reports_agents_budget_and_readiness(tmp_path, repository, settings):
     env = make_env(tmp_path, repository, settings)
-    await ready(env, count=5)
+    await ready(env)
 
     status = result(await env.toolbox.call("read_status", {}, agent="supervisor"))
 
@@ -1075,7 +1081,7 @@ async def test_read_status_reports_agents_budget_and_readiness(tmp_path, reposit
     assert next(agent for agent in status["agents"] if agent["agent"] == "queries")["status"] == "done"
     assert status["budget"]["tool_calls"]["used"] == 4
     assert status["stored"] == {
-        "pages": 1, "candidates": 0, "queries": 5, "search_rows": 0, "model_rows": 0,
+        "pages": 1, "candidates": 0, "queries": 2, "search_rows": 0, "model_rows": 0,
         "report_ready": False,
     }
     assert status["exhausted"] is False

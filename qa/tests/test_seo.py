@@ -131,7 +131,7 @@ def seed_finished_analysis() -> str:
 
     analysis_id = f"qa-seo-{uuid4().hex[:10]}"
     now = datetime.now(UTC).isoformat()
-    estimate = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
+    estimate = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1}
 
     with closing(sqlite3.connect(path, timeout=5)) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
@@ -313,8 +313,8 @@ def test_seo_form_shows_the_upper_call_estimate(
     expect(seo.estimate_model).to_have_text("0")
 
     seo.connection_checkbox(PROVIDER_NAME).check()
-    expect(seo.estimate_search).to_have_text("43")
-    expect(seo.estimate_model).to_have_text("40")
+    expect(seo.estimate_search).to_have_text("5")
+    expect(seo.estimate_model).to_have_text("5")
     expect(seo.form).to_contain_text("платные вызовы")
     expect(seo.form).to_contain_text("отложенном режиме")
     expect(seo.form).to_contain_text("отдельно настроенную LLM")
@@ -462,8 +462,8 @@ def test_saved_report_opens_from_history_and_deletes(page: Page, application: Ap
             expect(seo.agent(agent)).to_contain_text(AGENT_LABELS[agent])
             expect(seo.agent_status(agent)).to_have_text("Готово")
         assert seo.budget_text("pages") == "1 / 5"
-        assert seo.budget_text("searches") == "3 / 43"
-        assert seo.budget_text("model_answers") == "3 / 40"
+        assert seo.budget_text("searches") == "3 / 5"
+        assert seo.budget_text("model_answers") == "3 / 5"
         assert seo.budget_text("tool_calls") == "4 / 120"
         assert seo.budget_text("handoffs") == "1 / 15"
         assert seo.budget_text("steps") == str(len(AGENT_STEPS))

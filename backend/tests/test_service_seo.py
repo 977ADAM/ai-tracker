@@ -46,7 +46,7 @@ from tests.fakes import (
 )
 
 SEEDS = ("букет цветов", "доставка цветов", "розы")
-ESTIMATE = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
+ESTIMATE = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1}
 TERMINAL = frozenset({"completed", "failed", "interrupted", "cancelled"})
 # A sentinel for "this container has no Yandex gateway at all".
 NO_GATEWAY = object()
@@ -172,7 +172,7 @@ async def test_start_writes_the_analysis_and_runs_the_graph_in_the_background(
 
 
 @pytest.mark.anyio
-async def test_the_estimate_counts_every_selected_connection(tmp_path, repository, settings):
+async def test_the_estimate_keeps_the_model_upper_flat_for_every_connection(tmp_path, repository, settings):
     harness = make_harness(
         tmp_path,
         repository,
@@ -183,7 +183,7 @@ async def test_the_estimate_counts_every_selected_connection(tmp_path, repositor
     created = await harness.service.start(payload(connection_ids=["openai", "deepseek"]))
 
     assert created["estimate"] == {
-        "search_upper": 43, "model_upper": 80, "generated_limit": 40, "connections": 2,
+        "search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 2,
     }
     await asyncio.sleep(0)
     assert harness.runtime.runs[0][1].connection_ids == ("openai", "deepseek")
@@ -579,7 +579,7 @@ def test_the_container_builds_the_service_over_the_agent_runtime(tmp_path):
         assert not checkpoint_path(tmp_path).exists()
 
         toolbox = service.runtime.toolbox_factory(
-            "analysis", stored_input(), SeoBudget.for_connections(1),
+            "analysis", stored_input(), SeoBudget.for_run(),
         )
         assert isinstance(toolbox.fetcher, HttpxSiteFetcher)
         assert toolbox.fetcher.client is container.search_client

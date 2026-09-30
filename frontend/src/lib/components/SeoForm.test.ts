@@ -45,11 +45,15 @@ describe('SeoForm', () => {
   });
 
   it('shows the upper estimate for the selected connections and the paid-run notices', async () => {
-    render(SeoForm, { props: { providers, form, onSubmit: vi.fn() } });
-    expect(screen.getByText('43')).toBeTruthy();
-    expect(screen.getByText('40')).toBeTruthy();
+    const { container } = render(SeoForm, { props: { providers, form, onSubmit: vi.fn() } });
+    const estimate = (selector: string) => container.querySelector(selector)?.textContent?.trim() ?? '';
+    expect(estimate('[data-estimate-search]')).toBe('5');
+    expect(estimate('[data-estimate-model]')).toBe('5');
     await fireEvent.click(screen.getByRole('checkbox', { name: /Модель 2/ }));
-    expect(screen.getByText('80')).toBeTruthy();
+    // The model upper stays flat: a second connection does not raise the price.
+    expect(estimate('[data-estimate-search]')).toBe('5');
+    expect(estimate('[data-estimate-model]')).toBe('5');
+    expect(screen.getByText(/независимо от числа подключений/i)).toBeTruthy();
     expect(screen.getByText(/служебные шаги/i)).toBeTruthy();
     expect(screen.getByText(/платные вызовы/i)).toBeTruthy();
     expect(screen.getByText(/отложенном режиме/i)).toBeTruthy();

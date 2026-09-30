@@ -649,8 +649,12 @@ class SeoToolbox:
                 return await self._answer_one(connection_id, target, existing, prepared[connection_id])
 
         try:
+            # Target-major order: the model-answer cap of one run binds as soon as
+            # `queries × connections` exceeds it, and then every connection must be
+            # asked the same first query instead of the first connections eating
+            # the whole budget and leaving nothing to compare against.
             results = await asyncio.gather(*(
-                run(connection_id, target) for connection_id in connections for target in targets
+                run(connection_id, target) for target in targets for connection_id in connections
             ))
         finally:
             for provider, _error, _name in prepared.values():

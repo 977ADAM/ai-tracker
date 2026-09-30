@@ -149,7 +149,7 @@
         <span class="font-semibold" data-estimate-search>{upper.searchUpper}</span>
         поисковых запросов в Яндекс (3 ключевых + до {upper.generatedLimit} сгенерированных) и не больше
         <span class="font-semibold" data-estimate-model>{upper.modelUpper}</span>
-        запросов к моделям (до {upper.generatedLimit} × {upper.connections}).
+        запросов к моделям за прогон, независимо от числа подключений.
       </p>
       <ul class="mt-3 space-y-1 text-xs leading-5 text-muted" aria-label="Предупреждения о прогоне">
         <li>Прогон ведут агенты: супервизор передаёт работу специалистам, и число шагов зависит от модели — эта часть в оценку выше не входит и заранее не тарифицируется.</li>

@@ -7,10 +7,10 @@ nothing here trusts the model: an unknown tool, an extra field, a wrong type, or
 an exhausted budget becomes a safe `ToolRejected`/`BudgetExceeded` that the
 toolbox returns to the model instead of executing.
 
-The limits are the agreed ceilings of one run: 20 fetched pages (owned by
-`domain.site_fetch`), 43 paid Yandex searches together with the three key ones,
-40 × M model answers, 15 supervisor handoffs, 20 model turns per specialist,
-120 tool calls, and 120 seconds per LLM call.
+The limits are the agreed ceilings of one run: 5 fetched pages (owned by
+`domain.site_fetch`), 5 paid Yandex searches (the three key ones plus the two
+generated ones), 5 model answers for the whole run, 15 supervisor handoffs, 20
+model turns per specialist, 120 tool calls, and 120 seconds per LLM call.
 """
 
 from __future__ import annotations
@@ -30,14 +30,18 @@ from app.domain.seo import (
     MAX_SERVICES,
     MIN_GENERATED_QUERIES,
     QUERY_CATEGORIES,
+    SEED_COUNT,
 )
 from app.domain.seo_llm import ToolSchema
 from app.domain.site_fetch import MAX_FETCH_PAGES
 
 # Budget ceilings of one run. `MAX_FETCH_PAGES` is re-exported so a caller reads
-# every cap from one module; the model-answer cap is `GENERATED_QUERY_LIMIT * M`
-# and is built per run by `SeoBudget.for_connections`.
-MAX_SEARCH_REQUESTS = 43
+# every cap from one module. The Yandex pool is derived from the fixed query
+# shape, so the three key searches and the generated ones can never drift apart,
+# and the model-answer cap is flat: five paid answers per run, not per
+# connection, so adding a connection never raises the price of the run.
+MAX_SEARCH_REQUESTS = SEED_COUNT + GENERATED_QUERY_LIMIT
+MAX_MODEL_ANSWERS = 5
 MAX_SUPERVISOR_HANDOFFS = 15
 MAX_SPECIALIST_TURNS = 20
 MAX_TOOL_CALLS = 120
@@ -128,17 +132,15 @@ class SeoBudget:
 
     max_pages: int = MAX_FETCH_PAGES
     max_searches: int = MAX_SEARCH_REQUESTS
-    max_model_answers: int = 0
+    max_model_answers: int = MAX_MODEL_ANSWERS
     max_tool_calls: int = MAX_TOOL_CALLS
     max_handoffs: int = MAX_SUPERVISOR_HANDOFFS
     max_turns: int = MAX_SPECIALIST_TURNS
 
     @classmethod
-    def for_connections(cls, connections: int) -> SeoBudget:
-        """Build the budget of one run with `M` selected model connections."""
-        if isinstance(connections, bool) or not isinstance(connections, int) or connections < 0:
-            raise ToolRejected(INVALID_ARGUMENTS)
-        return cls(max_model_answers=GENERATED_QUERY_LIMIT * connections)
+    def for_run(cls) -> SeoBudget:
+        """Build the budget of one run: no cap depends on the connection count."""
+        return cls()
 
     def turns_for(self, agent: str) -> int:
         """Return the model turns one specialist already spent."""
@@ -261,7 +263,8 @@ TOOL_DESCRIPTIONS: Mapping[str, str] = {
     ),
     "ask_models": (
         "Опросить выбранные модели по сохранённым запросам. Уже проверенные пары возвращаются "
-        "без нового обращения; ошибка одного подключения не мешает остальным."
+        "без нового обращения; ошибка одного подключения не мешает остальным. За весь прогон "
+        f"оплачивается не больше {MAX_MODEL_ANSWERS} ответов: пары сверх лимита не оплачиваются."
     ),
     "read_checks": "Показать состояние поисковых и модельных проверок и безопасные тексты ошибок.",
     "read_metrics": "Показать агрегированные числа, посчитанные сервером по сохранённым строкам.",
@@ -585,6 +588,7 @@ __all__ = [
     "GENERATED_QUERY_LIMIT",
     "LLM_CALL_TIMEOUT",
     "MAX_FETCH_PAGES",
+    "MAX_MODEL_ANSWERS",
     "MAX_SEARCH_REQUESTS",
     "MAX_SPECIALIST_TURNS",
     "MAX_SUPERVISOR_HANDOFFS",

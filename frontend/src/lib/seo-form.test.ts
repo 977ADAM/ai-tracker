@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   actualConnectionCount, actualQueryCount, estimateActual, estimateUpper, GENERATED_QUERY_LIMIT,
+  MAX_MODEL_ANSWERS,
   parseSeeds, parseServices, queriesGenerated, SEO_STAGE_LABELS, SEARCH_UPPER, snapshotActualEstimate,
   validateSeoForm
 } from './seo-form';
@@ -93,18 +94,21 @@ describe('validateSeoForm', () => {
 
 describe('call estimates', () => {
   it('bounds the run before generation with M connections', () => {
-    expect(estimateUpper(1)).toEqual({ searchUpper: 43, modelUpper: 40, generatedLimit: 40, connections: 1 });
-    expect(estimateUpper(3)).toEqual({ searchUpper: 43, modelUpper: 120, generatedLimit: 40, connections: 3 });
-    expect(estimateUpper(5)).toEqual({ searchUpper: 43, modelUpper: 200, generatedLimit: 40, connections: 5 });
-    expect(SEARCH_UPPER).toBe(43);
-    expect(GENERATED_QUERY_LIMIT).toBe(40);
+    expect(estimateUpper(0)).toEqual({ searchUpper: 5, modelUpper: 0, generatedLimit: 2, connections: 0 });
+    expect(estimateUpper(1)).toEqual({ searchUpper: 5, modelUpper: 5, generatedLimit: 2, connections: 1 });
+    expect(estimateUpper(3)).toEqual({ searchUpper: 5, modelUpper: 5, generatedLimit: 2, connections: 3 });
+    expect(estimateUpper(5)).toEqual({ searchUpper: 5, modelUpper: 5, generatedLimit: 2, connections: 5 });
+    expect(SEARCH_UPPER).toBe(5);
+    expect(GENERATED_QUERY_LIMIT).toBe(2);
+    expect(MAX_MODEL_ANSWERS).toBe(5);
   });
 
-  it('counts the actual K and K x M after generation', () => {
+  it('counts the actual K and K x M after generation, capped by the flat model budget', () => {
     expect(estimateActual(0, 3)).toEqual({ searchActual: 3, modelActual: 0 });
-    expect(estimateActual(12, 3)).toEqual({ searchActual: 15, modelActual: 36 });
-    expect(estimateActual(20, 1)).toEqual({ searchActual: 23, modelActual: 20 });
-    expect(estimateActual(40, 5)).toEqual({ searchActual: 43, modelActual: 200 });
+    expect(estimateActual(12, 3)).toEqual({ searchActual: 15, modelActual: 5 });
+    expect(estimateActual(2, 1)).toEqual({ searchActual: 5, modelActual: 2 });
+    expect(estimateActual(2, 2)).toEqual({ searchActual: 5, modelActual: 4 });
+    expect(estimateActual(40, 5)).toEqual({ searchActual: 43, modelActual: 5 });
   });
 });
 
@@ -136,7 +140,7 @@ describe('snapshot helpers', () => {
     const counted = snapshot({ counters: { queries: 9, search_rows: 9, model_rows: 18, search_errors: 0, model_errors: 0 } });
     expect(actualQueryCount(counted)).toBe(9);
     expect(queriesGenerated(counted)).toBe(true);
-    expect(snapshotActualEstimate(counted)).toEqual({ searchActual: 12, modelActual: 18 });
+    expect(snapshotActualEstimate(counted)).toEqual({ searchActual: 12, modelActual: 5 });
     expect(queriesGenerated(snapshot())).toBe(false);
   });
 });

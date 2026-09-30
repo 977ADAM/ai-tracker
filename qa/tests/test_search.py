@@ -72,7 +72,7 @@ def snapshot(status: str) -> dict:
             "seeds": ["купить цветы", "доставка букетов", "цветочный магазин"],
             "services": ["Доставка цветов"], "connection_ids": [MODEL_ID],
         },
-        "estimate": {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+        "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
         "company_name": "Ромашка",
         "services": ["Доставка цветов"],
         "pages": [],
@@ -135,7 +135,7 @@ def agent_snapshot(status: str, *, exhausted: bool = False) -> dict:
     """A snapshot of the agent runtime: six agents, their budget, and conclusions."""
     data = snapshot(status)
     running = status == "running"
-    data["estimate"] = {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1}
+    data["estimate"] = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1}
     data["agents"] = [
         {
             "agent": agent,
@@ -147,8 +147,8 @@ def agent_snapshot(status: str, *, exhausted: bool = False) -> dict:
     ]
     data["budget"] = {
         "pages": {"used": 1, "limit": 5},
-        "searches": {"used": 2, "limit": 43},
-        "model_answers": {"used": 1, "limit": 40},
+        "searches": {"used": 2, "limit": 5},
+        "model_answers": {"used": 1, "limit": 5},
         "tool_calls": {"used": 5, "limit": 120},
         "handoffs": {"used": 1, "limit": 15},
         "seed_searches": 0, "model_rows": 1, "steps": 7,
@@ -177,7 +177,7 @@ def _answer_agent(route: Route, state: dict) -> None:
         state["posts"] += 1
         route.fulfill(status=202, json={
             "id": ANALYSIS_ID, "status": "running",
-            "estimate": {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+            "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
         })
     elif path.endswith("/api/seo/analyses") and request.method == "GET":
         route.fulfill(json={"items": [], "next_cursor": None})
@@ -213,7 +213,7 @@ def seeded_run(page: Page, state: dict) -> None:
             state["posts"] += 1
             route.fulfill(status=202, json={
                 "id": ANALYSIS_ID, "status": "running",
-                "estimate": {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+                "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
             })
         elif path.endswith("/api/seo/analyses") and method == "GET":
             route.fulfill(json={"items": [], "next_cursor": None})
@@ -241,7 +241,7 @@ def seeded_cancel(page: Page, state: dict) -> None:
             state["posts"] += 1
             route.fulfill(status=202, json={
                 "id": ANALYSIS_ID, "status": "running",
-                "estimate": {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+                "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
             })
         elif path.endswith("/api/seo/analyses") and request.method == "GET":
             route.fulfill(json={"items": [], "next_cursor": None})
@@ -324,7 +324,7 @@ def test_agent_run_shows_agents_budget_trace_and_conclusions(
 
     # The budget pairs what was spent with the caps of the run.
     assert page.locator("[data-budget-used='pages']").inner_text().strip() == "1 / 5"
-    assert page.locator("[data-budget-used='searches']").inner_text().strip() == "2 / 43"
+    assert page.locator("[data-budget-used='searches']").inner_text().strip() == "2 / 5"
     assert page.locator("[data-budget-used='tool_calls']").inner_text().strip() == "5 / 120"
     assert page.locator("[data-budget-used='handoffs']").inner_text().strip() == "1 / 15"
     expect(page.locator("[data-budget-exhausted]")).to_have_count(0)

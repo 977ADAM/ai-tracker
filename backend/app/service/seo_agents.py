@@ -907,9 +907,7 @@ class SeoAgentRuntime:
 
     def _toolbox(self, analysis_id: str, input: SeoInput) -> SeoToolbox:
         """Build one run's toolbox and give it this run's cancellation probe."""
-        toolbox = self.toolbox_factory(
-            analysis_id, input, SeoBudget.for_connections(len(input.connection_ids)),
-        )
+        toolbox = self.toolbox_factory(analysis_id, input, SeoBudget.for_run())
         toolbox.should_stop = lambda: self._cancelled(analysis_id)
         return toolbox
 

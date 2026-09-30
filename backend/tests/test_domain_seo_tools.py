@@ -21,6 +21,7 @@ from app.domain.seo_tools import (
     COMPETITOR_TOOLS,
     LLM_CALL_TIMEOUT,
     MAX_FETCH_PAGES,
+    MAX_MODEL_ANSWERS,
     MAX_SEARCH_REQUESTS,
     MAX_SPECIALIST_TURNS,
     MAX_SUPERVISOR_HANDOFFS,
@@ -49,9 +50,10 @@ def query(text: str, category: str = "commercial", service: str = "") -> dict[st
 
 
 def test_the_agreed_limits_are_the_ones_the_run_uses():
-    assert GENERATED_QUERY_LIMIT == 40
-    assert MIN_GENERATED_QUERIES == 5
-    assert MAX_SEARCH_REQUESTS == 43
+    assert GENERATED_QUERY_LIMIT == 2
+    assert MIN_GENERATED_QUERIES == 2
+    assert MAX_SEARCH_REQUESTS == 5
+    assert MAX_MODEL_ANSWERS == 5
     assert MAX_FETCH_PAGES == 5
     assert MAX_SUPERVISOR_HANDOFFS == 15
     assert MAX_SPECIALIST_TURNS == 20
@@ -217,14 +219,14 @@ def test_a_rejection_is_a_safe_app_error():
 
 
 def test_budget_spend_returns_a_new_budget_without_mutating_the_old_one():
-    first = SeoBudget.for_connections(1)
+    first = SeoBudget.for_run()
     second = first.spend_pages(2).spend_search().spend_model_answer(3).spend_tool_call().spend_handoff()
 
-    assert first == SeoBudget.for_connections(1)
+    assert first == SeoBudget.for_run()
     assert (first.pages, first.searches, first.model_answers, first.tool_calls, first.handoffs) == (0, 0, 0, 0, 0)
     assert (second.pages, second.searches, second.model_answers) == (2, 1, 3)
     assert (second.tool_calls, second.handoffs) == (1, 1)
-    assert second.max_model_answers == GENERATED_QUERY_LIMIT
+    assert second.max_model_answers == MAX_MODEL_ANSWERS
 
 
 def test_every_budget_raises_budget_exceeded_at_its_cap():
@@ -242,20 +244,16 @@ def test_every_budget_raises_budget_exceeded_at_its_cap():
         spent.spend_handoff()
 
 
-def test_the_model_answer_cap_is_the_query_limit_times_the_connections():
-    budget = SeoBudget.for_connections(3)
-    assert budget.max_model_answers == GENERATED_QUERY_LIMIT * 3
-    assert budget.spend_model_answer(budget.max_model_answers).model_answers == 120
+def test_the_model_answer_cap_is_flat_and_ignores_the_connection_count():
+    budget = SeoBudget.for_run()
+    assert budget.max_model_answers == MAX_MODEL_ANSWERS
+    assert budget.spend_model_answer(budget.max_model_answers).model_answers == 5
     with pytest.raises(BudgetExceeded):
         budget.spend_model_answer(budget.max_model_answers + 1)
-    with pytest.raises(ToolRejected):
-        SeoBudget.for_connections(-1)
-    with pytest.raises(ToolRejected):
-        SeoBudget.for_connections(True)  # type: ignore[arg-type]
 
 
 def test_turns_are_counted_per_specialist_and_never_for_the_supervisor():
-    budget = SeoBudget.for_connections(1)
+    budget = SeoBudget.for_run()
     spent = budget.spend_turn("site").spend_turn("site").spend_turn("queries")
 
     assert budget.turns_for("site") == 0
@@ -272,12 +270,12 @@ def test_turns_are_counted_per_specialist_and_never_for_the_supervisor():
 
 
 def test_the_budget_summary_reports_used_versus_cap():
-    budget = SeoBudget.for_connections(2)
+    budget = SeoBudget.for_run()
     summary = budget.spend_pages(3).spend_search(1).spend_turn("checks").as_dict()
 
     assert summary["pages"] == {"used": 3, "cap": MAX_FETCH_PAGES}
     assert summary["searches"] == {"used": 1, "cap": MAX_SEARCH_REQUESTS}
-    assert summary["model_answers"] == {"used": 0, "cap": GENERATED_QUERY_LIMIT * 2}
+    assert summary["model_answers"] == {"used": 0, "cap": MAX_MODEL_ANSWERS}
     assert summary["tool_calls"] == {"used": 0, "cap": MAX_TOOL_CALLS}
     assert summary["handoffs"] == {"used": 0, "cap": MAX_SUPERVISOR_HANDOFFS}
     assert summary["turns"] == {"checks": {"used": 1, "cap": MAX_SPECIALIST_TURNS}}

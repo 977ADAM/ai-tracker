@@ -84,8 +84,8 @@ def test_key_queries_keep_the_entered_spelling():
 
 
 def test_the_seo_limits_and_labels_are_the_agreed_ones():
-    assert GENERATED_QUERY_LIMIT == 40
-    assert MIN_GENERATED_QUERIES == 5
+    assert GENERATED_QUERY_LIMIT == 2
+    assert MIN_GENERATED_QUERIES == 2
     assert QUERY_CATEGORIES == ("commercial", "informational", "comparative")
     assert CATEGORY_LABELS == {
         "commercial": "Коммерческие",
@@ -271,8 +271,6 @@ def test_accepts_a_valid_generated_payload():
                 item("купить имплантацию", service="Имплантация"),
                 item("как лечить зубы", "informational"),
                 item("имплантация или протез", "comparative", "протез"),
-                item("цена брекетов", service=""),
-                item("брекеты отзывы", "informational", "Брекеты"),
             ]
         },
         ("Лечение", "Имплантация", "Брекеты"),
@@ -280,41 +278,37 @@ def test_accepts_a_valid_generated_payload():
     assert [query.text for query in accepted] == [
         "купить имплантацию",
         "как лечить зубы",
-        "имплантация или протез",
-        "цена брекетов",
-        "брекеты отзывы",
     ]
     assert accepted[0].category == "commercial"
     assert accepted[0].service == "Имплантация"
+    assert accepted[1].category == "informational"
     assert accepted[1].service is None
-    assert accepted[2].service is None
-    assert accepted[3].service is None
-    assert accepted[4].service == "Брекеты"
     assert accepted[0].flags == QueryFlags(False, False, False, False)
 
 
 def test_accepts_fenced_json_text_and_maps_service_case():
-    text = "```json\n" + json.dumps({"queries": [item(f"запрос {index}", service="имплантация") for index in range(5)]}) + "\n```"
+    text = "```json\n" + json.dumps({"queries": [
+        item(f"запрос {index}", service="имплантация") for index in range(GENERATED_QUERY_LIMIT)
+    ]}) + "\n```"
     accepted = accept_generated_queries(text, ("Имплантация",))
-    assert len(accepted) == 5
+    assert len(accepted) == GENERATED_QUERY_LIMIT
     assert accepted[0].service == "Имплантация"
 
 
 def test_generated_queries_are_deduplicated_in_model_order_and_truncated_to_the_limit():
-    items = [item(f"запрос {index}") for index in range(45)] + [item("ЗАПРОС 0")]
+    items = [item("запрос 0"), item("ЗАПРОС 0"), item("запрос 1"), item("запрос 2")]
     accepted = accept_generated_queries({"queries": items}, ())
     assert len(accepted) == GENERATED_QUERY_LIMIT
-    assert accepted[0].text == "запрос 0"
-    assert accepted[-1].text == f"запрос {GENERATED_QUERY_LIMIT - 1}"
+    assert [query.text for query in accepted] == ["запрос 0", "запрос 1"]
 
 
-def test_rejects_fewer_than_five_unique_generated_queries():
-    items = [item(f"запрос {index}") for index in range(4)]
-    with pytest.raises(ValidationError, match="меньше 5"):
+def test_rejects_fewer_unique_generated_queries_than_the_minimum():
+    items = [item(f"запрос {index}") for index in range(MIN_GENERATED_QUERIES - 1)]
+    with pytest.raises(ValidationError, match=f"меньше {MIN_GENERATED_QUERIES}"):
         accept_generated_queries({"queries": items}, ())
 
-    duplicated = [item("один"), item("ОДИН"), item("два"), item("три"), item("четыре")]
-    with pytest.raises(ValidationError, match="меньше 5"):
+    duplicated = [item("один"), item("ОДИН")]
+    with pytest.raises(ValidationError, match=f"меньше {MIN_GENERATED_QUERIES}"):
         accept_generated_queries({"queries": duplicated}, ())
 
 
@@ -355,10 +349,8 @@ def test_rejects_generated_queries_outside_the_yandex_limits():
 
 
 def test_accepts_generated_queries_at_the_yandex_limits():
-    items = [item("x" * MAX_QUERY_LENGTH), item(" ".join(["слово"] * MAX_QUERY_WORDS))] + [
-        item(f"запрос {index}") for index in range(3)
-    ]
-    assert len(accept_generated_queries({"queries": items}, ())) == 5
+    items = [item("x" * MAX_QUERY_LENGTH), item(" ".join(["слово"] * MAX_QUERY_WORDS))]
+    assert len(accept_generated_queries({"queries": items}, ())) == GENERATED_QUERY_LIMIT
 
 
 def test_flag_queries_marks_the_company_name():

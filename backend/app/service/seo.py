@@ -36,7 +36,7 @@ from app.domain.seo_llm import (
     AgentModel,
     close_agent_model,
 )
-from app.domain.seo_tools import MAX_SEARCH_REQUESTS
+from app.domain.seo_tools import MAX_MODEL_ANSWERS, MAX_SEARCH_REQUESTS
 from app.service.checks import MISSING_KEY_MESSAGE
 from app.service.connections import ConnectionService
 from app.service.search import DISABLED_ENGINE, MISSING_CREDENTIALS
@@ -105,7 +105,7 @@ class SeoService:
         connections = len(request.connection_ids)
         estimate = {
             "search_upper": MAX_SEARCH_REQUESTS,
-            "model_upper": GENERATED_QUERY_LIMIT * connections,
+            "model_upper": MAX_MODEL_ANSWERS,
             "generated_limit": GENERATED_QUERY_LIMIT,
             "connections": connections,
         }

@@ -52,7 +52,7 @@ def snapshot(status: str = "completed") -> dict:
             "seeds": ["купить цветы", "доставка букетов", "цветочный магазин"],
             "services": ["Доставка цветов"], "connection_ids": ["model-1"],
         },
-        "estimate": {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+        "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
         "company_name": "Ромашка",
         "services": ["Доставка цветов"],
         "pages": [],

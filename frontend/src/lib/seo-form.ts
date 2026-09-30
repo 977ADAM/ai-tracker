@@ -9,7 +9,9 @@
 import type { SeoAnalysisSnapshot } from './types';
 
 /** At most this many unique queries are generated per run, and to the Yandex seeds. */
-export const GENERATED_QUERY_LIMIT = 40;
+export const GENERATED_QUERY_LIMIT = 2;
+/** Model answers are paid for per run, not per connection: this is the flat cap. */
+export const MAX_MODEL_ANSWERS = 5;
 /** Exactly three key queries are sent to Yandex in stage 2. */
 export const SEO_SEED_COUNT = 3;
 export const MAX_SPHERE_LENGTH = 200;
@@ -130,11 +132,17 @@ export function validateSeoForm(input: SeoFormInput): string | null {
   return null;
 }
 
-/** The upper bound shown next to the submit button, before anything is generated. */
+/**
+ * The upper bound shown next to the submit button, before anything is generated.
+ *
+ * The model cap is flat — one number for the whole run, whatever the connection
+ * count — but a run without a single selected connection makes no model call at
+ * all, so the estimate stays `0` until one is chosen.
+ */
 export function estimateUpper(connections: number): SeoUpperEstimate {
   return {
     searchUpper: SEARCH_UPPER,
-    modelUpper: GENERATED_QUERY_LIMIT * connections,
+    modelUpper: connections > 0 ? MAX_MODEL_ANSWERS : 0,
     generatedLimit: GENERATED_QUERY_LIMIT,
     connections
   };
@@ -142,7 +150,10 @@ export function estimateUpper(connections: number): SeoUpperEstimate {
 
 /** The informational estimate once the generated query count `K` is known. */
 export function estimateActual(queries: number, connections: number): SeoActualEstimate {
-  return { searchActual: SEED_SEARCHES + queries, modelActual: queries * connections };
+  return {
+    searchActual: SEED_SEARCHES + queries,
+    modelActual: Math.min(queries * connections, MAX_MODEL_ANSWERS)
+  };
 }
 
 /** The number of generated queries `K` of a saved analysis. */
@@ -156,7 +167,7 @@ export function actualConnectionCount(snapshot: SeoAnalysisSnapshot): number {
   return snapshot.input.connection_ids.length;
 }
 
-/** `3 + K` search and `K × M` model rows once the queries were generated. */
+/** `3 + K` search and at most the flat model-answer cap once the queries were generated. */
 export function snapshotActualEstimate(snapshot: SeoAnalysisSnapshot): SeoActualEstimate {
   return estimateActual(actualQueryCount(snapshot), actualConnectionCount(snapshot));
 }

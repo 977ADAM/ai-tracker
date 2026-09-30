@@ -22,10 +22,11 @@ from app.domain.site_fetch import canonical_host, same_site_host
 
 # Fixed SEO constants: the form has no limit field and the old 20-query
 # validators of `/api/check`, `/api/search`, and `/api/runs` stay untouched.
-# Revision 2 raises the generated-query cap to 40 and the run estimate becomes
-# `3 + 40` searches and `40 × M` model answers.
-GENERATED_QUERY_LIMIT = 40
-MIN_GENERATED_QUERIES = 5
+# The run is deliberately small and its shape is fixed: two generated queries on
+# top of the three key ones (`3 + 2 = 5` Yandex searches in total) and five model
+# answers for the whole run, however many connections were selected.
+GENERATED_QUERY_LIMIT = 2
+MIN_GENERATED_QUERIES = 2
 QUERY_CATEGORIES = ("commercial", "informational", "comparative")
 CATEGORY_LABELS = {
     "commercial": "Коммерческие",
@@ -307,9 +308,9 @@ def accept_generated_queries(payload: object, services: Sequence[str]) -> tuple[
     list, or that list itself. A broken schema, an unknown category, or a query
     outside the Yandex length and word limits is a domain error; duplicate
     queries are dropped by normalized text in model order; entries beyond the
-    limit are cut; an unknown or empty service becomes ``None``. Fewer than
-    five unique queries is a domain error the orchestrator answers with one
-    regeneration attempt.
+    limit are cut; an unknown or empty service becomes ``None``. Fewer unique
+    queries than the fixed minimum is a domain error the orchestrator answers
+    with one regeneration attempt.
     """
     known_services = {normalize_text(service): service for service in services if normalize_text(service)}
     accepted: list[GeneratedQuery] = []

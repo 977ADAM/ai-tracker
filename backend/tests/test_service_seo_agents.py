@@ -25,7 +25,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.core.errors import ProviderError
 from app.db.seo import SeoRepository
 from app.domain.search import SearchDocument
-from app.domain.seo import SeoInput, normalize_seo_request
+from app.domain.seo import GENERATED_QUERY_LIMIT, SeoInput, normalize_seo_request
 from app.domain.seo_llm import LLM_NOT_CONFIGURED
 from app.domain.seo_tools import (
     AGENT_TOOLS,
@@ -59,7 +59,7 @@ SERVICES = ["Букеты", "Доставка"]
 CONNECTION_ID = "openai"
 ANALYSIS_QUERIES = [
     {"query": f"купить букет {index}", "category": "commercial", "service": "Букеты"}
-    for index in range(5)
+    for index in range(GENERATED_QUERY_LIMIT)
 ]
 CANDIDATES = [{"host": "rival.ru", "note": "Соперник"}]
 DOCUMENTS = (
@@ -286,7 +286,7 @@ def make_harness(tmp_path: Path, connection_repository, settings, script=None) -
     request = normalize_seo_request(payload())
     analysis_id = repository.create_analysis(
         request,
-        {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+        {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
     )
     # The recorder lists are class attributes, so one harness starts clean and a
     # test never depends on which test ran before it.
@@ -319,7 +319,7 @@ async def test_bridge_tools_mirror_the_declared_schemas_of_every_agent(
 ):
     harness = make_harness(tmp_path, repository, settings)
     toolbox = harness.toolbox_factory(
-        harness.analysis_id, harness.input, SeoBudget.for_connections(1),
+        harness.analysis_id, harness.input, SeoBudget.for_run(),
     )
 
     for agent in ("supervisor", *SPECIALISTS):
@@ -341,7 +341,7 @@ async def test_bridge_tools_mirror_the_declared_schemas_of_every_agent(
         if agent == "queries":
             root = next(tool for tool in tools if tool.name == "save_queries").args_schema.model_json_schema()
             items = root["properties"]["queries"]
-            assert (items["minItems"], items["maxItems"]) == (1, 40)
+            assert (items["minItems"], items["maxItems"]) == (1, GENERATED_QUERY_LIMIT)
             item = _resolve(items["items"], root)
             assert item["additionalProperties"] is False
             assert set(item["properties"]) == {"query", "category", "service"}
@@ -494,8 +494,9 @@ async def test_saved_rows_reach_the_repository_and_the_paid_calls_stay_inside_th
     assert snapshot["conclusions"]["recommendations"] == RECOMMENDATIONS
     assert snapshot["conclusions"]["model"] == "seo-model"
 
-    # One paid key search plus five generated searches, and five model answers.
-    # Tool batches run concurrently, so only the sets are ordered by contract.
+    # One paid key search plus the generated searches, and one model answer per
+    # generated query. Tool batches run concurrently, so only the sets are
+    # ordered by contract.
     assert sorted(harness.gateway.submitted) == sorted(
         [(SEEDS[0], 225)] + [(item["query"], 225) for item in ANALYSIS_QUERIES],
     )
@@ -506,8 +507,8 @@ async def test_saved_rows_reach_the_repository_and_the_paid_calls_stay_inside_th
     budget = harness.repository.budget_state(harness.analysis_id)
     assert budget["pages"] == 1
     assert budget["seed_searches"] == 1
-    assert budget["searches"] == 5
-    assert budget["model_rows"] == 5
+    assert budget["searches"] == GENERATED_QUERY_LIMIT
+    assert budget["model_rows"] == GENERATED_QUERY_LIMIT
     assert budget["handoffs"] == 5
 
 
@@ -616,7 +617,7 @@ async def test_checkpoint_is_owner_only_and_a_second_graph_sees_the_finished_sta
     # A second graph over the same checkpoint file reads the finished run without
     # a single further model call.
     reader = ScriptedChatModel(script=[])
-    toolbox = harness.toolbox_factory(harness.analysis_id, harness.input, SeoBudget.for_connections(1))
+    toolbox = harness.toolbox_factory(harness.analysis_id, harness.input, SeoBudget.for_run())
     async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
         graph = build_agent_graph(reader, toolbox, checkpointer=saver)
         state = await graph.aget_state({"configurable": {"thread_id": harness.analysis_id}})
@@ -767,7 +768,7 @@ def another_analysis(harness: Harness) -> str:
     """Create a second analysis row for a second run over the same harness."""
     return harness.repository.create_analysis(
         harness.input,
-        {"search_upper": 43, "model_upper": 40, "generated_limit": 40, "connections": 1},
+        {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
     )
 
 

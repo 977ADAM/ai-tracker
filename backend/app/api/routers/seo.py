@@ -21,8 +21,8 @@ from app.api.schemas.seo import (
     SeoSnapshotResponse,
     SeoTracePageResponse,
 )
-from app.domain.seo import GENERATED_QUERY_LIMIT
 from app.domain.seo_tools import (
+    MAX_MODEL_ANSWERS,
     MAX_SEARCH_REQUESTS,
     MAX_SUPERVISOR_HANDOFFS,
     MAX_TOOL_CALLS,
@@ -43,13 +43,12 @@ def _public_snapshot(snapshot: dict) -> dict:
     run, so the interface can show "used of limit" without inventing numbers.
     """
     counts = snapshot.get("budget") or {}
-    connections = len(snapshot.get("input", {}).get("connection_ids", ()))
     budget = {
         "pages": {"used": int(counts.get("pages", 0)), "limit": MAX_FETCH_PAGES},
         "searches": {"used": int(counts.get("searches", 0)), "limit": MAX_SEARCH_REQUESTS},
         "model_answers": {
             "used": int(counts.get("model_rows", 0)),
-            "limit": GENERATED_QUERY_LIMIT * connections,
+            "limit": MAX_MODEL_ANSWERS,
         },
         "tool_calls": {"used": int(counts.get("tool_calls", 0)), "limit": MAX_TOOL_CALLS},
         "handoffs": {"used": int(counts.get("handoffs", 0)), "limit": MAX_SUPERVISOR_HANDOFFS},
