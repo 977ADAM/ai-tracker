@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { onDestroy, onMount, untrack } from 'svelte';
   import SeoForm from '$lib/components/SeoForm.svelte';
   import SeoHistory from '$lib/components/SeoHistory.svelte';
@@ -78,7 +79,7 @@
     rowsLoading = kind;
     try {
       const query = cursor === null ? `kind=${kind}` : `kind=${kind}&cursor=${encodeURIComponent(cursor)}`;
-      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}/rows?${query}`);
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/rows?${query}`);
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить строки отчёта'));
       if (destroyed || activeId !== id) return;
@@ -127,7 +128,7 @@
     traceLoading = true;
     try {
       const query = cursor === null ? '' : `?cursor=${encodeURIComponent(cursor)}`;
-      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}/trace${query}`);
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/trace${query}`);
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить трассу агентов'));
       if (destroyed || activeId !== id) return;
@@ -165,7 +166,7 @@
     rowsError = '';
     resetTrace();
     try {
-      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}`);
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}`);
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось открыть анализ'));
       if (destroyed || activeId !== id) return;
@@ -184,7 +185,7 @@
   async function pollAnalysis(id: string) {
     if (destroyed || pendingId !== id) return;
     try {
-      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}`);
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}`);
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось получить состояние анализа'));
       if (destroyed || pendingId !== id) return;
@@ -212,8 +213,8 @@
     historyError = '';
     try {
       const path = cursor === null
-        ? '/api/seo/analyses'
-        : `/api/seo/analyses?cursor=${encodeURIComponent(cursor)}`;
+        ? `${base}/api/seo/analyses`
+        : `${base}/api/seo/analyses?cursor=${encodeURIComponent(cursor)}`;
       const response = await fetch(path);
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить SEO-историю'));
@@ -237,7 +238,7 @@
     error = '';
     runError = '';
     try {
-      const response = await fetch('/api/seo/analyses', {
+      const response = await fetch(`${base}/api/seo/analyses`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           url: input.url.trim(),
@@ -269,7 +270,7 @@
     cancelling = true;
     runError = '';
     try {
-      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(activeId)}/cancel`, { method: 'POST' });
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(activeId)}/cancel`, { method: 'POST' });
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось отменить анализ'));
       if (destroyed) return;
@@ -301,7 +302,7 @@
   async function removeAnalysis(id: string) {
     historyError = '';
     try {
-      const response = await fetch(`/api/seo/analyses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error(detail(await payload(response), 'Не удалось удалить SEO-анализ'));
       if (destroyed) return;
       history = history.filter((item) => item.id !== id);
@@ -329,7 +330,7 @@
 
 <main class="mx-auto w-full max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
     <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-6 text-xs font-medium text-muted">
-        <a href="/" class="hover:text-accent">Инструменты</a>
+        <a href={base || '/'} class="hover:text-accent">Инструменты</a>
         <span aria-hidden="true">/</span>
         <span class="text-ink">SEO-анализ сайта</span>
     </nav>

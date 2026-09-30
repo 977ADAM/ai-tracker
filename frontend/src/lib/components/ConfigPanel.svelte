@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   const FOCUSABLE = 'button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
   type Config = { directory: string; exists: boolean; content: string | null };
@@ -22,7 +23,7 @@
     error = '';
     config = null;
     try {
-      const response = await fetch('/api/config');
+      const response = await fetch(`${base}/api/config`);
       const value: unknown = await response.json().catch(() => {
         throw new Error('Некорректный ответ сервиса');
       });

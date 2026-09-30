@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import type { RunSnapshot } from '$lib/types';
 
   let { snapshot }: { snapshot: RunSnapshot } = $props();
@@ -11,7 +12,7 @@
       <p class="mt-2 text-sm leading-6 text-muted">Сводка по каждому запросу, модели и региону поиска.</p>
     </div>
     {#if snapshot.status !== 'pending'}
-      <a href={`/api/runs/${encodeURIComponent(snapshot.id)}/export.csv`} class="inline-flex min-h-11 items-center rounded-xl border border-line px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent">Экспорт</a>
+      <a href={`${base}/api/runs/${encodeURIComponent(snapshot.id)}/export.csv`} class="inline-flex min-h-11 items-center rounded-xl border border-line px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent">Экспорт</a>
     {/if}
   </div>
   <div class="overflow-x-auto px-6 pb-6 sm:px-8">

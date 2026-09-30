@@ -21,11 +21,11 @@ services:
     environment:
       AI_TRACKER_API_URL: http://backend:8000
       AI_TRACKER_API_HOSTS: backend
-      ORIGIN: http://localhost:3001
+      ORIGIN: ${AI_TRACKER_ORIGIN:-http://localhost:3001}
       HOST: 0.0.0.0
       PORT: 3001
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     depends_on:
       - backend
     restart: unless-stopped

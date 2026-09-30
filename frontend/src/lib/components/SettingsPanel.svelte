@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { invalidateAll } from '$app/navigation';
   import type { SettingsProvider } from '$lib/types';
 
@@ -11,7 +12,7 @@
   /** `form: true` belongs to the creation card; otherwise it belongs to a provider. */
   type Feedback = { kind: Kind; text: string; providerId: string | null; form: boolean };
 
-  const SETTINGS_PATH = '/api/providers/settings';
+  const SETTINGS_PATH = `${base}/api/providers/settings`;
 
   const field = 'block w-full min-h-11 rounded-lg border border-shell-line bg-shell-inset px-3.5 py-2.5 text-sm text-shell-ink outline-none transition placeholder:text-shell-muted/80 focus:border-shell-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-accent disabled:opacity-60';
   const label = 'mb-2 block text-xs font-semibold text-shell-ink';

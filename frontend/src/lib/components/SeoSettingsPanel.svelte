@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { invalidateAll } from '$app/navigation';
   import type { SeoSettings, SeoSource } from '$lib/types';
 
@@ -53,7 +54,7 @@
     busy = true;
     feedback = null;
     try {
-      const response = await fetch('/api/seo/settings', {
+      const response = await fetch(`${base}/api/seo/settings`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body)
@@ -74,7 +75,7 @@
     busy = true;
     feedback = null;
     try {
-      const response = await fetch('/api/seo/settings/test', { method: 'POST' });
+      const response = await fetch(`${base}/api/seo/settings/test`, { method: 'POST' });
       if (!response.ok) throw new Error('request failed');
       const value = (await response.json()) as { ok?: unknown; model?: unknown; error?: unknown; tools?: unknown };
       // The SEO run needs tool calling, so the probe result always names it.
@@ -103,7 +104,7 @@
     feedback = null;
     apiKey = '';
     try {
-      const response = await fetch('/api/seo/settings/credentials', { method: 'DELETE' });
+      const response = await fetch(`${base}/api/seo/settings/credentials`, { method: 'DELETE' });
       apply(await publicState(response));
       await invalidateAll();
       feedback = { kind: 'notice', text: 'Ключ удалён, значения возвращены к переменным окружения' };

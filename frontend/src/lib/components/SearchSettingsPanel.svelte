@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { invalidateAll } from '$app/navigation';
   import type { YandexSearchSettings } from '$lib/types';
 
@@ -45,7 +46,7 @@
     busy = true;
     feedback = null;
     try {
-      const response = await fetch('/api/search/settings', {
+      const response = await fetch(`${base}/api/search/settings`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body)
@@ -69,7 +70,7 @@
     feedback = null;
     apiKey = '';
     try {
-      const response = await fetch('/api/search/settings/credentials', { method: 'DELETE' });
+      const response = await fetch(`${base}/api/search/settings/credentials`, { method: 'DELETE' });
       current = await publicState(response);
       enabled = current.enabled;
       folderId = current.folder_id ?? '';

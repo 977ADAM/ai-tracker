@@ -1,6 +1,8 @@
 FROM node:22-alpine AS build
 
 WORKDIR /app
+ARG AI_TRACKER_BASE_PATH=/clustering/tracker
+ENV AI_TRACKER_BASE_PATH=$AI_TRACKER_BASE_PATH
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
