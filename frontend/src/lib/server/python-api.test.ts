@@ -6,7 +6,9 @@ import {
   publicRunSnapshot, publicRunList, runPath, runListPath, runExportPath, proxyCsv,
   publicSeoAnalysisCreated, publicSeoHistory, publicSeoRows, publicSeoSettings, publicSeoSettingsTest,
   publicSeoSnapshot, publicSeoTracePage, seoAnalysisCancelPath, seoAnalysisListPath, seoAnalysisPath,
-  seoAnalysisRowsPath, seoAnalysisTracePath, SEO_SETTINGS_TEST_TIMEOUT_MS
+  seoAnalysisRowsPath, seoAnalysisTracePath, SEO_SETTINGS_TEST_TIMEOUT_MS,
+  publicChatList, publicChatMessages, publicChatPage, publicChatSummary,
+  seoChatDetailPath, seoChatMessagesPath, seoChatPath, seoChatProposalPath, SEO_CHAT_MESSAGE_TIMEOUT_MS
 } from './python-api';
 import type { ApiPath } from '$lib/types';
 
@@ -918,5 +920,223 @@ describe('SEO BFF', () => {
     expect(data.loadError).toBe('');
     expect(data.providers.map((provider) => provider.id)).toEqual(['p1']);
     expect(data.searchSettings).toEqual(publicSearchState.yandex);
+  });
+});
+
+describe('chat BFF', () => {
+  const CHAT_JSON = {
+    id: 'chat-1_X', title: 'Цветы', updated_at: '2026-10-01T10:00:00Z', running: false,
+    draft: { url: 'https://example.ru/' }, pending_proposal_id: 'm-2_X', active_analysis_id: null,
+    api_key: 'secret'
+  };
+  const PROPOSAL_JSON = {
+    status: 'pending', url: 'https://example.ru/', sphere: 'Цветы', seeds: ['a', 'b', 'c'],
+    services: ['Букеты'], connection_ids: ['p1'], search_upper: 23, model_upper: 20, generated_limit: 20,
+    operation_id: 'secret'
+  };
+  const PROPOSAL_MESSAGE = {
+    id: 'm-2_X', seq: 2, role: 'assistant', kind: 'proposal', text: null,
+    payload: { ...PROPOSAL_JSON, api_key: 'secret' }, created_at: '2026-10-01T10:00:00Z', api_key: 'secret'
+  };
+  const PUBLIC_CHAT = { id: 'chat-1_X', title: 'Цветы', updated_at: '2026-10-01T10:00:00Z', running: false };
+  const PUBLIC_PROPOSAL = {
+    status: 'pending', url: 'https://example.ru/', sphere: 'Цветы', seeds: ['a', 'b', 'c'],
+    services: ['Букеты'], connection_ids: ['p1'], search_upper: 23, model_upper: 20, generated_limit: 20
+  };
+
+  it('accepts the chat paths and rejects a foreign one', () => {
+    expect(seoChatPath('abc-1')).toBe('/api/seo/chats/abc-1');
+    expect(seoChatDetailPath('abc-1', null)).toBe('/api/seo/chats/abc-1');
+    expect(seoChatDetailPath('abc-1', 7)).toBe('/api/seo/chats/abc-1?before=7');
+    expect(seoChatMessagesPath('abc-1')).toBe('/api/seo/chats/abc-1/messages');
+    expect(seoChatProposalPath('abc-1')).toBe('/api/seo/chats/abc-1/proposal');
+    for (const id of ['../settings', 'a/b', 'a'.repeat(129), '']) expect(() => seoChatPath(id)).toThrow();
+    for (const before of [0, -1, 1.5, Number.NaN]) expect(() => seoChatDetailPath('abc-1', before)).toThrow();
+  });
+
+  it('gives the chat message call the long budget', () => {
+    expect(apiTimeoutMs(seoChatMessagesPath('abc-1'))).toBe(SEO_CHAT_MESSAGE_TIMEOUT_MS);
+    expect(SEO_CHAT_MESSAGE_TIMEOUT_MS).toBe(120_000);
+    expect(apiTimeoutMs(seoChatPath('abc-1'))).toBe(DEFAULT_TIMEOUT_MS);
+    expect(apiTimeoutMs(seoChatDetailPath('abc-1', 7))).toBe(DEFAULT_TIMEOUT_MS);
+    expect(apiTimeoutMs(seoChatProposalPath('abc-1'))).toBe(DEFAULT_TIMEOUT_MS);
+    // A chat whose ID is literally `messages` stays the bare chat, not the feed.
+    expect(apiTimeoutMs(seoChatPath('messages'))).toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  it('rejects unknown chat paths and wrong methods before reaching Python', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    for (const path of [
+      '/api/seo/chats/', '/api/seo/chats?cursor=1', '/api/seo/chats/a/b', '/api/seo/chats/a/messages/extra',
+      '/api/seo/chats/a/proposal/x', '/api/seo/../chats', '/api/seo/chats/a/messages?x=1'
+    ] as const) {
+      expect((await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats'), path as ApiPath, 'GET')).status).toBe(400);
+    }
+    const request = new Request('http://127.0.0.1:5173/api/seo/chats');
+    expect((await proxyJson(request, '/api/seo/chats', 'DELETE')).status).toBe(405);
+    expect((await proxyJson(request, seoChatPath('chat-1_X'), 'PUT')).status).toBe(405);
+    expect((await proxyJson(request, seoChatMessagesPath('chat-1_X'), 'GET')).status).toBe(405);
+    expect((await proxyJson(request, seoChatProposalPath('chat-1_X'), 'POST')).status).toBe(405);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps a chat summary to its four public fields', () => {
+    expect(publicChatList({ items: [CHAT_JSON], secret: 'x' })).toEqual({ items: [PUBLIC_CHAT] });
+    const summary = publicChatSummary(CHAT_JSON);
+    expect(Object.keys(summary)).toEqual(['id', 'title', 'updated_at', 'running']);
+    expect(() => publicChatSummary({ ...CHAT_JSON, running: 'yes' })).toThrow();
+    expect(() => publicChatSummary({ ...CHAT_JSON, id: 'a/b' })).toThrow();
+    expect(() => publicChatList([CHAT_JSON])).toThrow();
+    expect(() => publicChatList({ items: [{ ...CHAT_JSON, updated_at: 7 }] })).toThrow();
+  });
+
+  it('projects a chat page and drops unknown fields', () => {
+    const page = publicChatPage({ chat: CHAT_JSON, messages: [PROPOSAL_MESSAGE], next_cursor: 4, secret: 'x' });
+    expect(page.next_cursor).toBe(4);
+    expect(Object.keys(page)).toEqual(['chat', 'messages', 'next_cursor']);
+    expect(page.chat).toEqual(PUBLIC_CHAT);
+    expect(Object.keys(page.messages[0])).toEqual(['id', 'seq', 'role', 'kind', 'text', 'payload', 'created_at']);
+    expect(page.messages[0].payload).toEqual(PUBLIC_PROPOSAL);
+    expect(publicChatPage({ chat: CHAT_JSON, messages: [], next_cursor: null }).next_cursor).toBeNull();
+  });
+
+  it('projects a run payload and refuses a broken message instead of inventing values', () => {
+    const run = publicChatMessages({ chat: CHAT_JSON, messages: [{ ...PROPOSAL_MESSAGE, kind: 'run',
+      payload: { analysis_id: 'seo-1_X', api_key: 'secret' } }] });
+    expect(Object.keys(run)).toEqual(['chat', 'messages']);
+    expect(run.messages[0].payload).toEqual({ analysis_id: 'seo-1_X' });
+    const text = publicChatMessages({ chat: CHAT_JSON, messages: [{ ...PROPOSAL_MESSAGE, kind: 'text',
+      text: 'привет', payload: { api_key: 'secret' } }] });
+    expect(text.messages[0]).toMatchObject({ kind: 'text', text: 'привет', payload: null });
+    expect(() => publicChatMessages({ chat: CHAT_JSON, messages: 'nope' })).toThrow();
+    expect(() => publicChatPage({ chat: CHAT_JSON, messages: [{ ...PROPOSAL_MESSAGE, kind: 'thinking' }], next_cursor: null })).toThrow();
+    expect(() => publicChatPage({ chat: CHAT_JSON, messages: [{ ...PROPOSAL_MESSAGE, seq: '2' }], next_cursor: null })).toThrow();
+    expect(() => publicChatPage({ chat: CHAT_JSON, messages: [{ ...PROPOSAL_MESSAGE, payload: { status: 'later' } }], next_cursor: null })).toThrow();
+    expect(() => publicChatPage({ chat: CHAT_JSON, messages: [{ ...PROPOSAL_MESSAGE, kind: 'run', payload: { analysis_id: 7 } }], next_cursor: null })).toThrow();
+    expect(() => publicChatPage({ chat: CHAT_JSON, messages: [], next_cursor: 'x' })).toThrow();
+  });
+
+  it('serves the list, creation, page, turn, proposal and delete through their chat paths', async () => {
+    const fetchSpy = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      if (init.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }));
+      if (init.method === 'POST' && String(url).endsWith('/messages')) return Promise.resolve(new Response(JSON.stringify({
+        chat: CHAT_JSON, messages: [PROPOSAL_MESSAGE], api_key: 'secret'
+      }), { headers: { 'content-type': 'application/json' } }));
+      if (init.method === 'PUT') return Promise.resolve(new Response(JSON.stringify({
+        chat: CHAT_JSON, message: PROPOSAL_MESSAGE, api_key: 'secret'
+      }), { headers: { 'content-type': 'application/json' } }));
+      if (init.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ chat: CHAT_JSON, api_key: 'secret' }),
+        { status: 201, headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/seo/chats')) return Promise.resolve(new Response(JSON.stringify({
+        items: [CHAT_JSON], next_cursor: null, api_key: 'secret'
+      }), { headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(new Response(JSON.stringify({
+        chat: CHAT_JSON, messages: [PROPOSAL_MESSAGE], next_cursor: 3, api_key: 'secret'
+      }), { headers: { 'content-type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const list = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats'), '/api/seo/chats', 'GET');
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ items: [PUBLIC_CHAT] });
+
+    const created = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+    }), '/api/seo/chats', 'POST');
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({ chat: PUBLIC_CHAT });
+
+    const page = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats/chat-1_X?before=3'),
+      seoChatDetailPath('chat-1_X', 3), 'GET');
+    expect(page.status).toBe(200);
+    expect(await page.json()).toEqual({ chat: PUBLIC_CHAT,
+      messages: [{ id: 'm-2_X', seq: 2, role: 'assistant', kind: 'proposal', text: null,
+        payload: PUBLIC_PROPOSAL, created_at: '2026-10-01T10:00:00Z' }], next_cursor: 3 });
+
+    const sent = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats/chat-1_X/messages', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'привет' })
+    }), seoChatMessagesPath('chat-1_X'), 'POST');
+    const turn = await sent.json() as { chat: { id: string }; messages: { payload: unknown }[] };
+    expect(turn.chat.id).toBe('chat-1_X');
+    expect(turn.messages[0].payload).toEqual(PUBLIC_PROPOSAL);
+    expect(fetchSpy).toHaveBeenLastCalledWith('http://127.0.0.1:8000/api/seo/chats/chat-1_X/messages',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ text: 'привет' }) }));
+
+    const proposal = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats/chat-1_X/proposal', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ connection_ids: ['p1'] })
+    }), seoChatProposalPath('chat-1_X'), 'PUT');
+    const proposalJson = await proposal.json() as { chat: unknown; message: { payload: unknown } };
+    expect(Object.keys(proposalJson)).toEqual(['chat', 'message']);
+    expect(proposalJson.chat).toEqual(PUBLIC_CHAT);
+    expect(proposalJson.message.payload).toEqual(PUBLIC_PROPOSAL);
+
+    const deleted = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats/chat-1_X', { method: 'DELETE' }),
+      seoChatPath('chat-1_X'), 'DELETE');
+    expect(deleted.status).toBe(204);
+    expect(await deleted.text()).toBe('');
+  });
+
+  it('blocks cross-origin chat writes and turns a broken upstream answer into a safe 502', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const writes = [
+      ['/api/seo/chats', 'POST'], [seoChatPath('chat-1_X'), 'DELETE'],
+      [seoChatMessagesPath('chat-1_X'), 'POST'], [seoChatProposalPath('chat-1_X'), 'PUT']
+    ] as const;
+    for (const [path, method] of writes) {
+      const request = new Request(`http://127.0.0.1:5173${path}`, {
+        method, headers: { origin: 'https://other.example',
+          ...(method === 'DELETE' ? {} : { 'content-type': 'application/json' }) },
+        ...(method === 'DELETE' ? {} : { body: '{}' })
+      });
+      expect((await proxyJson(request, path, method)).status).toBe(403);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>secret-value</html>',
+      { headers: { 'content-type': 'text/html' } })));
+    const broken = await proxyJson(new Request('http://127.0.0.1:5173/api/seo/chats'), '/api/seo/chats', 'GET');
+    expect(broken.status).toBe(502);
+    expect(await broken.text()).not.toContain('secret-value');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Чат не найден', api_key: 'secret' }),
+      { status: 404, headers: { 'content-type': 'application/json' } })));
+    const missing = await proxyJson(new Request(`http://127.0.0.1:5173${seoChatPath('chat-1_X')}`),
+      seoChatPath('chat-1_X'), 'GET');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ detail: 'Чат не найден' });
+  });
+
+  it('loads the chat list independently from the model configuration', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).endsWith('/api/seo/chats')) return Promise.resolve(new Response(JSON.stringify({ items: [CHAT_JSON] }),
+        { headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(new Response('nope', { status: 500 }));
+    }));
+    const data = await loadPageData();
+    expect(data.chats).toEqual([PUBLIC_CHAT]);
+    expect(data.chatsError).toBe('');
+    expect(data.loadError).not.toBe('');
+  });
+
+  it('keeps the page when the chat list is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).endsWith('/api/seo/chats')) return Promise.resolve(new Response('nope', { status: 500 }));
+      if (String(url).endsWith('/api/search/regions')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/providers/settings')) return Promise.resolve(new Response('[]', { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/form')) return Promise.resolve(new Response(JSON.stringify({
+        limits: { max_prompts: 20, max_providers: 5, max_prompt_length: 500, max_brand_length: 100, max_domain_length: 253 },
+        new_provider_fields: [], default_provider_ids: []
+      }), { headers: { 'content-type': 'application/json' } }));
+      if (String(url).endsWith('/api/search/settings') || String(url).endsWith('/api/seo/settings'))
+        return Promise.resolve(new Response('nope', { status: 500 }));
+      return Promise.resolve(new Response(JSON.stringify([
+        { id: 'p1', name: 'Demo', kind: 'openai', endpoint: 'https://api.example.com/chat/completions', model: 'm', configured: true }
+      ]), { headers: { 'content-type': 'application/json' } }));
+    }));
+    const data = await loadPageData();
+    expect(data.chats).toEqual([]);
+    expect(data.chatsError).not.toBe('');
+    expect(data.loadError).toBe('');
+    expect(data.providers.map((provider) => provider.id)).toEqual(['p1']);
   });
 });

@@ -2,6 +2,8 @@ import type {
   ApiPath, FormConfig, PublicProvider, SearchCreated, SearchRegion, SearchRow, SearchRowStatus,
   SearchSnapshot, SettingsProvider, RunCreated, RunHistoryPage, RunSnapshot, RunSummaryRow,
   RunModelRow, RunSearchRow, YandexSearchSettings,
+  ChatCreated, ChatList, ChatMessage, ChatMessageKind, ChatMessages, ChatPage, ChatPayload,
+  ChatProposal, ChatProposalStatus, ChatProposalUpdated, ChatSummary,
   SeoAggregates, SeoAgent, SeoAgentStatus, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoAnalysisStatus,
   SeoBudgetItem, SeoBudgetView, SeoCategoryAggregates, SeoCandidate, SeoCompetitorAggregates,
   SeoConclusions, SeoCounts, SeoEstimate, SeoHistoryPage, SeoMetric, SeoModelRow, SeoQuery,
@@ -17,6 +19,8 @@ const MAX_CSV_BYTES = 5 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 10_000;
 /** `POST /api/seo/settings/test` waits for one real chat completion. */
 export const SEO_SETTINGS_TEST_TIMEOUT_MS = 120_000;
+/** One chat turn is one real chat completion as well, so it needs the same budget. */
+export const SEO_CHAT_MESSAGE_TIMEOUT_MS = 120_000;
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -202,8 +206,31 @@ export function seoAnalysisListPath(cursor: string | null): ApiPath {
   return `/api/seo/analyses?cursor=${seoCursor(cursor)}`;
 }
 
+export function seoChatPath(id: string): ApiPath {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid SEO chat ID');
+  return `/api/seo/chats/${encodeURIComponent(id)}`;
+}
+
+/** `before` asks for the page of messages older than that sequence number. */
+export function seoChatDetailPath(id: string, before: number | null): ApiPath {
+  if (before !== null && (!Number.isInteger(before) || before < 1)) throw new Error('Invalid chat cursor');
+  const suffix = before === null ? '' : `?before=${before}`;
+  return `${seoChatPath(id)}${suffix}` as ApiPath;
+}
+
+export function seoChatMessagesPath(id: string): ApiPath {
+  return `${seoChatPath(id)}/messages` as ApiPath;
+}
+
+export function seoChatProposalPath(id: string): ApiPath {
+  return `${seoChatPath(id)}/proposal` as ApiPath;
+}
+
 const SEO_ROWS_SUFFIX = /^([^/]+)\/rows\?kind=(model|search)(?:&cursor=([A-Za-z0-9_-]{1,256}))?$/;
 const SEO_TRACE_SUFFIX = /^([^/]+)\/trace(?:\?cursor=([A-Za-z0-9_-]{1,256}))?$/;
+const SEO_CHAT_MESSAGES_SUFFIX = /^([^/]+)\/messages$/;
+const SEO_CHAT_PROPOSAL_SUFFIX = /^([^/]+)\/proposal$/;
+const SEO_CHAT_DETAIL_SUFFIX = /^([^/?]+)\?before=([1-9]\d{0,15})$/;
 
 function validPath(path: ApiPath): boolean {
   if (path === '/api/runs') return true;
@@ -222,6 +249,30 @@ function validPath(path: ApiPath): boolean {
   }
   // The static SEO settings paths come before the dynamic analysis route.
   if (path === '/api/seo/settings' || path === '/api/seo/settings/credentials' || path === '/api/seo/settings/test') return true;
+  // The chat collection is static; the dynamic chat routes come after it. The
+  // action suffixes are matched with their leading slash, so the chat named
+  // `messages` stays the bare ID `/api/seo/chats/messages` and never the feed.
+  if (path === '/api/seo/chats') return true;
+  if (path.startsWith('/api/seo/chats/')) {
+    const suffix = path.slice('/api/seo/chats/'.length);
+    const messages = SEO_CHAT_MESSAGES_SUFFIX.exec(suffix);
+    if (messages) {
+      try { return seoChatMessagesPath(decodeURIComponent(messages[1])) === path; }
+      catch { return false; }
+    }
+    const proposal = SEO_CHAT_PROPOSAL_SUFFIX.exec(suffix);
+    if (proposal) {
+      try { return seoChatProposalPath(decodeURIComponent(proposal[1])) === path; }
+      catch { return false; }
+    }
+    const detail = SEO_CHAT_DETAIL_SUFFIX.exec(suffix);
+    if (detail) {
+      try { return seoChatDetailPath(decodeURIComponent(detail[1]), Number(detail[2])) === path; }
+      catch { return false; }
+    }
+    try { return seoChatPath(suffix) === path; }
+    catch { return false; }
+  }
   if (path === '/api/seo/analyses') return true;
   if (path.startsWith('/api/seo/analyses?cursor=')) {
     try { return seoAnalysisListPath(path.slice('/api/seo/analyses?cursor='.length)) === path; }
@@ -478,6 +529,8 @@ const SEO_AGENT_STATUSES: readonly SeoAgentStatus[] =
   ['pending', 'running', 'waiting', 'done', 'error', 'skipped'];
 const SEO_TRACE_KINDS = ['model', 'tool', 'handoff', 'system'] as const;
 const SEO_TRACE_STATUSES = ['pending', 'running', 'done', 'error', 'rejected', 'skipped'] as const;
+const CHAT_MESSAGE_KINDS: readonly ChatMessageKind[] = ['text', 'proposal', 'run'];
+const CHAT_PROPOSAL_STATUSES: readonly ChatProposalStatus[] = ['pending', 'confirmed', 'superseded'];
 
 /**
  * Project the public service-LLM settings.
@@ -843,6 +896,85 @@ export function publicSeoTracePage(value: unknown): SeoTracePage {
   return { items: page.items.map(seoTraceStep), next_cursor };
 }
 
+/**
+ * Project a message payload by the kind of its message.
+ *
+ * A proposal carries exactly the run parameters, the estimate and the status;
+ * a run carries only the analysis it started; a text message carries nothing.
+ * Any other key of a stored payload is dropped instead of being forwarded.
+ */
+function chatPayload(kind: ChatMessageKind, value: unknown): ChatPayload | null {
+  if (value === null || value === undefined) return null;
+  const item = record(value);
+  if (kind === 'proposal') {
+    const proposal: ChatProposal = {
+      status: oneOf(item.status, CHAT_PROPOSAL_STATUSES),
+      url: stringValue(item.url), sphere: stringValue(item.sphere),
+      seeds: strings(item.seeds), services: strings(item.services), connection_ids: strings(item.connection_ids),
+      search_upper: requiredInteger(item.search_upper), model_upper: requiredInteger(item.model_upper),
+      generated_limit: requiredInteger(item.generated_limit)
+    };
+    return proposal;
+  }
+  if (kind === 'run') return { analysis_id: requiredString(item.analysis_id) };
+  return null;
+}
+
+function publicChatMessage(value: unknown): ChatMessage {
+  const item = record(value);
+  const kind = oneOf(item.kind, CHAT_MESSAGE_KINDS);
+  return {
+    id: requiredString(item.id),
+    seq: requiredInteger(item.seq),
+    role: requiredString(item.role),
+    kind,
+    text: optionalString(item.text),
+    payload: chatPayload(kind, item.payload),
+    created_at: requiredString(item.created_at)
+  };
+}
+
+/** The list view of one chat: its title, its age and its live run flag. */
+export function publicChatSummary(value: unknown): ChatSummary {
+  const item = record(value);
+  const id = requiredString(item.id);
+  seoChatPath(id);
+  return {
+    id, title: requiredString(item.title), updated_at: requiredString(item.updated_at),
+    running: requiredBoolean(item.running)
+  };
+}
+
+export function publicChatList(value: unknown): ChatList {
+  const item = record(value);
+  if (!Array.isArray(item.items)) throw new Error('Invalid chat list');
+  return { items: item.items.map(publicChatSummary) };
+}
+
+export function publicChatPage(value: unknown): ChatPage {
+  const item = record(value);
+  if (!Array.isArray(item.messages)) throw new Error('Invalid chat page');
+  return {
+    chat: publicChatSummary(item.chat), messages: item.messages.map(publicChatMessage),
+    next_cursor: optionalInteger(item.next_cursor)
+  };
+}
+
+export function publicChatMessages(value: unknown): ChatMessages {
+  const item = record(value);
+  if (!Array.isArray(item.messages)) throw new Error('Invalid chat messages');
+  return { chat: publicChatSummary(item.chat), messages: item.messages.map(publicChatMessage) };
+}
+
+function publicChatCreated(value: unknown): ChatCreated {
+  return { chat: publicChatSummary(record(value).chat) };
+}
+
+function publicChatProposalUpdated(value: unknown): ChatProposalUpdated {
+  const item = record(value);
+  return { chat: publicChatSummary(item.chat), message: publicChatMessage(item.message) };
+}
+
 export function publicForm(value: unknown): Record<string, unknown> {  const item = record(value);
   const limits = record(item.limits);
   if (!Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids)) throw new Error('Invalid form');
@@ -855,11 +987,15 @@ export function publicForm(value: unknown): Record<string, unknown> {  const ite
  * The request budget for one upstream path.
  *
  * `/api/check` is streamed without a shared deadline, the SEO connection test
- * waits for a real LLM completion, and every other call keeps the short budget.
+ * and the chat message call wait for a real LLM completion, and every other
+ * call keeps the short budget.
  */
 export function apiTimeoutMs(path: ApiPath): number | undefined {
   if (path === '/api/check') return undefined;
   if (path === '/api/seo/settings/test') return SEO_SETTINGS_TEST_TIMEOUT_MS;
+  // Only the turn that calls the service LLM is long; every other chat read stays short.
+  if (path.startsWith('/api/seo/chats/') && SEO_CHAT_MESSAGES_SUFFIX.test(path.slice('/api/seo/chats/'.length)))
+    return SEO_CHAT_MESSAGE_TIMEOUT_MS;
   return DEFAULT_TIMEOUT_MS;
 }
 
@@ -870,7 +1006,7 @@ export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
 }
 
-export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; searchSettings: YandexSearchSettings | null; searchSettingsError: string; seoSettings: SeoSettings | null; seoSettingsError: string; loadError: string }> {
+export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; searchSettings: YandexSearchSettings | null; searchSettingsError: string; seoSettings: SeoSettings | null; seoSettingsError: string; chats: ChatSummary[]; chatsError: string; loadError: string }> {
   // The region catalog is an independent request: a failure there must not stop
   // the model list, and vice versa.
   const { regions: searchRegions, error: searchRegionError } = await loadSearchRegions();
@@ -878,6 +1014,9 @@ export async function loadPageData(): Promise<{ providers: PublicProvider[]; set
   // The SEO service-LLM settings are independent as well: an unavailable SEO
   // resource must never take the model configuration down with it.
   const { settings: seoSettings, error: seoSettingsError } = await loadSeoSettings();
+  // The chat list is one more independent resource: an empty or unavailable chat
+  // list must not take the model configuration down with it.
+  const { chats, error: chatsError } = await loadChats();
   try {
     const [providerResponse, formResponse, settingsResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form'), pythonApi('/api/providers/settings')]);
     if (!providerResponse.ok || !formResponse.ok || !settingsResponse.ok ||
@@ -887,9 +1026,20 @@ export async function loadPageData(): Promise<{ providers: PublicProvider[]; set
     const providers: unknown = await providerResponse.json();
     const settingsProviders: unknown = await settingsResponse.json();
     if (!Array.isArray(providers) || !Array.isArray(settingsProviders)) throw new Error('Invalid providers');
-    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, loadError: '' };
+    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, chats, chatsError, loadError: '' };
   } catch {
-    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, chats, chatsError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+  }
+}
+
+async function loadChats(): Promise<{ chats: ChatSummary[]; error: string }> {
+  try {
+    const response = await pythonApi('/api/seo/chats');
+    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || ''))
+      throw new Error('Invalid chats');
+    return { chats: publicChatList(await response.json()).items, error: '' };
+  } catch {
+    return { chats: [], error: 'Список чатов недоступен' };
   }
 }
 
@@ -938,6 +1088,18 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       : path === '/api/seo/settings/credentials' ? ['DELETE'] : ['POST'];
     if (!allowed.includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
   }
+  // Each chat path has exactly the methods the screen uses: the collection is
+  // read and created, a chat is read and deleted, and the two actions are one
+  // write each. Anything else never reaches Python.
+  const chatMessagesPath = path.startsWith('/api/seo/chats/') &&
+    SEO_CHAT_MESSAGES_SUFFIX.test(path.slice('/api/seo/chats/'.length));
+  const chatProposalPath = path.startsWith('/api/seo/chats/') &&
+    SEO_CHAT_PROPOSAL_SUFFIX.test(path.slice('/api/seo/chats/'.length));
+  if (path === '/api/seo/chats' && !['GET', 'POST'].includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
+  if (chatMessagesPath && method !== 'POST') return json({ detail: 'Недопустимый метод' }, 405);
+  if (chatProposalPath && method !== 'PUT') return json({ detail: 'Недопустимый метод' }, 405);
+  if (path.startsWith('/api/seo/chats/') && !chatMessagesPath && !chatProposalPath &&
+      !['GET', 'DELETE'].includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
   // The connection probe and the cancel action are bodyless POSTs: neither
   // carries a payload, and the probe triggers one upstream chat call.
   const bodylessPost = path === '/api/seo/settings/test' ||
@@ -979,6 +1141,13 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
     if (path === '/api/seo/settings' || path === '/api/seo/settings/credentials')
       return json(publicSeoSettings(value), upstream.status);
     if (path === '/api/seo/settings/test') return json(publicSeoSettingsTest(value), upstream.status);
+    // The chat responses are projected field by field: the draft, the open
+    // proposal pointer and the active run of a chat stay in the server.
+    if (path === '/api/seo/chats' && method === 'GET') return json(publicChatList(value), upstream.status);
+    if (path === '/api/seo/chats' && method === 'POST') return json(publicChatCreated(value), upstream.status);
+    if (chatMessagesPath && method === 'POST') return json(publicChatMessages(value), upstream.status);
+    if (chatProposalPath && method === 'PUT') return json(publicChatProposalUpdated(value), upstream.status);
+    if (path.startsWith('/api/seo/chats/') && method === 'GET') return json(publicChatPage(value), upstream.status);
     if (path === '/api/seo/analyses' && method === 'POST') return json(publicSeoAnalysisCreated(value), upstream.status);
     if ((path === '/api/seo/analyses' || path.startsWith('/api/seo/analyses?cursor=')) && method === 'GET')
       return json(publicSeoHistory(value), upstream.status);

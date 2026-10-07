@@ -15,6 +15,7 @@ const data = {
     endpoint_source: 'none' as const, model_source: 'none' as const, api_key_source: 'none' as const
   },
   seoSettingsError: '',
+  chats: [], chatsError: '',
   loadError: ''
 };
 

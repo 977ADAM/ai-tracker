@@ -4,6 +4,8 @@ export type ApiPath =
   | '/api/search' | '/api/search/regions' | '/api/search/settings' | '/api/search/settings/credentials'
   | '/api/runs' | `/api/runs?cursor=${string}` | `/api/runs/${string}`
   | '/api/seo/settings' | '/api/seo/settings/credentials' | '/api/seo/settings/test'
+  | '/api/seo/chats' | `/api/seo/chats/${string}`
+  | `/api/seo/chats/${string}/messages` | `/api/seo/chats/${string}/proposal`
   | '/api/seo/analyses' | `/api/seo/analyses?cursor=${string}` | `/api/seo/analyses/${string}`
   | `/api/seo/analyses/${string}/trace` | `/api/seo/analyses/${string}/trace?cursor=${string}`
   | `/api/providers/settings/${string}` | `/api/providers/${string}` | `/api/search/${string}`;
@@ -366,3 +368,40 @@ export type SeoModelRow = {
 
 export type SeoRow = SeoSearchRow | SeoModelRow;
 export type SeoRowsPage = { items: SeoRow[]; next_cursor: string | null };
+
+export type ChatMessageKind = 'text' | 'proposal' | 'run';
+export type ChatProposalStatus = 'pending' | 'confirmed' | 'superseded';
+
+/** The proposal payload: the five run parameters, the estimate, and the status. */
+export type ChatProposal = {
+  status: ChatProposalStatus;
+  url: string;
+  sphere: string;
+  seeds: string[];
+  services: string[];
+  connection_ids: string[];
+  search_upper: number;
+  model_upper: number;
+  generated_limit: number;
+};
+
+/** The run card's payload: the analysis the chat started. */
+export type ChatRunRef = { analysis_id: string };
+export type ChatPayload = ChatProposal | ChatRunRef;
+
+export type ChatMessage = {
+  id: string;
+  seq: number;
+  role: string;
+  kind: ChatMessageKind;
+  text: string | null;
+  payload: ChatPayload | null;
+  created_at: string;
+};
+
+export type ChatSummary = { id: string; title: string; updated_at: string; running: boolean };
+export type ChatList = { items: ChatSummary[] };
+export type ChatCreated = { chat: ChatSummary };
+export type ChatPage = { chat: ChatSummary; messages: ChatMessage[]; next_cursor: number | null };
+export type ChatMessages = { chat: ChatSummary; messages: ChatMessage[] };
+export type ChatProposalUpdated = { chat: ChatSummary; message: ChatMessage };
