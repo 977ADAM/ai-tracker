@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
+from app.core.errors import ValidationError
 from app.domain.chat import (
     DEFAULT_TITLE,
     FIELD_ORDER,
@@ -23,6 +26,8 @@ from app.domain.chat import (
 )
 from app.domain.seo import (
     MAX_CONNECTIONS,
+    MAX_QUERY_LENGTH,
+    MAX_QUERY_WORDS,
     MAX_SERVICE_LENGTH,
     MAX_SPHERE_LENGTH,
     SEED_COUNT,
@@ -136,6 +141,48 @@ def test_missing_fields_rejects_a_wrong_seed_count_and_too_many_connections():
     assert missing_fields(no_connections, CONNECTIONS) == ("services",)
 
 
+def test_missing_fields_reports_a_key_query_longer_than_the_run_allows():
+    draft = ChatDraft(
+        "https://a.ru",
+        "Цветы",
+        ("1", "я" * (MAX_QUERY_LENGTH + 1), "3"),
+        ("Букеты",),
+        CONNECTIONS,
+    )
+    assert missing_fields(draft, CONNECTIONS) == ("seeds",)
+    with pytest.raises(ValidationError):
+        normalize_seo_request(proposal_params(draft))
+
+
+def test_missing_fields_reports_a_key_query_with_too_many_words():
+    wordy = " ".join(f"слово{index}" for index in range(MAX_QUERY_WORDS + 1))
+    draft = ChatDraft("https://a.ru", "Цветы", ("1", wordy, "3"), ("Букеты",), CONNECTIONS)
+    assert missing_fields(draft, CONNECTIONS) == ("seeds",)
+    with pytest.raises(ValidationError):
+        normalize_seo_request(proposal_params(draft))
+
+
+def test_missing_fields_reports_duplicate_key_queries():
+    draft = ChatDraft("https://a.ru", "Цветы", ("1", "1", "3"), ("Букеты",), CONNECTIONS)
+    assert missing_fields(draft, CONNECTIONS) == ("seeds",)
+    with pytest.raises(ValidationError):
+        normalize_seo_request(proposal_params(draft))
+
+
+def test_missing_fields_reports_duplicate_services():
+    draft = ChatDraft("https://a.ru", "Цветы", ("1", "2", "3"), ("Букеты", "Букеты"), CONNECTIONS)
+    assert missing_fields(draft, CONNECTIONS) == ("services",)
+    with pytest.raises(ValidationError):
+        normalize_seo_request(proposal_params(draft))
+
+
+def test_missing_fields_reports_duplicate_connection_ids():
+    draft = ChatDraft("https://a.ru", "Цветы", ("1", "2", "3"), ("Букеты",), ("a", "a"))
+    assert missing_fields(draft, CONNECTIONS) == ("services",)
+    with pytest.raises(ValidationError):
+        normalize_seo_request(proposal_params(draft))
+
+
 def test_draft_round_trips_through_json():
     draft = ChatDraft("https://a.ru", "Цветы", ("1", "2", "3"), ("Букеты",), CONNECTIONS)
     assert draft_from_json(draft_to_json(draft)) == draft
@@ -212,6 +259,23 @@ def test_proposal_params_of_a_complete_draft_pass_run_validation():
     assert request.seeds == ("1", "2", "3")
     assert request.services == ("Букеты",)
     assert request.connection_ids == CONNECTIONS
+
+
+def test_no_missing_field_means_the_proposal_params_pass_run_validation():
+    """The chat invariant: an empty gap tuple guarantees `SeoService.start` accepts."""
+    drafts = (
+        ChatDraft("https://a.ru", "Цветы", ("1", "2", "3"), ("Букеты",), CONNECTIONS),
+        ChatDraft(
+            "https://a.ru",
+            "Цветы",
+            ("купить розы", "доставка цветов", "букет на свадьбу"),
+            ("Розы", "Пионы"),
+            ("a",),
+        ),
+    )
+    for draft in drafts:
+        assert missing_fields(draft, CONNECTIONS) == ()
+        normalize_seo_request(proposal_params(draft))
 
 
 def test_proposal_matches_reads_stored_lists_and_scalars():

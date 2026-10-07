@@ -17,6 +17,8 @@ from dataclasses import dataclass, replace
 from app.domain.matching import normalize_text
 from app.domain.seo import (
     MAX_CONNECTIONS,
+    MAX_QUERY_LENGTH,
+    MAX_QUERY_WORDS,
     MAX_SERVICE_LENGTH,
     MAX_SERVICES,
     MAX_SPHERE_LENGTH,
@@ -120,7 +122,9 @@ def missing_fields(draft: ChatDraft, available_connections: Sequence[str]) -> tu
     The rules are the run's field rules for the URL, sphere, key queries,
     services, and the connection count; the caller supplies the configured
     connection IDs. Connections share the `services` entry: they are never asked
-    for in words, so their absence is reported as that one gap.
+    for in words, so their absence is reported as that one gap. An empty tuple is
+    a promise: `normalize_seo_request(proposal_params(draft))` then accepts, so a
+    confirmed proposal can never be refused by `SeoService.start`.
     """
     gaps = {
         "url": url_problem(draft.url) is not None,
@@ -210,25 +214,31 @@ def _texts(value: object) -> tuple[str, ...]:
 
 
 def _seeds_valid(seeds: Sequence[str]) -> bool:
-    """Exactly `SEED_COUNT` distinct, non-empty key queries."""
+    """Exactly `SEED_COUNT` distinct non-empty key queries inside the run's limits."""
     texts = tuple(_text(seed) for seed in seeds)
     if len(texts) != SEED_COUNT or not all(texts):
+        return False
+    if any(len(text) > MAX_QUERY_LENGTH or len(text.split()) > MAX_QUERY_WORDS for text in texts):
         return False
     return _distinct(texts)
 
 
 def _services_valid(services: Sequence[str]) -> bool:
-    """One to `MAX_SERVICES` non-empty services of at most `MAX_SERVICE_LENGTH`."""
+    """One to `MAX_SERVICES` distinct non-empty services of at most `MAX_SERVICE_LENGTH`."""
     texts = tuple(_text(service) for service in services)
     if not 1 <= len(texts) <= MAX_SERVICES or not all(texts):
         return False
-    return all(len(text) <= MAX_SERVICE_LENGTH for text in texts)
+    if not all(len(text) <= MAX_SERVICE_LENGTH for text in texts):
+        return False
+    return _distinct(texts)
 
 
 def _connections_valid(connection_ids: Sequence[str], available_connections: Sequence[str]) -> bool:
-    """One to `MAX_CONNECTIONS` non-empty IDs, each one configured."""
+    """One to `MAX_CONNECTIONS` distinct non-empty IDs, each one configured."""
     ids = tuple(_text(connection_id) for connection_id in connection_ids)
     if not 1 <= len(ids) <= MAX_CONNECTIONS or not all(ids):
+        return False
+    if len(set(ids)) != len(ids):
         return False
     known = {_text(connection_id) for connection_id in available_connections}
     return all(connection_id in known for connection_id in ids)
