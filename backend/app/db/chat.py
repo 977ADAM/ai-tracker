@@ -213,6 +213,16 @@ class ChatRepository:
                 (payload, now, chat_id),
             )
 
+    def set_title(self, chat_id: str, title: str) -> None:
+        """Replace the title of one chat, which the first user message sets."""
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_chat(connection, chat_id)
+            connection.execute(
+                "UPDATE seo_chats SET title=?, updated_at=? WHERE id=?",
+                (title, now, chat_id),
+            )
+
     def set_pending_proposal(self, chat_id: str, message_id: str | None) -> None:
         """Point the chat at its open proposal message, or clear the pointer."""
         now = _now()

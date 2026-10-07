@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from app.core.config import ConnectionPreset
-from app.core.errors import ProviderError, StorageError
+from app.core.errors import ProviderError, RunNotFound, StorageError
 from app.domain.search import SearchDocument
 from app.domain.seo import SeoInput
 from app.domain.seo_llm import AgentMessage, AgentTurn, ToolCall, ToolSchema
@@ -492,4 +492,75 @@ def tool_calling_settings(model_name: str = "seo-model") -> FakeSeoSettingsServi
         FakeAgentModel(tool_call_turn("check_connection", {"status": "OK"})),
         model_name=model_name,
     )
+
+
+# -- chat fakes ---------------------------------------------------------------
+
+
+class FakeChatClient:
+    """A `ChatModel` that answers from a script and repeats its last answer.
+
+    One client serves a whole dialogue: `complete` takes the next answer of the
+    queue and keeps returning the last one once the queue is exhausted, so a test
+    scripts only the turns that matter. `calls` records every `(system, user)`
+    pair the service sent, so a test can prove what reached the model.
+    """
+
+    def __init__(self, answers: Sequence[str]) -> None:
+        self.answers = list(answers)
+        self.calls: list[tuple[str, str]] = []
+
+    async def complete(self, system: str, user: str) -> str:
+        self.calls.append((system, user))
+        if not self.answers:
+            raise AssertionError("unexpected chat-LLM call")
+        index = min(len(self.calls) - 1, len(self.answers) - 1)
+        return self.answers[index]
+
+
+class FailingChatClient:
+    """A `ChatModel` that raises its error on every call and records the dialogue.
+
+    The error is raised as it is, so a test can prove which failures the service
+    lets through and which ones it answers itself.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.calls: list[tuple[str, str]] = []
+
+    async def complete(self, system: str, user: str) -> str:
+        self.calls.append((system, user))
+        raise self.error
+
+
+class FakeChatSeoService:
+    """A `SeoService` stand-in for the chat: records runs and their snapshots.
+
+    `start` answers with one fixed analysis and reports it as running, which is
+    all the chat's "a run is already going" check reads. A snapshot of an
+    analysis the fake never started — or one dropped by `delete` — raises
+    `RunNotFound`, exactly like the real repository, so the chat's deleted-run
+    path is reachable without a database.
+    """
+
+    def __init__(self, analysis_id: str = "a-1") -> None:
+        self.analysis_id = analysis_id
+        self.started: list[dict[str, object]] = []
+        self.deleted: list[str] = []
+        self.snapshots: dict[str, dict[str, object]] = {}
+
+    async def start(self, payload: dict[str, object]) -> dict[str, object]:
+        self.started.append(dict(payload))
+        self.snapshots[self.analysis_id] = {"status": "running"}
+        return {"id": self.analysis_id, "status": "running", "estimate": {}}
+
+    def snapshot(self, analysis_id: str) -> dict[str, object]:
+        if analysis_id not in self.snapshots:
+            raise RunNotFound("SEO-анализ не найден")
+        return dict(self.snapshots[analysis_id])
+
+    def delete(self, analysis_id: str) -> None:
+        self.deleted.append(analysis_id)
+        self.snapshots.pop(analysis_id, None)
 

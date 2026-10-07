@@ -109,6 +109,18 @@ def test_a_new_chat_starts_with_an_empty_draft(tmp_path):
 # -- chats --------------------------------------------------------------
 
 
+def test_set_title_replaces_the_chat_title(tmp_path):
+    repository = _repository(tmp_path)
+    chat_id = repository.create_chat("Новый чат")
+    repository.set_title(chat_id, "Проверь flowers.ru")
+    assert repository.chat(chat_id)["title"] == "Проверь flowers.ru"
+
+
+def test_set_title_refuses_an_unknown_chat(tmp_path):
+    with pytest.raises(ChatNotFound):
+        _repository(tmp_path).set_title("нет-такого", "Заголовок")
+
+
 def test_list_chats_is_newest_updated_first(tmp_path):
     repository = _repository(tmp_path)
     first = repository.create_chat("Первый")
