@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import Page from './+page.svelte';
 import type {
   ChatMessage, ChatPage, ChatProposal, ChatSummary, PublicProvider, SeoAnalysisSnapshot,
-  SeoSearchRow, SeoStage
+  SeoSearchRow, SeoStage, SeoTraceStep
 } from '$lib/types';
 
 const STAMP = '2026-10-07T10:00:00Z';
@@ -91,6 +91,13 @@ function searchRow(query: string): SeoSearchRow {
   };
 }
 
+function traceStep(index: number, name: string): SeoTraceStep {
+  return {
+    step_index: index, agent: 'site', kind: 'tool', name, arguments: {}, result_summary: 'Готово',
+    status: 'running', error: null, created_at: STAMP
+  };
+}
+
 function chatPage(overrides: Partial<ChatPage> = {}): ChatPage {
   return { chat: chat(), messages: [], next_cursor: null, ...overrides };
 }
@@ -123,6 +130,14 @@ function stubFetch(handler: Handler) {
 
 function calls(mock: ReturnType<typeof stubFetch>, fragment: string) {
   return mock.mock.calls.filter(([url]) => String(url).includes(fragment));
+}
+
+/**
+ * Snapshot requests only. The trace, rows and cancel endpoints all share the
+ * `/api/seo/analyses/{id}` prefix, so a plain `includes` would count them too.
+ */
+function snapshotCalls(mock: ReturnType<typeof stubFetch>, id: string) {
+  return mock.mock.calls.filter(([url]) => String(url).endsWith(`/api/seo/analyses/${id}`));
 }
 
 function pollTimers(spy: { mock: { calls: unknown[][] } }): number {
@@ -206,6 +221,7 @@ describe('chat page', () => {
 
   it('restores a running analysis when a chat is opened', async () => {
     const mock = stubFetch((url) => {
+      if (url.includes('/api/seo/analyses/a-1/trace')) return jsonResponse({ items: [], next_cursor: null });
       if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
       if (url.includes('/api/seo/chats/')) {
         return jsonResponse(chatPage({
@@ -217,7 +233,7 @@ describe('chat page', () => {
     render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1', running: true })] }) } });
 
     await waitFor(() => expect(screen.getByText('Прогон SEO-анализа')).toBeTruthy());
-    expect(calls(mock, '/api/seo/analyses/a-1')).toHaveLength(1);
+    expect(snapshotCalls(mock, 'a-1')).toHaveLength(1);
     expect(screen.getByText('Идёт прогон')).toBeTruthy();
   });
 
@@ -234,7 +250,7 @@ describe('chat page', () => {
     });
     render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1', running: true })] }) } });
 
-    await waitFor(() => expect(calls(mock, '/api/seo/analyses/a-1')).toHaveLength(1));
+    await waitFor(() => expect(snapshotCalls(mock, 'a-1')).toHaveLength(1));
     await waitFor(() => expect(screen.getByText('Прогон SEO-анализа')).toBeTruthy());
     expect(pollTimers(timeout)).toBe(0);
     await waitFor(() => expect(screen.getByText('Готов')).toBeTruthy());
@@ -244,6 +260,7 @@ describe('chat page', () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     let analysis = snapshot({ status: 'running' });
     const mock = stubFetch((url) => {
+      if (url.includes('/api/seo/analyses/a-1/trace')) return jsonResponse({ items: [], next_cursor: null });
       if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(analysis);
       if (url.includes('/api/seo/chats/')) {
         return jsonResponse(chatPage({
@@ -254,7 +271,7 @@ describe('chat page', () => {
     });
     render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1', running: true })] }) } });
 
-    await waitFor(() => expect(calls(mock, '/api/seo/analyses/a-1')).toHaveLength(1));
+    await waitFor(() => expect(snapshotCalls(mock, 'a-1')).toHaveLength(1));
     await screen.findByText('Прогон SEO-анализа');
     expect(screen.getByText('Идёт прогон')).toBeTruthy();
     const scheduled = timeout.mock.calls.filter((call) => call[1] === 30_000);
@@ -262,7 +279,7 @@ describe('chat page', () => {
 
     analysis = snapshot({ status: 'completed' });
     (scheduled[0][0] as () => void)();
-    await waitFor(() => expect(calls(mock, '/api/seo/analyses/a-1')).toHaveLength(2));
+    await waitFor(() => expect(snapshotCalls(mock, 'a-1')).toHaveLength(2));
     await waitFor(() => expect(screen.getByText('Готов')).toBeTruthy());
     expect(pollTimers(timeout)).toBe(1);
   });
@@ -280,7 +297,7 @@ describe('chat page', () => {
     });
     render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1' })] }) } });
 
-    await waitFor(() => expect(calls(mock, '/api/seo/analyses/a-1')).toHaveLength(1));
+    await waitFor(() => expect(snapshotCalls(mock, 'a-1')).toHaveLength(1));
     await fireEvent.click(screen.getByRole('button', { name: /новый чат/i }));
     release(jsonResponse(snapshot({ status: 'running' })));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -313,9 +330,128 @@ describe('chat page', () => {
     expect(String(trace[0][0])).not.toContain('cursor=');
   });
 
+  it('keeps the agent trace of a running run up to date while it polls', async () => {
+    const timeout = vi.spyOn(globalThis, 'setTimeout');
+    const mock = stubFetch((url) => {
+      if (url.includes('/api/seo/analyses/a-1/trace')) {
+        return jsonResponse({ items: [traceStep(1, 'site_crawl')], next_cursor: null });
+      }
+      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/chats/')) {
+        return jsonResponse(chatPage({
+          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
+        }));
+      }
+      return jsonResponse({ detail: 'Нет маршрута' }, 404);
+    });
+    render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1', running: true })] }) } });
+
+    // The first trace page is requested as soon as the running run appears.
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(1));
+    const first = calls(mock, '/trace')[0];
+    expect(String(first[0])).toContain('/api/seo/analyses/a-1/trace');
+    expect(String(first[0])).not.toContain('cursor=');
+
+    // The steps reach the live card through the feed's `traces` map.
+    await screen.findByText('Прогон SEO-анализа');
+    await waitFor(() => expect(screen.getByText('1 шаг')).toBeTruthy());
+    await fireEvent.click(screen.getByRole('button', { name: /показать трассу/i }));
+    expect(screen.getByText('site_crawl')).toBeTruthy();
+
+    // The 30-second poll refreshes that same first page, so new steps appear.
+    const scheduled = timeout.mock.calls.filter((call) => call[1] === 30_000);
+    expect(scheduled).toHaveLength(1);
+    (scheduled[0][0] as () => void)();
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(2));
+    expect(String(calls(mock, '/trace')[1][0])).not.toContain('cursor=');
+  });
+
+  it('does not collapse a trace the user paged deeper when a running run is polled', async () => {
+    const timeout = vi.spyOn(globalThis, 'setTimeout');
+    const mock = stubFetch((url) => {
+      if (url.includes('/api/seo/analyses/a-1/trace')) {
+        return url.includes('cursor=p1')
+          ? jsonResponse({ items: [traceStep(2, 'deep_step')], next_cursor: null })
+          : jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' });
+      }
+      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/chats/')) {
+        return jsonResponse(chatPage({
+          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
+        }));
+      }
+      return jsonResponse({ detail: 'Нет маршрута' }, 404);
+    });
+    render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1', running: true })] }) } });
+
+    await screen.findByText('Прогон SEO-анализа');
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(1));
+    await fireEvent.click(screen.getByRole('button', { name: /показать трассу/i }));
+    await fireEvent.click(screen.getByRole('button', { name: /показать ещё/i }));
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(2));
+    expect(String(calls(mock, '/trace')[1][0])).toContain('cursor=p1');
+    expect(screen.getByText('deep_step')).toBeTruthy();
+
+    const scheduled = timeout.mock.calls.filter((call) => call[1] === 30_000);
+    (scheduled[scheduled.length - 1][0] as () => void)();
+    await waitFor(() => expect(snapshotCalls(mock, 'a-1')).toHaveLength(2));
+
+    // The user's deeper pages survive: the poll refreshes the snapshot only.
+    expect(calls(mock, '/trace')).toHaveLength(2);
+    expect(screen.getByText('first_step')).toBeTruthy();
+    expect(screen.getByText('deep_step')).toBeTruthy();
+  });
+
+  it('keeps a page the user loaded when a first-page refresh was already in flight', async () => {
+    const timeout = vi.spyOn(globalThis, 'setTimeout');
+    let releaseAppend: (value: Response) => void = () => {};
+    let releaseRefresh: (value: Response) => void = () => {};
+    const appendPending = new Promise<Response>((resolve) => { releaseAppend = resolve; });
+    const refreshPending = new Promise<Response>((resolve) => { releaseRefresh = resolve; });
+    let firstPageCalls = 0;
+    const mock = stubFetch((url) => {
+      if (url.includes('/api/seo/analyses/a-1/trace')) {
+        if (url.includes('cursor=p1')) return appendPending;
+        firstPageCalls += 1;
+        return firstPageCalls === 1
+          ? jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' })
+          : refreshPending;
+      }
+      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/chats/')) {
+        return jsonResponse(chatPage({
+          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
+        }));
+      }
+      return jsonResponse({ detail: 'Нет маршрута' }, 404);
+    });
+    render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1', running: true })] }) } });
+
+    await screen.findByText('Прогон SEO-анализа');
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(1));
+    await fireEvent.click(screen.getByRole('button', { name: /показать трассу/i }));
+    await fireEvent.click(screen.getByRole('button', { name: /показать ещё/i }));
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(2));
+
+    // A poll starts its first-page refresh while the user's next page is on the wire.
+    const scheduled = timeout.mock.calls.filter((call) => call[1] === 30_000);
+    (scheduled[scheduled.length - 1][0] as () => void)();
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(3));
+
+    // The user's page lands first, then the older refresh: it must not undo it.
+    releaseAppend(jsonResponse({ items: [traceStep(2, 'deep_step')], next_cursor: null }));
+    await screen.findByText('deep_step');
+    releaseRefresh(jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByText('deep_step')).toBeTruthy();
+    expect(screen.getByText('first_step')).toBeTruthy();
+  });
+
   it('cancels the run through the existing endpoint', async () => {
     const mock = stubFetch((url) => {
       if (url.endsWith('/cancel')) return jsonResponse(snapshot({ status: 'cancelled' }));
+      if (url.includes('/api/seo/analyses/a-1/trace')) return jsonResponse({ items: [], next_cursor: null });
       if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
       if (url.includes('/api/seo/chats/')) {
         return jsonResponse(chatPage({

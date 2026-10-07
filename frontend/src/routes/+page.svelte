@@ -54,6 +54,8 @@
   const pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Which chat started each analysis, so a finished run clears its live flag. */
   const analysisChat = new Map<string, string>();
+  /** Analyses whose trace the user paged past the first page: a poll must not collapse it. */
+  const tracePaged = new Set<string>();
 
   function detail(value: unknown, fallback: string): string {
     return value !== null && typeof value === 'object' && 'detail' in value && typeof value.detail === 'string'
@@ -121,7 +123,7 @@
       snapshots = { ...snapshots, [id]: current };
       runError = '';
       // Only a live run is polled; a terminal one stops until the chat is reopened.
-      if (current.status === 'running') schedulePoll(id);
+      if (current.status === 'running') { void syncTrace(id); schedulePoll(id); }
       else { stopPolling(id); markChatStopped(analysisChat.get(id) ?? null); }
     } catch (cause) {
       if (destroyed || analysisChat.get(id) !== activeId) return;
@@ -157,6 +159,7 @@
     rowErrors = {};
     cancellingId = null;
     runError = '';
+    tracePaged.clear();
   }
 
   async function loadRows(id: string, kind: SeoRowsKind, cursor: string | null, append: boolean): Promise<void> {
@@ -194,12 +197,17 @@
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить трассу агентов'));
       if (destroyed) return;
+      // A first-page refresh that was already in flight must not undo a page
+      // the user loaded while it travelled: their state is the newer one.
+      if (!append && tracePaged.has(id)) return;
       const page = value as SeoTracePage;
       const current = traces[id] ?? EMPTY_TRACE;
       traces = { ...traces, [id]: {
         steps: append ? [...current.steps, ...page.items] : page.items,
         cursor: page.next_cursor, loading: false, error: ''
       } };
+      // The user asked for more than the first page; a later poll leaves it be.
+      if (append) tracePaged.add(id);
     } catch (cause) {
       if (destroyed) return;
       const current = traces[id] ?? EMPTY_TRACE;
@@ -208,6 +216,19 @@
         error: cause instanceof Error ? cause.message : 'Не удалось загрузить трассу агентов'
       } };
     }
+  }
+
+  /**
+   * The live card shows the stages, the agents and the agent trace, so the
+   * first trace page is read whenever a running snapshot arrives: once as the
+   * run appears and again on every 30-second poll, which is what makes new
+   * steps show up without a reload. A trace the user already paged deeper is
+   * left exactly as they loaded it. A trace failure stays best-effort: it only
+   * paints the feed's own error and never blocks the progress card.
+   */
+  async function syncTrace(id: string): Promise<void> {
+    if (tracePaged.has(id)) return;
+    await loadTrace(id, null, false);
   }
 
   /**
