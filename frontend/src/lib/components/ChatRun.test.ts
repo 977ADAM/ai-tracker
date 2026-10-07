@@ -116,6 +116,30 @@ describe('ChatRun', () => {
     expect(screen.getByText('site_fetch')).toBeTruthy();
   });
 
+  it('keeps the trace of a finished run reachable from the opened report', async () => {
+    const onMoreTrace = vi.fn();
+    const { container } = render(ChatRun, {
+      props: runProps({
+        snapshot: snapshot({ status: 'completed' }),
+        traces: { steps: [traceStep('site_fetch')], cursor: 'trace-page-2', loading: false, error: '' },
+        onMoreTrace
+      })
+    });
+
+    // The heavy block stays unmounted until the user asks for it.
+    expect(container.querySelector('[data-trace-feed]')).toBeNull();
+    expect(screen.queryByText('Трасса агентов')).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: /открыть отчёт/i }));
+    expect(container.querySelector('[data-trace-feed]')).not.toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: /показать трассу/i }));
+    expect(screen.getByText('site_fetch')).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));
+    expect(onMoreTrace).toHaveBeenCalledTimes(1);
+  });
+
   it('names every terminal state', () => {
     for (const [status, label, note] of [
       ['completed', 'Завершён', /Анализ завершён/],

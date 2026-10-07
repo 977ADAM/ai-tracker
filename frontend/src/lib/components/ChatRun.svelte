@@ -2,6 +2,7 @@
   import type { SeoAnalysisSnapshot, SeoModelRow, SeoRowsKind, SeoSearchRow, SeoTraceStep } from '$lib/types';
   import SeoRunProgress from './SeoRunProgress.svelte';
   import SeoReport from './SeoReport.svelte';
+  import SeoTraceFeed from './SeoTraceFeed.svelte';
 
   /**
    * One run card inside the chat feed. While the analysis runs it is the live
@@ -127,6 +128,18 @@
     </div>
 
     {#if reportOpen}
+      <!--
+        The agent trace of a finished run stays reachable: the report and the
+        trace unfold together. The trace sits right under the toggle so it is
+        not buried under the long report.
+      -->
+      <SeoTraceFeed
+        steps={traces.steps}
+        nextCursor={traces.cursor}
+        loading={traces.loading}
+        error={traces.error}
+        onMore={onMoreTrace}
+      />
       <SeoReport {snapshot} {rows} {cursors} {connectionNames} {loadingRows} {error} onMore={onMoreRows} />
     {/if}
   </section>
