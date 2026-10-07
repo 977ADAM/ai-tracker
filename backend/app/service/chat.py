@@ -5,7 +5,9 @@ extracts the fields it saw; it never decides whether a run starts. This module
 owns that decision, and the order of its branches is the safety property of the
 feature: the first match wins, so an incomplete draft always asks a question, a
 run already going always refuses, and a launch happens only from the chat's own
-open proposal whose parameters still equal the draft.
+open proposal whose parameters still equal the draft — after the store has
+atomically claimed that proposal for this turn, so two overlapping confirmations
+can never fund two runs.
 
 The launch itself is `SeoService.start`, so the paid path, its configuration
 refusals, and its budget stay untouched here. `ConfigurationError` and
@@ -145,8 +147,9 @@ class ChatService:
         The order is the rule: a confirmation without a proposal never reaches the
         launch check, an incomplete draft always resets the proposal, a live run
         always wins over a new proposal, and a launch requires the stored proposal
-        to match the draft exactly. Any other answer builds a fresh proposal, so
-        "да" written together with new parameters is not a confirmation.
+        to match the draft exactly and the store to hand this turn the claim on
+        it. Any other answer builds a fresh proposal, so "да" written together
+        with new parameters is not a confirmation.
         """
         chat_id = str(chat["id"])
         missing = missing_fields(draft, available)
@@ -173,7 +176,13 @@ class ChatService:
         proposal_id: str | None,
         proposal: Mapping[str, object] | None,
     ) -> list[dict]:
-        """Start the paid run from the confirmed proposal and close it as used.
+        """Claim the confirmed proposal, then start the paid run and close it as used.
+
+        `can_launch` only proved that the proposal this turn *read* was pending and
+        matched the draft; that read happened before the model call, so another
+        turn may have consumed the proposal since. The claim is the authority: one
+        conditional update in the store picks exactly one winner, and a loser
+        answers that the run is under way instead of funding a second one.
 
         The parameters come from the draft, which `can_launch` has just proven
         equal to the stored proposal: the model answer can name a run, but only
@@ -181,6 +190,8 @@ class ChatService:
         run card is the whole answer of this turn — the model's sentence is not
         shown, because the card already reports what is happening.
         """
+        if proposal_id is None or not self.chats.claim_proposal(chat_id, proposal_id):
+            return [self._text_message(chat_id, RUN_IN_PROGRESS)]
         started = await self.seo.start(proposal_params(draft))
         analysis_id = str(started["id"])
         self.chats.set_active_analysis(chat_id, analysis_id)

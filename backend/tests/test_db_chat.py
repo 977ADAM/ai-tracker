@@ -121,6 +121,32 @@ def test_set_title_refuses_an_unknown_chat(tmp_path):
         _repository(tmp_path).set_title("нет-такого", "Заголовок")
 
 
+def test_claim_proposal_has_exactly_one_winner(tmp_path):
+    """The conditional update is the compare-and-swap: the second claim loses."""
+    repository = _repository(tmp_path)
+    chat_id = repository.create_chat("Чат")
+    proposal = repository.append_message(
+        chat_id, "assistant", "proposal", None, {"status": "pending"},
+    )
+    repository.set_pending_proposal(chat_id, proposal["id"])
+    with sqlite3.connect(tmp_path / DB_FILE) as connection:
+        connection.execute(
+            "UPDATE seo_chats SET updated_at=? WHERE id=?",
+            ("2000-01-01T00:00:00+00:00", chat_id),
+        )
+
+    # A foreign pointer cannot claim the open proposal.
+    assert repository.claim_proposal(chat_id, "чужое-предложение") is False
+    assert repository.chat(chat_id)["pending_proposal_id"] == proposal["id"]
+
+    assert repository.claim_proposal(chat_id, proposal["id"]) is True
+    stored = repository.chat(chat_id)
+    assert stored["pending_proposal_id"] is None
+    assert stored["updated_at"] != "2000-01-01T00:00:00+00:00"
+    assert repository.claim_proposal(chat_id, proposal["id"]) is False
+    assert repository.chat(chat_id)["pending_proposal_id"] is None
+
+
 def test_list_chats_is_newest_updated_first(tmp_path):
     repository = _repository(tmp_path)
     first = repository.create_chat("Первый")
@@ -167,6 +193,8 @@ def test_unknown_chat_writes_raise(tmp_path):
         repository.save_draft("нет-такого", {})
     with pytest.raises(ChatNotFound):
         repository.set_pending_proposal("нет-такого", None)
+    with pytest.raises(ChatNotFound):
+        repository.claim_proposal("нет-такого", "сообщение")
     with pytest.raises(ChatNotFound):
         repository.set_active_analysis("нет-такого", None)
     with pytest.raises(ChatNotFound):

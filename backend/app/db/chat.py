@@ -233,6 +233,25 @@ class ChatRepository:
                 (message_id, now, chat_id),
             )
 
+    def claim_proposal(self, chat_id: str, message_id: str) -> bool:
+        """Clear the open proposal pointer, but only for the caller naming it.
+
+        The one conditional `UPDATE` is the compare-and-swap that makes a launch
+        safe under concurrent turns: the clear and the equality test happen in a
+        single write transaction, so when two turns read the same
+        `pending_proposal_id` only the first update matches and every later one
+        reports `rowcount == 0`. `True` means this caller won and owns the launch.
+        """
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_chat(connection, chat_id)
+            cursor = connection.execute(
+                "UPDATE seo_chats SET pending_proposal_id=NULL, updated_at=? "
+                "WHERE id=? AND pending_proposal_id=?",
+                (now, chat_id, message_id),
+            )
+            return cursor.rowcount == 1
+
     def set_active_analysis(self, chat_id: str, analysis_id: str | None) -> None:
         """Point the chat at the analysis it started, or clear the pointer."""
         now = _now()

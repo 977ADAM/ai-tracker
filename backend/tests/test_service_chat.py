@@ -8,6 +8,7 @@ run itself is a `FakeChatSeoService`, so no test spends anything.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -200,6 +201,113 @@ async def test_two_messages_do_not_start_two_runs(service, chat_id, seo):
     result = await service.send_message(chat_id, "да")
     assert len(seo.started) == 1
     assert result["messages"][-1]["text"] == RUN_IN_PROGRESS
+
+
+@pytest.mark.anyio
+async def test_a_turn_that_lost_the_proposal_starts_no_run(
+    chats: ChatRepository,
+    seo: FakeChatSeoService,
+    connections: ConnectionService,
+    form: FormService,
+    chat_id: str,
+):
+    """A turn that finds the proposal consumed mid-turn refuses instead of paying.
+
+    The model call is the turn's only suspension point before the launch, so a
+    concurrent turn can clear the pointer while this one is still being answered;
+    the claim then loses and the run must not start.
+    """
+    await ChatService(
+        chats, seo, connections, form, client_factory=lambda: FakeChatClient([FULL_ANSWER]),
+    ).send_message(chat_id, FULL_MESSAGE)
+
+    class StealingChatClient:
+        """Clears the proposal during the model call, as a winning turn would."""
+
+        async def complete(self, system: str, user: str) -> str:
+            chats.set_pending_proposal(chat_id, None)
+            return CONFIRM_ANSWER
+
+    service = ChatService(chats, seo, connections, form, client_factory=StealingChatClient)
+    result = await service.send_message(chat_id, "да")
+
+    assert seo.started == []
+    assert [item["kind"] for item in result["messages"]] == ["text", "text"]
+    assert result["messages"][-1]["text"] == RUN_IN_PROGRESS
+
+
+@pytest.mark.anyio
+async def test_overlapping_confirmations_start_exactly_one_run(
+    chats: ChatRepository,
+    connections: ConnectionService,
+    form: FormService,
+    chat_id: str,
+):
+    """Two turns holding the same pending proposal cannot both fund a run.
+
+    The gates build the real race deterministically: the fake model parks both
+    turns inside `complete`, so each has read the same pre-launch snapshot of the
+    chat, and the fake `seo.start` parks the winner inside its paid start, so the
+    loser gets to claim while the winner is still there. One run, one winner.
+    """
+    await ChatService(
+        chats, seo, connections, form, client_factory=lambda: FakeChatClient([FULL_ANSWER]),
+    ).send_message(chat_id, FULL_MESSAGE)
+
+    class BothTurnsChatClient:
+        """Parks every turn in `complete` until both turns have arrived."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.both_ready = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def complete(self, system: str, user: str) -> str:
+            self.calls += 1
+            if self.calls == 2:
+                self.both_ready.set()
+            await self.release.wait()
+            return CONFIRM_ANSWER
+
+    class ParkedStartSeo(FakeChatSeoService):
+        """Parks the first paid start until the test lets it finish."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.release = asyncio.Event()
+
+        async def start(self, payload: dict[str, object]) -> dict[str, object]:
+            started = await super().start(payload)
+            if len(self.started) == 1:
+                await self.release.wait()
+            return started
+
+    client = BothTurnsChatClient()
+    parked_seo = ParkedStartSeo()
+    service = ChatService(chats, parked_seo, connections, form, client_factory=lambda: client)
+
+    first = asyncio.create_task(service.send_message(chat_id, "да"))
+    second = asyncio.create_task(service.send_message(chat_id, "да"))
+    await client.both_ready.wait()
+    client.release.set()
+
+    # The winner is parked inside `seo.start`; the loser finishes its turn first.
+    _, pending = await asyncio.wait({first, second}, return_when=asyncio.FIRST_COMPLETED)
+    assert pending, "the winning turn must still be inside its paid start"
+    parked_seo.release.set()
+    results = list(await asyncio.gather(first, second))
+
+    kinds = [item["kind"] for result in results for item in result["messages"]]
+    answers = [
+        item["text"]
+        for result in results
+        for item in result["messages"]
+        if item["kind"] == "text" and item["role"] == "assistant"
+    ]
+    assert len(parked_seo.started) == 1
+    assert kinds.count("run") == 1
+    assert answers == [RUN_IN_PROGRESS]
+    assert chats.chat(chat_id)["pending_proposal_id"] is None
 
 
 @pytest.mark.anyio
