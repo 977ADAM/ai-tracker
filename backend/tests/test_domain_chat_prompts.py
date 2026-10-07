@@ -8,6 +8,7 @@ from app.domain.chat_prompts import (
     INPUT_OPEN,
     MISSING_QUESTIONS,
     NO_ACTIVE_PROPOSAL,
+    NO_CONNECTIONS,
     NOTHING_TO_RUN,
     PROPOSAL_HINT,
     RUN_IN_PROGRESS,
@@ -101,6 +102,6 @@ def test_question_for_an_unknown_field_is_still_a_safe_question():
 
 
 def test_fixed_phrases_are_short_distinct_sentences():
-    phrases = (PROPOSAL_HINT, NOTHING_TO_RUN, RUN_IN_PROGRESS, NO_ACTIVE_PROPOSAL)
+    phrases = (PROPOSAL_HINT, NOTHING_TO_RUN, RUN_IN_PROGRESS, NO_ACTIVE_PROPOSAL, NO_CONNECTIONS)
     assert all(phrase.strip() for phrase in phrases)
     assert len(set(phrases)) == len(phrases)

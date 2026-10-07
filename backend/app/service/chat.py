@@ -17,14 +17,24 @@ their fixed safe text. A `ProviderError` from the model is not caught either —
 its message is already safe, and the user message stays in the feed.
 
 Connections are never part of a model answer: the draft starts from the form's
-default provider, and only the proposal chips change it afterwards.
+default provider, and only the proposal chips change it afterwards, through
+`update_proposal`. A chat with no configured connection can never complete its
+draft — no question could ever fill that gap — so `send_message` answers it with
+the fixed `NO_CONNECTIONS` sentence and spends no model call. `delete_chat`
+removes the chat with the runs its own messages name, and refuses while one of
+them is still going.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
-from app.core.errors import ConfigurationError, RunNotFound, ValidationError
+from app.core.errors import (
+    ConfigurationError,
+    RunConflict,
+    RunNotFound,
+    ValidationError,
+)
 from app.db.chat import ChatRepository
 from app.domain.chat import (
     ChatDraft,
@@ -42,6 +52,8 @@ from app.domain.chat import (
     title_from_message,
 )
 from app.domain.chat_prompts import (
+    NO_ACTIVE_PROPOSAL,
+    NO_CONNECTIONS,
     NOTHING_TO_RUN,
     PROPOSAL_HINT,
     RUN_IN_PROGRESS,
@@ -49,7 +61,7 @@ from app.domain.chat_prompts import (
     system_prompt,
     user_prompt,
 )
-from app.domain.seo import GENERATED_QUERY_LIMIT
+from app.domain.seo import GENERATED_QUERY_LIMIT, INVALID_CONNECTIONS, MAX_CONNECTIONS
 from app.domain.seo_llm import LLM_NOT_CONFIGURED
 from app.domain.seo_tools import MAX_MODEL_ANSWERS, MAX_SEARCH_REQUESTS
 from app.service.connections import ConnectionService
@@ -103,6 +115,13 @@ class ChatService:
         user_message = self.chats.append_message(chat_id, "user", "text", message, None)
         if first_message:
             self.chats.set_title(chat_id, title_from_message(message))
+        if not available:
+            # Connections are never asked for in words, so without one configured
+            # connection the draft can never become complete: the model would be
+            # paid to ask the same services question on every turn. The user
+            # message is already stored; the fixed sentence is the whole answer.
+            answer = self._text_message(chat_id, NO_CONNECTIONS)
+            return {"chat": self.chat_summary(chat_id), "messages": [user_message, answer]}
 
         answer = await client.complete(
             system_prompt(draft_to_json(draft), missing_fields(draft, available)),
@@ -113,6 +132,51 @@ class ChatService:
         self.chats.save_draft(chat_id, draft_to_json(draft))
         messages = await self._decide(chat, draft, reply, available)
         return {"chat": self.chat_summary(chat_id), "messages": [user_message, *messages]}
+
+    def update_proposal(self, chat_id: str, connection_ids: Sequence[str]) -> dict[str, object]:
+        """Replace the connections of the chat's open proposal and answer with it.
+
+        The proposal card is the only place a connection is chosen, and only a
+        `pending` one may be edited: without an open proposal there is nothing to
+        update, so the caller hears the same fixed refusal a confirmation without
+        a proposal gets. The requested IDs are checked by the run's own rules
+        before anything is written, so the draft and the card can never hold a
+        connection the launch would refuse. The estimate is rebuilt with the
+        card, and its status stays `pending`.
+        """
+        chat = self.chats.chat(chat_id)
+        proposal_id = chat["pending_proposal_id"]
+        if not isinstance(proposal_id, str) or not proposal_id:
+            raise RunConflict(NO_ACTIVE_PROPOSAL)
+        draft = merge_draft(
+            draft_from_json(chat["draft"]),
+            {"connection_ids": list(self._required_connections(connection_ids))},
+        )
+        self.chats.save_draft(chat_id, draft_to_json(draft))
+        stored = self._proposal_payload(proposal_id) or {}
+        message = self.chats.update_message_payload(proposal_id, {**stored, **self._proposal(draft)})
+        return {"chat": self.chat_summary(chat_id), "message": message}
+
+    def delete_chat(self, chat_id: str) -> None:
+        """Delete one chat, its messages, and the runs it started.
+
+        A live run blocks the deletion: the run owns the analysis, and its task
+        would keep writing into a store whose chat is already gone. Once the
+        run is over — or gone from the store — the analyses named by the chat's
+        own run messages are deleted first, so no report is left orphaned; a run
+        the store no longer holds is skipped. Runs another chat started are not
+        named here and stay untouched. Only the chat's own messages are deleted,
+        because the two tables are per chat.
+        """
+        chat = self.chats.chat(chat_id)
+        if self._is_running(chat):
+            raise RunConflict(RUN_IN_PROGRESS)
+        for analysis_id in self._mentioned_runs(chat_id):
+            try:
+                self.seo.delete(analysis_id)
+            except RunNotFound:
+                continue
+        self.chats.delete_chat(chat_id)
 
     def chat_summary(self, chat_id: str) -> dict[str, object]:
         """Return the list view of one chat: its title, age, and running flag."""
@@ -236,6 +300,46 @@ class ChatService:
 
     # -- draft and proposal helpers --------------------------------------
 
+    def _required_connections(self, connection_ids: Sequence[str]) -> tuple[str, ...]:
+        """Return the chosen connection IDs, or refuse them by the run's rules.
+
+        One to `MAX_CONNECTIONS` distinct non-empty IDs, each one of the
+        configured connections the chips show. The check mirrors the run's own
+        normalization and its "configured" test, so a card that passed here can
+        never be refused by the launch over its connections.
+        """
+        if isinstance(connection_ids, (str, bytes)):
+            raise ValidationError(INVALID_CONNECTIONS)
+        ids = tuple(text.strip() if isinstance(text, str) else "" for text in connection_ids)
+        known = set(self.configured_connection_ids())
+        if not 1 <= len(ids) <= MAX_CONNECTIONS or not all(ids):
+            raise ValidationError(INVALID_CONNECTIONS)
+        if len(set(ids)) != len(ids) or any(item not in known for item in ids):
+            raise ValidationError(INVALID_CONNECTIONS)
+        return ids
+
+    def _mentioned_runs(self, chat_id: str) -> list[str]:
+        """Return the analyses the chat's run messages name, oldest first.
+
+        Every page is read, because a long dialogue can mention more runs than
+        one page holds, and a repeated mention of one analysis is reported once.
+        A run whose message is still in the feed but whose row is gone is
+        reported like any other: forgiving the missing analysis is the delete's
+        own job.
+        """
+        analyses: list[str] = []
+        cursor: int | None = None
+        while True:
+            page = self.chats.messages(chat_id, cursor)
+            for item in page["items"]:
+                analysis_id = _run_analysis_id(item)
+                if analysis_id is not None and analysis_id not in analyses:
+                    analyses.append(analysis_id)
+            next_cursor = page["next_cursor"]
+            if not isinstance(next_cursor, int) or isinstance(next_cursor, bool):
+                return analyses
+            cursor = next_cursor
+
     def _seeded_draft(self, stored: object) -> ChatDraft:
         """Read the stored draft, filling connections from the form's defaults.
 
@@ -291,6 +395,17 @@ class ChatService:
             return self.seo.snapshot(analysis_id).get("status") == "running"
         except RunNotFound:
             return False
+
+
+def _run_analysis_id(message: Mapping[str, object]) -> str | None:
+    """Return the analysis a run message names, or `None` for any other message."""
+    if message.get("kind") != "run":
+        return None
+    payload = message.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    analysis_id = payload.get("analysis_id")
+    return analysis_id if isinstance(analysis_id, str) and analysis_id else None
 
 
 __all__ = ["ChatService"]

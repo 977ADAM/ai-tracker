@@ -43,6 +43,10 @@ PROPOSAL_HINT = "Проверьте параметры и подтвердите
 NOTHING_TO_RUN = "Сейчас нечего запускать: опишите, что нужно проверить."
 RUN_IN_PROGRESS = "Прогон уже идёт: дождитесь его завершения или отмените прогон."
 NO_ACTIVE_PROPOSAL = "В чате нет активного предложения."
+# A chat with no configured connection can never complete its draft — connections
+# are never asked for in words — so this one sentence replaces the model call
+# that would only repeat the services question.
+NO_CONNECTIONS = "Настройте хотя бы одно подключение модели: без него прогон невозможен"
 
 # The clarifying question of each collected field, in the order of `FIELD_ORDER`.
 MISSING_QUESTIONS: Mapping[str, str] = {

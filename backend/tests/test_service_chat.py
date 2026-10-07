@@ -19,17 +19,21 @@ from app.core.errors import (
     ChatNotFound,
     ConfigurationError,
     ProviderError,
+    RunConflict,
+    RunNotFound,
     ValidationError,
 )
 from app.db.chat import ChatRepository
 from app.domain.chat import DEFAULT_TITLE
 from app.domain.chat_prompts import (
+    NO_ACTIVE_PROPOSAL,
+    NO_CONNECTIONS,
     NOTHING_TO_RUN,
     PROPOSAL_HINT,
     RUN_IN_PROGRESS,
     question_for,
 )
-from app.domain.seo import GENERATED_QUERY_LIMIT
+from app.domain.seo import GENERATED_QUERY_LIMIT, INVALID_CONNECTIONS, MAX_CONNECTIONS
 from app.domain.seo_llm import LLM_NOT_CONFIGURED
 from app.domain.seo_tools import MAX_MODEL_ANSWERS, MAX_SEARCH_REQUESTS
 from app.service.chat import ChatService
@@ -106,6 +110,21 @@ def service_factory(
 
 @pytest.fixture
 def service(service_factory: Callable[[Sequence[str]], ChatService]) -> ChatService:
+    return service_factory()
+
+
+@pytest.fixture
+def two_connection_service(
+    service_factory: Callable[[Sequence[str]], ChatService],
+    connections: ConnectionService,
+) -> ChatService:
+    """A service over two configured connections, so the chips can move between them.
+
+    The first configured preset stays the default, exactly as `FormService` picks
+    it, so a fresh draft still starts on `openai` while `deepseek` is available
+    for a chip change.
+    """
+    connections.save({"api_key": "second-key"}, "deepseek")
     return service_factory()
 
 
@@ -431,6 +450,183 @@ async def test_the_proposal_carries_the_estimate_and_the_default_connections(ser
     assert payload["generated_limit"] == GENERATED_QUERY_LIMIT
     assert payload["connection_ids"] == ["openai"]
     assert service.chats.chat(chat_id)["draft"]["connection_ids"] == ["openai"]
+
+
+def test_update_proposal_rewrites_connections_and_estimate(two_connection_service, chat_id):
+    service = two_connection_service
+    asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+    proposal_id = service.chats.chat(chat_id)["pending_proposal_id"]
+
+    result = service.update_proposal(chat_id, ["deepseek"])
+
+    message = result["message"]
+    payload = message["payload"]
+    assert message["kind"] == "proposal"
+    assert message["id"] == proposal_id
+    assert payload["connection_ids"] == ["deepseek"]
+    assert payload["model_upper"] == MAX_MODEL_ANSWERS
+    assert payload["search_upper"] == MAX_SEARCH_REQUESTS
+    assert payload["generated_limit"] == GENERATED_QUERY_LIMIT
+    assert payload["status"] == "pending"
+    assert payload["url"] == "https://example.ru"
+    assert result["chat"]["id"] == chat_id
+    chat = service.chats.chat(chat_id)
+    assert chat["draft"]["connection_ids"] == ["deepseek"]
+    assert chat["pending_proposal_id"] == message["id"]
+
+
+def test_update_proposal_keeps_the_card_launchable(two_connection_service, chat_id, seo):
+    """The rewritten card still matches the draft, so «да» starts the run on it."""
+    service = two_connection_service
+    asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+    service.update_proposal(chat_id, ["deepseek"])
+
+    asyncio.run(service.send_message(chat_id, "да"))
+
+    assert [payload["connection_ids"] for payload in seo.started] == [["deepseek"]]
+
+
+def test_update_proposal_without_a_proposal_conflicts(service, chat_id):
+    with pytest.raises(RunConflict) as error:
+        service.update_proposal(chat_id, ["openai"])
+    assert str(error.value) == NO_ACTIVE_PROPOSAL
+
+
+def test_update_proposal_on_an_unknown_chat_is_not_found(service):
+    with pytest.raises(ChatNotFound):
+        service.update_proposal("нет-такого", ["openai"])
+
+
+@pytest.mark.parametrize(
+    "connection_ids",
+    [
+        [],
+        ["нет-такого"],
+        ["openai", "openai"],
+        [f"c{index}" for index in range(MAX_CONNECTIONS + 1)],
+    ],
+    ids=["empty", "unknown", "duplicate", "too-many"],
+)
+def test_update_proposal_rejects_bad_connections(service, chat_id, connection_ids):
+    asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+    proposal_id = service.chats.chat(chat_id)["pending_proposal_id"]
+
+    with pytest.raises(ValidationError) as error:
+        service.update_proposal(chat_id, connection_ids)
+
+    assert str(error.value) == INVALID_CONNECTIONS
+    assert service.chats.chat(chat_id)["draft"]["connection_ids"] == ["openai"]
+    assert service.chats.message(proposal_id)["payload"]["connection_ids"] == ["openai"]
+
+
+def test_delete_chat_removes_it_with_its_runs(service, chat_id, seo):
+    asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+    asyncio.run(service.send_message(chat_id, "да"))
+    seo.snapshots[seo.analysis_id] = {"status": "completed"}
+
+    service.delete_chat(chat_id)
+
+    assert seo.deleted == [seo.analysis_id]
+    with pytest.raises(ChatNotFound):
+        service.chats.chat(chat_id)
+
+
+def test_delete_chat_conflicts_while_a_run_is_active(service, chat_id, seo):
+    asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+    asyncio.run(service.send_message(chat_id, "да"))
+
+    with pytest.raises(RunConflict):
+        service.delete_chat(chat_id)
+
+    assert service.chats.chat(chat_id)["active_analysis_id"] == seo.analysis_id
+    assert seo.deleted == []
+
+
+def test_delete_chat_leaves_foreign_runs_alone(service, chat_id, seo):
+    seo.snapshots["b-9"] = {"status": "completed"}  # a run no chat mentions
+
+    service.delete_chat(chat_id)
+
+    assert seo.deleted == []
+    assert "b-9" in seo.snapshots
+
+
+def test_delete_chat_survives_a_run_its_store_no_longer_has(chats, connections, form, chat_id):
+    """A run row dropped by hand must not block the chat's own deletion."""
+
+    class StrictDeleteSeo(FakeChatSeoService):
+        """Raises `RunNotFound` for an unknown analysis, like the real service."""
+
+        def delete(self, analysis_id: str) -> None:
+            if analysis_id not in self.snapshots:
+                raise RunNotFound("SEO-анализ не найден")
+            super().delete(analysis_id)
+
+    seo = StrictDeleteSeo()
+    service = ChatService(
+        chats, seo, connections, form,
+        client_factory=lambda: FakeChatClient([FULL_ANSWER, CONFIRM_ANSWER]),
+    )
+    asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+    asyncio.run(service.send_message(chat_id, "да"))
+    seo.snapshots.clear()
+
+    service.delete_chat(chat_id)
+
+    with pytest.raises(ChatNotFound):
+        chats.chat(chat_id)
+
+
+def test_a_chat_without_connections_answers_without_calling_the_model(
+    chats: ChatRepository,
+    seo: FakeChatSeoService,
+    repository,
+    settings,
+    chat_id: str,
+):
+    """No configured connection means no draft can ever be complete.
+
+    The chat answers with the fixed sentence instead of spending a model call on
+    a turn that could only ask the same question again.
+    """
+    connections = ConnectionService(repository, settings)
+    client = FakeChatClient((FULL_ANSWER,))
+    service = ChatService(
+        chats, seo, connections, FormService(connections), client_factory=lambda: client,
+    )
+
+    result = asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+
+    assert client.calls == []
+    assert seo.started == []
+    assert [(item["role"], item["kind"]) for item in result["messages"]] == [
+        ("user", "text"),
+        ("assistant", "text"),
+    ]
+    assert result["messages"][0]["text"] == FULL_MESSAGE
+    assert result["messages"][-1]["text"] == NO_CONNECTIONS
+    chat = chats.chat(chat_id)
+    assert chat["pending_proposal_id"] is None
+    assert chat["draft"]["url"] == ""
+
+
+def test_a_missing_llm_wins_over_the_missing_connections(
+    chats: ChatRepository,
+    seo: FakeChatSeoService,
+    repository,
+    settings,
+    chat_id: str,
+):
+    """The unconfigured-LLM refusal runs first, before the feed changes at all."""
+    connections = ConnectionService(repository, settings)
+    service = ChatService(
+        chats, seo, connections, FormService(connections), client_factory=lambda: None,
+    )
+
+    with pytest.raises(ConfigurationError):
+        asyncio.run(service.send_message(chat_id, FULL_MESSAGE))
+
+    assert chats.messages(chat_id)["items"] == []
 
 
 @pytest.mark.anyio
