@@ -17,4 +17,8 @@ node_modules/
 # Browser checks
 test-results/
 
+# Local scratch: agent workspace and sandboxed test config directory
+.superpowers/
+.pytest-config/
+
 .env
