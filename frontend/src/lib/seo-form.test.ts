@@ -2,18 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   actualConnectionCount, actualQueryCount, estimateActual, estimateUpper, GENERATED_QUERY_LIMIT,
   MAX_MODEL_ANSWERS,
-  parseSeeds, parseServices, queriesGenerated, SEO_STAGE_LABELS, SEARCH_UPPER, snapshotActualEstimate,
-  validateSeoForm
+  queriesGenerated, SEO_STAGE_LABELS, SEARCH_UPPER, snapshotActualEstimate
 } from './seo-form';
 import type { SeoAnalysisSnapshot } from './types';
-
-const valid = {
-  url: 'https://example.ru',
-  sphere: 'Цветы и подарки',
-  seeds: ['купить цветы', 'доставка букетов', 'цветочный магазин'],
-  services: ['Доставка цветов'],
-  connectionIds: ['model-1']
-};
 
 function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
   return {
@@ -31,66 +22,6 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     ...overrides
   } as unknown as SeoAnalysisSnapshot;
 }
-
-describe('parseServices', () => {
-  it('reads one service per line and ignores blank lines', () => {
-    expect(parseServices('Доставка цветов\n  Букеты  \n\n\nОформление')).toEqual(['Доставка цветов', 'Букеты', 'Оформление']);
-  });
-
-  it('returns nothing for an empty textarea', () => {
-    expect(parseServices('')).toEqual([]);
-    expect(parseServices('   \n \n')).toEqual([]);
-  });
-});
-
-describe('parseSeeds', () => {
-  it('trims the three fields and drops the empty ones', () => {
-    expect(parseSeeds([' купить цветы ', '', '  ', 'доставка букетов'])).toEqual(['купить цветы', 'доставка букетов']);
-  });
-});
-
-describe('validateSeoForm', () => {
-  it('accepts the documented five fields', () => {
-    expect(validateSeoForm(valid)).toBeNull();
-  });
-
-  it('requires a full public HTTP(S) URL', () => {
-    expect(validateSeoForm({ ...valid, url: '' })).toMatch(/адрес главной страницы/i);
-    expect(validateSeoForm({ ...valid, url: 'example.ru' })).toMatch(/https:\/\/example\.ru/);
-    expect(validateSeoForm({ ...valid, url: 'ftp://example.ru' })).toMatch(/https:\/\/example\.ru/);
-    expect(validateSeoForm({ ...valid, url: 'http://example.ru/catalog' })).toBeNull();
-    expect(validateSeoForm({ ...valid, url: 'https://user:pass@example.ru' })).toMatch(/https:\/\/example\.ru/);
-  });
-
-  it('rejects IP addresses like the backend crawler does', () => {
-    expect(validateSeoForm({ ...valid, url: 'http://127.0.0.1:8000' })).toMatch(/доменом, а не IP/);
-    expect(validateSeoForm({ ...valid, url: 'http://[::1]/' })).toMatch(/доменом, а не IP/);
-  });
-
-  it('requires a sphere', () => {
-    expect(validateSeoForm({ ...valid, sphere: '   ' })).toMatch(/сферу бизнеса/);
-    expect(validateSeoForm({ ...valid, sphere: 'x'.repeat(201) })).toMatch(/200/);
-  });
-
-  it('requires exactly three distinct non-empty key queries', () => {
-    expect(validateSeoForm({ ...valid, seeds: ['один', 'два', ''] })).toMatch(/ровно 3/);
-    expect(validateSeoForm({ ...valid, seeds: ['один', 'два', 'три', 'четыре'] })).toMatch(/ровно 3/);
-    expect(validateSeoForm({ ...valid, seeds: ['один', 'один ', 'два'] })).toMatch(/не должны повторяться/);
-    expect(validateSeoForm({ ...valid, seeds: ['x'.repeat(401), 'два', 'три'] })).toMatch(/400/);
-  });
-
-  it('requires at least one service', () => {
-    expect(validateSeoForm({ ...valid, services: [] })).toMatch(/хотя бы одну услугу/);
-    expect(validateSeoForm({ ...valid, services: ['  '] })).toMatch(/хотя бы одну услугу/);
-    expect(validateSeoForm({ ...valid, services: Array.from({ length: 21 }, (_, index) => `услуга ${index}`) })).toMatch(/20 услуг/);
-  });
-
-  it('holds the connections to one through five distinct choices', () => {
-    expect(validateSeoForm({ ...valid, connectionIds: [] })).toMatch(/от 1 до 5/);
-    expect(validateSeoForm({ ...valid, connectionIds: ['a', 'b', 'c', 'd', 'e', 'f'] })).toMatch(/от 1 до 5/);
-    expect(validateSeoForm({ ...valid, connectionIds: ['a', 'a', 'b'] })).toBeNull();
-  });
-});
 
 describe('call estimates', () => {
   it('bounds the run before generation with M connections', () => {

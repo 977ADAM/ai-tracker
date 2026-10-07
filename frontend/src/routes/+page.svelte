@@ -1,59 +1,59 @@
 <script lang="ts">
   import { base } from '$app/paths';
   import { onDestroy, onMount, untrack } from 'svelte';
-  import SeoForm from '$lib/components/SeoForm.svelte';
-  import SeoHistory from '$lib/components/SeoHistory.svelte';
-  import SeoReport from '$lib/components/SeoReport.svelte';
-  import SeoRunProgress from '$lib/components/SeoRunProgress.svelte';
-  import { hasAgentState } from '$lib/seo-agents';
-  import { validateSeoForm } from '$lib/seo-form';
-  import type { SeoFormInput } from '$lib/seo-form';
+  import ChatSidebar from '$lib/components/ChatSidebar.svelte';
+  import ChatFeed from '$lib/components/ChatFeed.svelte';
+  import ChatComposer from '$lib/components/ChatComposer.svelte';
   import type {
-    FormConfig, PublicProvider, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoHistoryItem, SeoHistoryPage,
-    SeoModelRow, SeoRowsKind, SeoRowsPage, SeoSearchRow, SeoTracePage, SeoTraceStep
+    ChatCreated, ChatMessage, ChatMessages, ChatPage, ChatProposal, ChatProposalUpdated, ChatSummary,
+    PublicProvider, SeoAnalysisSnapshot, SeoModelRow, SeoRowsKind, SeoRowsPage, SeoSearchRow,
+    SeoTracePage, SeoTraceStep
   } from '$lib/types';
+
+  type TraceState = { steps: SeoTraceStep[]; cursor: string | null; loading: boolean; error: string };
+  type RowsState = { model: SeoModelRow[]; search: SeoSearchRow[] };
+  type CursorsState = { model: string | null; search: string | null };
 
   type Data = {
     providers: PublicProvider[];
-    form?: FormConfig | null;
+    chats: ChatSummary[];
+    chatsError: string;
     loadError: string;
   };
   let { data }: { data: Data } = $props();
 
   const POLL_INTERVAL_MS = 30_000;
-  let activeId = $state<string | null>(null);
-  let pendingId = $state<string | null>(null);
-  let snapshot = $state<SeoAnalysisSnapshot | null>(null);
+  const EMPTY_ROWS: RowsState = { model: [], search: [] };
+  const EMPTY_CURSORS: CursorsState = { model: null, search: null };
+  const EMPTY_TRACE: TraceState = { steps: [], cursor: null, loading: false, error: '' };
+
+  /**
+   * The chat screen owns one dialogue and the resources its runs use. Report
+   * rows, the agent trace and the cancellation flag are keyed by analysis id,
+   * because one chat can hold several runs and the feed shows them together.
+   */
+  let chats = $state<ChatSummary[]>(untrack(() => data.chats));
+  let chatsError = $state(untrack(() => data.chatsError));
   let error = $state(untrack(() => data.loadError));
   let runError = $state('');
-  let cancelling = $state(false);
-  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let activeId = $state<string | null>(null);
+  let messages = $state<ChatMessage[]>([]);
+  let snapshots = $state<Record<string, SeoAnalysisSnapshot>>({});
+  let traces = $state<Record<string, TraceState>>({});
+  let rows = $state<Record<string, RowsState>>({});
+  let cursors = $state<Record<string, CursorsState>>({});
+  let loadingRows = $state<Record<string, SeoRowsKind | null>>({});
+  let rowErrors = $state<Record<string, string>>({});
+  let olderCursor = $state<number | null>(null);
+  let loadingOlder = $state(false);
+  let cancellingId = $state<string | null>(null);
+  let sending = $state(false);
+  let composerHost = $state<HTMLElement | null>(null);
+
   let destroyed = false;
-
-  // The SEO history and the report detail are independent resources: a failure
-  // in either one must never take the form or the run screen down with it.
-  let history = $state<SeoHistoryItem[]>([]);
-  let historyCursor = $state<string | null>(null);
-  let historyLoading = $state(false);
-  let historyError = $state('');
-  let reportRows = $state<{ model: SeoModelRow[]; search: SeoSearchRow[] }>({ model: [], search: [] });
-  let reportCursors = $state<{ model: string | null; search: string | null }>({ model: null, search: null });
-  let rowsLoading = $state<SeoRowsKind | null>(null);
-  let rowsError = $state('');
-
-  // The agent trace is its own paginated resource. An analysis from before the
-  // agent runtime has no steps at all, so nothing is requested for it; once a
-  // run does have agents, the first page is kept fresh while the run lasts and
-  // the user's own paging is never thrown away by a poll.
-  let trace = $state<SeoTraceStep[]>([]);
-  let traceCursor = $state<string | null>(null);
-  let traceLoading = $state(false);
-  let traceError = $state('');
-  let traceId = $state<string | null>(null);
-  let tracePaged = $state(false);
-
-  const terminal = $derived(!!snapshot && snapshot.status !== 'running');
-  const connectionNames = $derived(Object.fromEntries(data.providers.map((provider) => [provider.id, provider.name])));
+  const pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Which chat started each analysis, so a finished run clears its live flag. */
+  const analysisChat = new Map<string, string>();
 
   function detail(value: unknown, fallback: string): string {
     return value !== null && typeof value === 'object' && 'detail' in value && typeof value.detail === 'string'
@@ -63,270 +63,343 @@
     try { return await response.json(); }
     catch { return null; }
   }
-  function stopPolling() {
-    if (pollTimer !== undefined) clearTimeout(pollTimer);
-    pollTimer = undefined;
+
+  /** The analysis a run message points at; a malformed card owns no run. */
+  function analysisIdOf(message: ChatMessage): string | null {
+    if (message.kind !== 'run' || !message.payload) return null;
+    const value = (message.payload as Record<string, unknown>).analysis_id;
+    return typeof value === 'string' && value.length > 0 ? value : null;
   }
-  function schedulePoll(id: string) {
+
+  /** The proposal of a message, or null for a card that carries something else. */
+  function proposalOf(message: ChatMessage | undefined): ChatProposal | null {
+    if (!message || message.kind !== 'proposal' || !message.payload) return null;
+    const value = message.payload as Partial<ChatProposal>;
+    return Array.isArray(value.connection_ids) ? (value as ChatProposal) : null;
+  }
+
+  function applyChat(chat: ChatSummary): void {
+    chats = chats.some((item) => item.id === chat.id)
+      ? chats.map((item) => (item.id === chat.id ? chat : item))
+      : [chat, ...chats];
+  }
+
+  /** A finished run is no longer a reason to keep its chat locked for deletion. */
+  function markChatStopped(chatId: string | null): void {
+    if (chatId === null) return;
+    chats = chats.map((item) => (item.id === chatId ? { ...item, running: false } : item));
+  }
+
+  function replaceMessage(message: ChatMessage): void {
+    messages = messages.map((item) => (item.id === message.id ? message : item));
+  }
+
+  function stopPolling(id?: string): void {
+    if (id === undefined) {
+      for (const timer of pollTimers.values()) clearTimeout(timer);
+      pollTimers.clear();
+      return;
+    }
+    const timer = pollTimers.get(id);
+    if (timer !== undefined) { clearTimeout(timer); pollTimers.delete(id); }
+  }
+
+  /** The one interval of the screen: the same 30 seconds the old page used. */
+  function schedulePoll(id: string): void {
+    stopPolling(id);
+    pollTimers.set(id, setTimeout(() => { pollTimers.delete(id); void loadSnapshot(id); }, POLL_INTERVAL_MS));
+  }
+
+  async function loadSnapshot(id: string): Promise<void> {
+    try {
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}`);
+      const value = await payload(response);
+      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить прогон'));
+      // The chat may have been left while the request was in flight.
+      if (destroyed || analysisChat.get(id) !== activeId) return;
+      const current = value as SeoAnalysisSnapshot;
+      snapshots = { ...snapshots, [id]: current };
+      runError = '';
+      // Only a live run is polled; a terminal one stops until the chat is reopened.
+      if (current.status === 'running') schedulePoll(id);
+      else { stopPolling(id); markChatStopped(analysisChat.get(id) ?? null); }
+    } catch (cause) {
+      if (destroyed || analysisChat.get(id) !== activeId) return;
+      runError = cause instanceof Error ? cause.message : 'Не удалось загрузить прогон';
+      // A transient failure must not freeze the progress screen.
+      schedulePoll(id);
+    }
+  }
+
+  /**
+   * Restore the live state of every run in the feed: an unknown analysis is
+   * loaded, a running one keeps polling, a finished one stops at once.
+   */
+  function trackRuns(list: ChatMessage[], chatId: string): void {
+    for (const message of list) {
+      const id = analysisIdOf(message);
+      if (id === null) continue;
+      analysisChat.set(id, chatId);
+      const known = snapshots[id];
+      if (known === undefined) void loadSnapshot(id);
+      else if (known.status === 'running') schedulePoll(id);
+      else { stopPolling(id); markChatStopped(chatId); }
+    }
+  }
+
+  function resetAnalysisState(): void {
     stopPolling();
-    pollTimer = setTimeout(() => void pollAnalysis(id), POLL_INTERVAL_MS);
+    snapshots = {};
+    traces = {};
+    rows = {};
+    cursors = {};
+    loadingRows = {};
+    rowErrors = {};
+    cancellingId = null;
+    runError = '';
   }
 
-  const EMPTY_ROWS = { model: [], search: [] };
-  const EMPTY_CURSORS = { model: null, search: null };
-
-  async function loadRows(id: string, kind: SeoRowsKind, cursor: string | null, append: boolean) {
-    rowsLoading = kind;
+  async function loadRows(id: string, kind: SeoRowsKind, cursor: string | null, append: boolean): Promise<void> {
+    loadingRows = { ...loadingRows, [id]: kind };
     try {
       const query = cursor === null ? `kind=${kind}` : `kind=${kind}&cursor=${encodeURIComponent(cursor)}`;
       const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/rows?${query}`);
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить строки отчёта'));
-      if (destroyed || activeId !== id) return;
+      if (destroyed) return;
       const page = value as SeoRowsPage;
+      const current = rows[id] ?? EMPTY_ROWS;
       if (kind === 'model') {
         const items = page.items as SeoModelRow[];
-        reportRows = { ...reportRows, model: append ? [...reportRows.model, ...items] : items };
-        reportCursors = { ...reportCursors, model: page.next_cursor };
+        rows = { ...rows, [id]: { model: append ? [...current.model, ...items] : items, search: current.search } };
       } else {
         const items = page.items as SeoSearchRow[];
-        reportRows = { ...reportRows, search: append ? [...reportRows.search, ...items] : items };
-        reportCursors = { ...reportCursors, search: page.next_cursor };
+        rows = { ...rows, [id]: { model: current.model, search: append ? [...current.search, ...items] : items } };
       }
-      rowsError = '';
+      cursors = { ...cursors, [id]: { ...(cursors[id] ?? EMPTY_CURSORS), [kind]: page.next_cursor } };
+      rowErrors = { ...rowErrors, [id]: '' };
     } catch (cause) {
-      if (destroyed || activeId !== id) return;
-      rowsError = cause instanceof Error ? cause.message : 'Не удалось загрузить строки отчёта';
+      if (destroyed) return;
+      rowErrors = { ...rowErrors, [id]: cause instanceof Error ? cause.message : 'Не удалось загрузить строки отчёта' };
     } finally {
-      if (rowsLoading === kind) rowsLoading = null;
+      if (!destroyed && loadingRows[id] === kind) loadingRows = { ...loadingRows, [id]: null };
     }
   }
 
-  /** The detail rows come from saved data only: opening a report never pays for a new call. */
-  async function loadReport(id: string, status: SeoAnalysisSnapshot['status']) {
-    reportRows = EMPTY_ROWS;
-    reportCursors = EMPTY_CURSORS;
-    rowsError = '';
-    if (status === 'running') return;
-    await Promise.all([
-      loadRows(id, 'model', null, false),
-      loadRows(id, 'search', null, false)
-    ]);
-  }
-
-  function resetTrace() {
-    trace = [];
-    traceCursor = null;
-    traceError = '';
-    traceId = null;
-    tracePaged = false;
-    traceLoading = false;
-  }
-
-  /** One trace page: the first page replaces the feed, later pages append to it. */
-  async function loadTrace(id: string, cursor: string | null, append: boolean) {
-    traceLoading = true;
+  async function loadTrace(id: string, cursor: string | null, append: boolean): Promise<void> {
+    traces = { ...traces, [id]: { ...(traces[id] ?? EMPTY_TRACE), loading: true, error: '' } };
     try {
       const query = cursor === null ? '' : `?cursor=${encodeURIComponent(cursor)}`;
       const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/trace${query}`);
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить трассу агентов'));
-      if (destroyed || activeId !== id) return;
+      if (destroyed) return;
       const page = value as SeoTracePage;
-      trace = append ? [...trace, ...page.items] : page.items;
-      traceCursor = page.next_cursor;
-      traceId = id;
-      traceError = '';
-      if (append) tracePaged = true;
+      const current = traces[id] ?? EMPTY_TRACE;
+      traces = { ...traces, [id]: {
+        steps: append ? [...current.steps, ...page.items] : page.items,
+        cursor: page.next_cursor, loading: false, error: ''
+      } };
     } catch (cause) {
-      if (destroyed || activeId !== id) return;
-      traceError = cause instanceof Error ? cause.message : 'Не удалось загрузить трассу агентов';
-    } finally {
-      if (!destroyed && activeId === id) traceLoading = false;
+      if (destroyed) return;
+      const current = traces[id] ?? EMPTY_TRACE;
+      traces = { ...traces, [id]: {
+        ...current, loading: false,
+        error: cause instanceof Error ? cause.message : 'Не удалось загрузить трассу агентов'
+      } };
     }
   }
 
-  /** A trace failure must never break the run screen, so it is only best-effort. */
-  async function syncTrace(id: string, current: SeoAnalysisSnapshot) {
-    if (!hasAgentState(current.agents)) return;
-    if (tracePaged && traceId === id) return;
-    await loadTrace(id, null, false);
+  /**
+   * Opening a report reads saved data only, and the trace comes with it: an
+   * empty feed shows no "load more", so the first page must be requested here.
+   */
+  function openReport(id: string): void {
+    void Promise.all([
+      loadRows(id, 'model', null, false),
+      loadRows(id, 'search', null, false),
+      loadTrace(id, null, false)
+    ]);
   }
 
-  function loadMoreTrace() {
-    if (!snapshot) return;
-    void loadTrace(snapshot.id, traceCursor, true);
-  }
-
-  async function loadAnalysis(id: string) {
-    activeId = id;
-    runError = '';
-    reportRows = EMPTY_ROWS;
-    reportCursors = EMPTY_CURSORS;
-    rowsError = '';
-    resetTrace();
-    try {
-      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}`);
-      const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось открыть анализ'));
-      if (destroyed || activeId !== id) return;
-      const current = value as SeoAnalysisSnapshot;
-      snapshot = current;
-      if (current.status === 'running') { pendingId = id; schedulePoll(id); }
-      else { pendingId = null; stopPolling(); }
-      await syncTrace(id, current);
-      await loadReport(id, current.status);
-    } catch (cause) {
-      if (destroyed) return;
-      runError = cause instanceof Error ? cause.message : 'Не удалось открыть анализ';
-    }
-  }
-
-  async function pollAnalysis(id: string) {
-    if (destroyed || pendingId !== id) return;
-    try {
-      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}`);
-      const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось получить состояние анализа'));
-      if (destroyed || pendingId !== id) return;
-      const current = value as SeoAnalysisSnapshot;
-      snapshot = current;
-      runError = '';
-      await syncTrace(id, current);
-      if (current.status === 'running') schedulePoll(id);
-      else {
-        pendingId = null;
-        stopPolling();
-        // The report is read from the saved rows, which are complete by now.
-        await loadReport(id, current.status);
-        await loadHistory();
-      }
-    } catch (cause) {
-      if (destroyed) return;
-      runError = cause instanceof Error ? cause.message : 'Не удалось обновить анализ';
-      schedulePoll(id);
-    }
-  }
-
-  async function loadHistory(cursor: string | null = null) {
-    historyLoading = true;
-    historyError = '';
-    try {
-      const path = cursor === null
-        ? `${base}/api/seo/analyses`
-        : `${base}/api/seo/analyses?cursor=${encodeURIComponent(cursor)}`;
-      const response = await fetch(path);
-      const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить SEO-историю'));
-      if (destroyed) return;
-      const page = value as SeoHistoryPage;
-      history = cursor === null ? page.items : [...history, ...page.items];
-      historyCursor = page.next_cursor;
-      if (cursor === null) {
-        const active = page.items.find((item) => item.status === 'running');
-        if (active && !pendingId) await loadAnalysis(active.id);
-      }
-    } catch (cause) {
-      if (destroyed) return;
-      historyError = cause instanceof Error ? cause.message : 'Не удалось загрузить SEO-историю';
-    } finally {
-      historyLoading = false;
-    }
-  }
-
-  async function startAnalysis(input: SeoFormInput) {
+  async function openChat(id: string): Promise<void> {
     error = '';
-    runError = '';
+    resetAnalysisState();
+    activeId = id;
+    messages = [];
+    olderCursor = null;
+    loadingOlder = false;
     try {
-      const response = await fetch(`${base}/api/seo/analyses`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          url: input.url.trim(),
-          sphere: input.sphere.trim(),
-          seeds: input.seeds.map((seed) => seed.trim()).filter((seed) => seed.length > 0),
-          services: input.services.map((service) => service.trim()).filter((service) => service.length > 0),
-          connection_ids: input.connectionIds
-        })
+      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(id)}`);
+      const value = await payload(response);
+      if (!response.ok) throw new Error(detail(value, 'Не удалось открыть чат'));
+      if (destroyed || activeId !== id) return;
+      const page = value as ChatPage;
+      messages = page.messages;
+      olderCursor = page.next_cursor;
+      applyChat(page.chat);
+      trackRuns(page.messages, id);
+    } catch (cause) {
+      if (destroyed || activeId !== id) return;
+      error = cause instanceof Error ? cause.message : 'Не удалось открыть чат';
+    }
+  }
+
+  /** A new dialogue has no row in the database yet: the first message creates it. */
+  function newChat(): void {
+    error = '';
+    resetAnalysisState();
+    activeId = null;
+    messages = [];
+    olderCursor = null;
+    loadingOlder = false;
+  }
+
+  async function loadOlder(): Promise<void> {
+    const id = activeId;
+    if (id === null || olderCursor === null || loadingOlder) return;
+    loadingOlder = true;
+    error = '';
+    try {
+      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(id)}?before=${olderCursor}`);
+      const value = await payload(response);
+      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить более ранние сообщения'));
+      if (destroyed || activeId !== id) return;
+      const page = value as ChatPage;
+      messages = [...page.messages, ...messages];
+      olderCursor = page.next_cursor;
+      trackRuns(page.messages, id);
+    } catch (cause) {
+      if (destroyed || activeId !== id) return;
+      error = cause instanceof Error ? cause.message : 'Не удалось загрузить более ранние сообщения';
+    } finally {
+      if (!destroyed) loadingOlder = false;
+    }
+  }
+
+  async function createChat(): Promise<ChatSummary> {
+    const response = await fetch(`${base}/api/seo/chats`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+    });
+    const value = await payload(response);
+    if (!response.ok) throw new Error(detail(value, 'Не удалось создать чат'));
+    return (value as ChatCreated).chat;
+  }
+
+  /**
+   * The composer clears its field as it hands the text over, and its contract
+   * has no way to be fed a value back. A failed send must not cost the user the
+   * message, so the text goes back into the field it came from.
+   */
+  function restoreDraft(text: string): void {
+    const field = composerHost?.querySelector('textarea');
+    if (!field) return;
+    field.value = text;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  async function send(text: string): Promise<void> {
+    if (sending) return;
+    sending = true;
+    error = '';
+    try {
+      let chatId = activeId;
+      if (chatId === null) {
+        const created = await createChat();
+        if (destroyed) return;
+        chatId = created.id;
+        activeId = chatId;
+        applyChat(created);
+      }
+      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(chatId)}/messages`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text })
       });
       const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось запустить анализ'));
-      const created = value as SeoAnalysisCreated;
-      snapshot = null;
-      await loadAnalysis(created.id);
-      void loadHistory();
+      if (!response.ok) throw new Error(detail(value, 'Не удалось отправить сообщение'));
+      if (destroyed) return;
+      const answer = value as ChatMessages;
+      applyChat(answer.chat);
+      messages = [...messages, ...answer.messages];
+      trackRuns(answer.messages, chatId);
     } catch (cause) {
-      throw cause instanceof Error ? cause : new Error('Не удалось запустить анализ');
+      if (destroyed) return;
+      error = cause instanceof Error ? cause.message : 'Не удалось отправить сообщение';
+      restoreDraft(text);
+    } finally {
+      if (!destroyed) sending = false;
     }
   }
-  function submit(input: SeoFormInput) {
+
+  async function toggleConnection(messageId: string, connectionId: string): Promise<void> {
+    const chatId = activeId;
+    if (chatId === null) return;
+    const current = proposalOf(messages.find((item) => item.id === messageId));
+    if (current === null) return;
+    const selected = new Set(current.connection_ids);
+    if (selected.has(connectionId)) selected.delete(connectionId);
+    else selected.add(connectionId);
     error = '';
-    const problem = validateSeoForm(input);
-    if (problem) { error = problem; return; }
-    return startAnalysis(input);
+    try {
+      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(chatId)}/proposal`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ connection_ids: [...selected] })
+      });
+      const value = await payload(response);
+      if (!response.ok) throw new Error(detail(value, 'Не удалось изменить подключения'));
+      if (destroyed || activeId !== chatId) return;
+      const updated = value as ChatProposalUpdated;
+      replaceMessage(updated.message);
+      applyChat(updated.chat);
+    } catch (cause) {
+      if (destroyed) return;
+      error = cause instanceof Error ? cause.message : 'Не удалось изменить подключения';
+    }
   }
 
-  async function cancel() {
-    if (!activeId || cancelling) return;
-    cancelling = true;
+  async function cancelRun(id: string): Promise<void> {
+    if (cancellingId !== null) return;
+    cancellingId = id;
     runError = '';
     try {
-      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(activeId)}/cancel`, { method: 'POST' });
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
       const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось отменить анализ'));
+      if (!response.ok) throw new Error(detail(value, 'Не удалось отменить прогон'));
       if (destroyed) return;
       const current = value as SeoAnalysisSnapshot;
-      snapshot = current;
-      pendingId = null;
-      stopPolling();
-      await syncTrace(current.id, current);
-      await loadReport(current.id, current.status);
-      await loadHistory();
+      snapshots = { ...snapshots, [id]: current };
+      stopPolling(id);
+      markChatStopped(analysisChat.get(id) ?? activeId);
     } catch (cause) {
       if (destroyed) return;
-      runError = cause instanceof Error ? cause.message : 'Не удалось отменить анализ';
+      runError = cause instanceof Error ? cause.message : 'Не удалось отменить прогон';
     } finally {
-      cancelling = false;
+      if (!destroyed) cancellingId = null;
     }
   }
 
-  /** Opening a saved analysis reads the database only; nothing is paid for again. */
-  async function openAnalysis(id: string) {
-    await loadAnalysis(id);
-  }
-
-  function loadMoreRows(kind: SeoRowsKind) {
-    if (!snapshot) return;
-    void loadRows(snapshot.id, kind, reportCursors[kind], true);
-  }
-
-  async function removeAnalysis(id: string) {
-    historyError = '';
+  async function removeChat(id: string): Promise<void> {
+    error = '';
     try {
-      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error(detail(await payload(response), 'Не удалось удалить SEO-анализ'));
+      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(detail(await payload(response), 'Не удалось удалить чат'));
       if (destroyed) return;
-      history = history.filter((item) => item.id !== id);
-      if (activeId === id) {
-        activeId = null;
-        pendingId = null;
-        snapshot = null;
-        stopPolling();
-        reportRows = EMPTY_ROWS;
-        reportCursors = EMPTY_CURSORS;
-        rowsError = '';
-        resetTrace();
-      }
+      chats = chats.filter((item) => item.id !== id);
+      if (activeId === id) newChat();
     } catch (cause) {
       if (destroyed) return;
-      historyError = cause instanceof Error ? cause.message : 'Не удалось удалить SEO-анализ';
+      error = cause instanceof Error ? cause.message : 'Не удалось удалить чат';
     }
   }
 
-  onMount(() => { void loadHistory(); });
+  onMount(() => {
+    // The list comes newest first, so the first row is the freshest chat.
+    const newest = chats[0];
+    if (newest) void openChat(newest.id);
+  });
   onDestroy(() => { destroyed = true; stopPolling(); });
 </script>
 
-<svelte:head><title>ИИ-трекинг · SEO-анализ сайта</title></svelte:head>
+<svelte:head><title>ИИ-трекинг · Чат SEO-анализа</title></svelte:head>
 
 <main class="mx-auto w-full max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
     <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-6 text-xs font-medium text-muted">
@@ -338,73 +411,81 @@
     <section class="relative overflow-hidden rounded-3xl bg-ink px-6 py-10 text-white shadow-lg shadow-ink/10 sm:px-10 sm:py-12 lg:px-14">
         <div class="relative max-w-4xl">
             <p class="mb-5 text-xs font-bold tracking-[0.16em] text-emerald-200 uppercase">SEO-анализ сайта и конкурентов</p>
-            <h1 class="text-3xl font-bold leading-tight sm:text-4xl lg:text-5xl">Узнайте, где виден ваш сайт</h1>
+            <h1 class="text-3xl font-bold leading-tight sm:text-4xl lg:text-5xl">Расскажите о сайте — ассистент соберёт прогон</h1>
             <p class="mt-6 max-w-3xl text-sm leading-7 text-emerald-50/90 sm:text-base">
-                Один запуск: система обходит сайт, ищет конкурентов в Яндексе, генерирует запросы, проверяет их в ИИ и Поиске и собирает отчёт. Прогон можно отменить, а результаты сохраняются.
+                Опишите задачу словами: адрес сайта, сферу бизнеса, ключевые запросы и услуги. Ассистент уточнит недостающее и покажет карточку параметров — прогон стартует после слова «да». Результаты остаются в чате, а незавершённый прогон можно отменить.
             </p>
         </div>
     </section>
 
-    <SeoForm
-        providers={data.providers}
-        form={data.form ?? null}
-        disabled={!!data.loadError || !data.form}
-        error={error}
-        onSubmit={submit}
-    />
-
-    {#if runError}
+    {#if data.loadError}
         <p role="alert" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            {runError}
+            {data.loadError}
         </p>
     {/if}
 
-    {#if snapshot}
-        <div class="scroll-mt-8" id="seo-run">
-            <SeoRunProgress
-                {snapshot}
-                {cancelling}
-                onCancel={() => void cancel()}
-                {trace}
-                traceCursor={traceCursor}
-                traceLoading={traceLoading}
-                traceError={traceError}
-                onTraceMore={loadMoreTrace}
-            />
-        </div>
-    {:else}
-        <section class="mt-8 rounded-3xl border border-dashed border-line bg-white px-6 py-14 text-center shadow-sm">
-            <h2 class="text-xl font-bold">Пока нет SEO-анализа</h2>
-            <p class="mt-2 text-sm text-muted">Заполните форму выше и запустите первый анализ. Незавершённый прогон возобновится после перезагрузки страницы.</p>
-        </section>
+    {#if chatsError}
+        <p role="alert" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {chatsError}
+        </p>
     {/if}
 
-    {#if terminal && snapshot}
-        <SeoReport
-            {snapshot}
-            rows={reportRows}
-            cursors={reportCursors}
-            {connectionNames}
-            loadingRows={rowsLoading}
-            error={rowsError}
-            onMore={loadMoreRows}
+    <div class="mt-8 grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-start">
+        <ChatSidebar
+            {chats}
+            {activeId}
+            busy={sending}
+            onSelect={(id) => void openChat(id)}
+            onCreate={newChat}
+            onDelete={(id) => void removeChat(id)}
         />
-    {/if}
 
-    <aside class="mt-8 rounded-2xl border border-line bg-accent-soft px-6 py-5 text-sm leading-6 text-ink">
-        <strong>Как читать результат</strong>
-        <p class="mt-2 text-muted">
-            Поиск проверяет только первую десятку органических результатов Яндекса по всей России. Ошибка отдельного источника не означает, что сайта нет в выдаче: такие строки исключаются из метрик. Если в знаменателе нет ни одной успешной строки, отчёт показывает «—», а не ноль процентов.
-        </p>
-    </aside>
+        <section class="min-w-0" aria-labelledby="chat-dialogue-title">
+            <h2 id="chat-dialogue-title" class="text-xl font-bold tracking-tight">Диалог</h2>
 
-    <SeoHistory
-        items={history}
-        nextCursor={historyCursor}
-        onView={(id) => void openAnalysis(id)}
-        onDelete={(id) => void removeAnalysis(id)}
-        onMore={() => void loadHistory(historyCursor)}
-        loading={historyLoading}
-        error={historyError}
-    />
+            {#if error}
+                <p role="alert" class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                    {error}
+                </p>
+            {/if}
+
+            {#if runError}
+                <p role="alert" class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                    {runError}
+                </p>
+            {/if}
+
+            {#if activeId === null}
+                <p class="mt-3 rounded-2xl border border-dashed border-line bg-white px-5 py-4 text-sm leading-6 text-muted" data-chat-empty>
+                    Опишите задачу в поле ниже: адрес сайта, сферу бизнеса, ключевые запросы и услуги. Чат создаётся при отправке первого сообщения.
+                </p>
+            {/if}
+
+            <div class="mt-4">
+                <ChatFeed
+                    {messages}
+                    providers={data.providers}
+                    {snapshots}
+                    {traces}
+                    {rows}
+                    {cursors}
+                    {loadingRows}
+                    errors={rowErrors}
+                    {cancellingId}
+                    {olderCursor}
+                    {loadingOlder}
+                    onLoadOlder={() => void loadOlder()}
+                    onOpenReport={openReport}
+                    onToggleConnection={(messageId, connectionId) => void toggleConnection(messageId, connectionId)}
+                    onCancel={(id) => void cancelRun(id)}
+                    onLoadRows={(id, kind, cursor) => void loadRows(id, kind, cursor, true)}
+                    onLoadTrace={(id, cursor) => void loadTrace(id, cursor, true)}
+                />
+            </div>
+
+            <div bind:this={composerHost}>
+                <ChatComposer disabled={!!data.loadError} busy={sending} onSend={(text) => void send(text)} />
+            </div>
+        </section>
+    </div>
 </main>
