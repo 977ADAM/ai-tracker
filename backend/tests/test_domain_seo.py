@@ -13,6 +13,8 @@ from app.domain.seo import (
     AGENTS,
     CATEGORY_LABELS,
     GENERATED_QUERY_LIMIT,
+    INVALID_HOST_IP,
+    INVALID_SITE,
     MAX_QUERY_LENGTH,
     MAX_QUERY_WORDS,
     MIN_GENERATED_QUERIES,
@@ -28,6 +30,7 @@ from app.domain.seo import (
     merge_services,
     normalize_seo_request,
     rank_candidates,
+    url_problem,
 )
 
 
@@ -169,6 +172,18 @@ def test_accepts_the_full_request_size():
 def test_rejects_an_ip_literal_as_the_site(url):
     with pytest.raises(ValidationError, match="IP"):
         normalize_seo_request(payload(url=url))
+
+
+def test_url_problem_rejects_a_bare_host():
+    assert url_problem("example.ru") == INVALID_SITE
+
+
+def test_url_problem_rejects_an_ip_literal():
+    assert url_problem("http://93.184.216.34") == INVALID_HOST_IP
+
+
+def test_url_problem_accepts_a_public_url():
+    assert url_problem(" https://example.ru ") is None
 
 
 def test_hosts_match_uses_the_task_two_host_rules():

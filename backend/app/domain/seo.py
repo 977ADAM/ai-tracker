@@ -13,10 +13,16 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
+from urllib.parse import urlsplit
 
 from app.core.errors import ValidationError
 from app.domain.matching import mentions_phrase, normalize_text
-from app.domain.search import INVALID_SITE, TOP_RESULTS, result_url_host
+from app.domain.search import (
+    ALLOWED_SCHEMES,
+    INVALID_SITE,
+    TOP_RESULTS,
+    result_url_host,
+)
 from app.domain.seo_llm import parse_json_object
 from app.domain.site_fetch import canonical_host, same_site_host
 
@@ -90,6 +96,28 @@ class SeoInput:
     connection_ids: tuple[str, ...]
 
 
+def url_problem(value: object) -> str | None:
+    """Return why the site address is unusable, or `None` when it can be crawled.
+
+    The address must be a public HTTP(S) URL of a domain. An IP literal gets its
+    own message because a private address must never reach the crawler, and a
+    bare host is refused because the fetcher needs an explicit scheme — the same
+    rule the SEO form already applies.
+    """
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > MAX_URL_LENGTH:
+        return INVALID_SITE
+    site = value.strip()
+    try:
+        host = canonical_host(site)
+    except ValidationError:
+        return INVALID_SITE
+    if _is_ip_literal(host):
+        return INVALID_HOST_IP
+    if urlsplit(site).scheme not in ALLOWED_SCHEMES:
+        return INVALID_SITE
+    return None
+
+
 def normalize_seo_request(payload: object) -> SeoInput:
     """Validate the URL, sphere, three key queries, services, and 1..5 connections.
 
@@ -102,14 +130,11 @@ def normalize_seo_request(payload: object) -> SeoInput:
     if any(not isinstance(key, str) or key not in ALLOWED_REQUEST_FIELDS for key in payload):
         raise ValidationError(INVALID_REQUEST)
 
-    url = payload.get("url")
-    if not isinstance(url, str) or not url.strip() or len(url.strip()) > MAX_URL_LENGTH:
-        raise ValidationError(INVALID_SITE)
-    site = url.strip()
+    problem = url_problem(payload.get("url"))
+    if problem is not None:
+        raise ValidationError(problem)
+    site = payload["url"].strip()
     host = canonical_host(site)
-    if _is_ip_literal(host):
-        # A private address must never reach the crawler; only domains are accepted.
-        raise ValidationError(INVALID_HOST_IP)
 
     sphere = payload.get("sphere")
     if not isinstance(sphere, str) or not 1 <= len(sphere.strip()) <= MAX_SPHERE_LENGTH:
