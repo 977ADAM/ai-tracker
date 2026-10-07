@@ -7,13 +7,20 @@ It performs no I/O: `db.chat` stores the draft, `service.chat` calls these
 functions, and the field rules reuse `domain.seo` so the chat and the run agree
 on what a usable parameter is. The connection count is checked here, while
 "configured" comes from the caller as `available_connections`.
+
+The module also declares the service-model contract the chat calls and parses
+its answer. The model names the intent and extracts the fields; it never decides
+whether a run starts, and its `params` can only carry the fields the chat itself
+collects.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from typing import Literal, Protocol, runtime_checkable
 
+from app.core.errors import ValidationError
 from app.domain.matching import normalize_text
 from app.domain.seo import (
     MAX_CONNECTIONS,
@@ -25,11 +32,16 @@ from app.domain.seo import (
     SEED_COUNT,
     url_problem,
 )
+from app.domain.seo_llm import parse_json_object
 
 MAX_MESSAGE_LENGTH = 4000
 MAX_REPLY_LENGTH = 2000
 MAX_TITLE_LENGTH = 80
 DEFAULT_TITLE = "Новый чат"
+
+# The intents the service model may name. `confirm` is only a request: whether a
+# run starts is decided by `can_launch`, not by this word.
+ChatIntent = Literal["message", "confirm"]
 
 # The order the assistant asks for the missing fields. Connections are not a
 # question of their own: they start from the configured defaults and change with
@@ -38,9 +50,18 @@ FIELD_ORDER = ("url", "sphere", "seeds", "services")
 
 EMPTY_MESSAGE = "Введите сообщение"
 MESSAGE_TOO_LONG = f"Сообщение не должно быть длиннее {MAX_MESSAGE_LENGTH} символов"
+# One fixed phrase for every malformed answer: the paid call is spent, but the
+# draft, the proposal, and the run stay as they were, and no model text leaks out.
+CHAT_PARSE_FAILED = "Не удалось разобрать сообщение. Переформулируйте, пожалуйста."
 
-_SCALAR_FIELDS = ("url", "sphere")
-_LIST_FIELDS = ("seeds", "services", "connection_ids")
+# The fields the chat collects and the model may fill. The draft also stores
+# `connection_ids`, but those change with the proposal chips only, so they are
+# never part of a parsed model answer.
+_REPLY_SCALARS = ("url", "sphere")
+_REPLY_LISTS = ("seeds", "services")
+
+_SCALAR_FIELDS = _REPLY_SCALARS
+_LIST_FIELDS = (*_REPLY_LISTS, "connection_ids")
 
 
 @dataclass(frozen=True)
@@ -199,6 +220,97 @@ def can_launch(proposal: Mapping[str, object] | None, draft: ChatDraft, running:
     if proposal.get("status") != "pending":
         return False
     return proposal_matches(proposal, draft)
+
+
+@runtime_checkable
+class ChatModel(Protocol):
+    """The service model of the dialogue: one system and one user message in, text out.
+
+    The contract is structural, so the real `SeoLlmClient` satisfies it without
+    any integration import in this package.
+    """
+
+    async def complete(self, system: str, user: str) -> str:
+        """Answer one chat prompt with the model's raw text."""
+        ...
+
+
+@dataclass(frozen=True)
+class ChatReply:
+    """One parsed service-model answer: what to say, what it means, what it extracted.
+
+    `params` holds only the four fields the chat collects; it is empty when the
+    message named no parameter. It is raw input for `merge_draft`, not a draft.
+    """
+
+    reply: str
+    intent: ChatIntent
+    params: Mapping[str, object]
+
+
+def parse_chat_reply(answer: str) -> ChatReply:
+    """Read one model answer into the strict chat contract, or fail closed.
+
+    The answer must be a JSON object with a string `reply` and an `intent` of
+    `message` or `confirm`; `params` is optional and may only name `url`,
+    `sphere`, `seeds`, and `services`. A mistyped known field fails the whole
+    answer, while unknown keys inside `params` — `connection_ids` included — are
+    ignored: connections change with the proposal chips, never with model text.
+    Every failure reports the one fixed phrase, so no model or provider detail
+    reaches the feed.
+    """
+    payload = _reply_payload(answer)
+    reply = payload.get("reply")
+    if not isinstance(reply, str):
+        raise ValidationError(CHAT_PARSE_FAILED)
+    return ChatReply(
+        reply=reply.strip()[:MAX_REPLY_LENGTH],
+        intent=_reply_intent(payload.get("intent")),
+        params=_reply_params(payload.get("params", {})),
+    )
+
+
+def _reply_payload(answer: str) -> dict[str, object]:
+    """Return the JSON object of an answer, reporting the chat's fixed failure phrase."""
+    try:
+        return parse_json_object(answer)
+    except ValidationError as exc:
+        raise ValidationError(CHAT_PARSE_FAILED) from exc
+
+
+def _reply_intent(value: object) -> ChatIntent:
+    """Return the named intent, refusing every other word and type."""
+    if value == "message":
+        return "message"
+    if value == "confirm":
+        return "confirm"
+    raise ValidationError(CHAT_PARSE_FAILED)
+
+
+def _reply_params(value: object) -> dict[str, object]:
+    """Return the known fields of `params`, ignoring unknown keys and failing on a type.
+
+    An optional `params` key defaults to an empty object; anything that is not an
+    object is a parse failure, as is a known field of the wrong type. A list
+    field must be a list of strings: partially understood parameters could
+    otherwise rewrite the draft in a way the user never stated.
+    """
+    if not isinstance(value, Mapping):
+        raise ValidationError(CHAT_PARSE_FAILED)
+    params: dict[str, object] = {}
+    for field in _REPLY_SCALARS:
+        if field in value:
+            text = value[field]
+            if not isinstance(text, str):
+                raise ValidationError(CHAT_PARSE_FAILED)
+            params[field] = text
+    for field in _REPLY_LISTS:
+        if field in value:
+            items = value[field]
+            if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+                raise ValidationError(CHAT_PARSE_FAILED)
+            params[field] = list(items)
+    return params
 
 
 def _text(value: object) -> str:

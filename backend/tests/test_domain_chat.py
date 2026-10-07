@@ -8,11 +8,14 @@ import pytest
 
 from app.core.errors import ValidationError
 from app.domain.chat import (
+    CHAT_PARSE_FAILED,
     DEFAULT_TITLE,
     FIELD_ORDER,
     MAX_MESSAGE_LENGTH,
+    MAX_REPLY_LENGTH,
     MAX_TITLE_LENGTH,
     ChatDraft,
+    ChatModel,
     can_launch,
     draft_from_json,
     draft_to_json,
@@ -20,6 +23,7 @@ from app.domain.chat import (
     message_problem,
     missing_fields,
     normalize_message,
+    parse_chat_reply,
     proposal_matches,
     proposal_params,
     title_from_message,
@@ -300,3 +304,77 @@ def test_launch_refuses_a_proposal_without_params_or_connections():
     draft = ChatDraft("https://a.ru", "Цветы", ("1", "2", "3"), ("Букеты",), CONNECTIONS)
     assert can_launch({"status": "pending"}, draft, running=False) is False
     assert can_launch({"status": "pending", **proposal_params(draft), "connection_ids": []}, draft, running=False) is False
+
+
+# -- the strict answer of the service model -----------------------------------
+
+
+def test_parse_reply_reads_params_and_intent():
+    reply = parse_chat_reply('{"reply": "Понял", "intent": "confirm", "params": {"url": "https://a.ru"}}')
+    assert reply.intent == "confirm"
+    assert reply.params == {"url": "https://a.ru"}
+
+
+def test_parse_reply_trims_and_defaults_missing_params():
+    reply = parse_chat_reply('{"reply": "' + "я" * 3000 + '", "intent": "message"}')
+    assert len(reply.reply) == MAX_REPLY_LENGTH
+    assert reply.params == {}
+
+
+def test_parse_reply_normalizes_an_empty_reply_for_the_question_fallback():
+    """An empty reply is legal: the scenario replaces it with the field question."""
+    assert parse_chat_reply('{"reply": "  ", "intent": "message"}').reply == ""
+    assert parse_chat_reply('{"reply": "", "intent": "message"}').reply == ""
+
+
+@pytest.mark.parametrize("answer", [
+    "не json", "[]", '{"intent": "message"}', '{"reply": "ок", "intent": "старт"}',
+    '{"reply": 5, "intent": "message"}', '{"reply": "ок", "intent": "message", "params": []}',
+])
+def test_parse_reply_fails_closed(answer):
+    with pytest.raises(ValidationError):
+        parse_chat_reply(answer)
+
+
+def test_parse_reply_reports_the_fixed_phrase():
+    with pytest.raises(ValidationError, match=CHAT_PARSE_FAILED):
+        parse_chat_reply("не json")
+
+
+def test_parse_reply_rejects_wrong_param_types():
+    with pytest.raises(ValidationError):
+        parse_chat_reply('{"reply": "ок", "intent": "message", "params": {"seeds": "1"}}')
+
+
+@pytest.mark.parametrize("params", [
+    '{"url": 5}', '{"sphere": null}', '{"seeds": [1]}', '{"services": {}}',
+])
+def test_parse_reply_rejects_every_mistyped_known_field(params):
+    with pytest.raises(ValidationError):
+        parse_chat_reply(f'{{"reply": "ок", "intent": "message", "params": {params}}}')
+
+
+def test_parse_reply_ignores_unknown_keys_inside_params():
+    reply = parse_chat_reply(
+        '{"reply": "ок", "intent": "message", "params": {"url": "https://a.ru", "unknown": "x"}}'
+    )
+    assert reply.params == {"url": "https://a.ru"}
+
+
+def test_parse_reply_ignores_a_model_supplied_connection_ids():
+    """Connections change with the proposal chips only, never with a model answer."""
+    reply = parse_chat_reply(
+        '{"reply": "ок", "intent": "message", '
+        '"params": {"connection_ids": ["чужое"], "url": "https://a.ru"}}'
+    )
+    assert reply.params == {"url": "https://a.ru"}
+    draft = ChatDraft("https://b.ru", "Цветы", ("1", "2", "3"), ("Букеты",), CONNECTIONS)
+    assert merge_draft(draft, reply.params).connection_ids == CONNECTIONS
+
+
+def test_chat_model_protocol_accepts_a_conforming_client():
+    class Client:
+        async def complete(self, system: str, user: str) -> str:
+            return "{}"
+
+    assert isinstance(Client(), ChatModel)
