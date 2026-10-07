@@ -2,8 +2,8 @@
 
 What the checks cover: a full dialogue that reaches a run and its report, the
 clear refusal of a «да» with no proposal behind it, the safe refusal when the
-service LLM is not configured, and the «SEO-анализ» settings tab with its
-tool-support probe.
+service LLM is not configured, the safe refusal when a chat cannot be created,
+and the «SEO-анализ» settings tab with its tool-support probe.
 
 No check reaches Yandex or a model API. The BFF is answered locally by the `api`
 fixture: `POST /api/seo/chats`, the message and proposal resources,
@@ -34,6 +34,12 @@ CONFIRM_JSON = json.dumps({"reply": "Запускаю прогон.", "intent": 
 LLM_TEST_ERROR = "Не удалось подключиться к служебной LLM"
 SEO_ENDPOINT = "https://llm.example.com/v1/chat/completions"
 SEO_MODEL = "qa-service-model"
+
+# The fixed refusal the backend raises from `ConfigurationError` when no service
+# LLM is configured: `app.domain.seo_llm.LLM_NOT_CONFIGURED`.
+LLM_NOT_CONFIGURED = "Не настроена служебная LLM для SEO-анализа"
+# A chat cannot be created for a reason that has nothing to do with the model.
+CHAT_CREATION_ERROR = "Не удалось создать чат"
 
 PUBLIC_SEO_SETTINGS = {
     "endpoint": SEO_ENDPOINT,
@@ -83,11 +89,45 @@ def test_confirm_without_a_proposal_is_explained(page: Page, api) -> None:
 
 
 def test_unconfigured_llm_is_explained(page: Page, api) -> None:
-    api.route_error("/api/seo/chats", status=400, detail="Служебная LLM не настроена")
-    chat = SeoChatPage(page)
-    chat.open()
+    # Creating a chat needs no model, so the refusal cannot come from the creation
+    # route: the chat exists and is open first, and the next message is the turn
+    # that meets the unconfigured service LLM.
+    chat = SeoChatPage(page).open()
+    chat.send(DESCRIPTION)
+    expect(chat.proposal()).to_be_visible()
+
+    messages_route = f"/api/seo/chats/{api.chat_id}/messages"
+    assert api.requests.count(f"POST {messages_route}") == 1
+
+    api.route_error(messages_route, status=400, detail=LLM_NOT_CONFIGURED)
     chat.send("проверь сайт")
-    assert "Служебная LLM" in chat.error_text()
+
+    # The failing turn really went to the messages resource of the open chat.
+    assert api.requests.count(f"POST {messages_route}") == 2
+    # The page shows the fixed, safe detail of the refusal verbatim.
+    expect(
+        chat.page.locator('main [role="alert"]').filter(has_text=LLM_NOT_CONFIGURED)
+    ).to_be_visible()
+    # The typed text is not lost: it is back in the composer, ready to resend.
+    expect(chat.composer).to_have_value("проверь сайт")
+    # Nothing was funded: no run card, and no run resource was touched.
+    expect(chat.run_cards()).to_have_count(0)
+    assert [request for request in api.requests if "/api/seo/analyses" in request] == []
+
+
+def test_chat_creation_failure_is_explained(page: Page, api) -> None:
+    # A creation failure is not the LLM refusal; the screen must still explain it
+    # safely and keep the message the user typed.
+    api.route_error("/api/seo/chats", status=400, detail=CHAT_CREATION_ERROR)
+    chat = SeoChatPage(page).open()
+    chat.send("проверь сайт")
+
+    expect(
+        chat.page.locator('main [role="alert"]').filter(has_text=CHAT_CREATION_ERROR)
+    ).to_be_visible()
+    expect(chat.composer).to_have_value("проверь сайт")
+    expect(chat.run_cards()).to_have_count(0)
+    assert [request for request in api.requests if "/api/seo/analyses" in request] == []
 
 
 # -- settings ------------------------------------------------------------------
