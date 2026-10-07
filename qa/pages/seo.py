@@ -1,11 +1,11 @@
-"""The SEO analysis page: form, run screen, trace, report, history, and the LLM settings tab.
+"""The chat screen: the dialogue, the proposal card, the run card, and the report.
 
-The home page is a one-shot SEO scenario: five form fields start an analysis, a
-supervisor agent hands work to five specialists whose statuses, budget usage, and
-trace steps appear on the run screen, the finished run shows a saved report with
-its model-written conclusions, and the SEO history opens or deletes a saved
-analysis. The settings dialog keeps the provider sections and adds a third tab for
-the service LLM, including whether that model can call tools.
+The home page is a chat now. A user describes the task in words, the assistant
+answers with a question or a parameter proposal, the run starts only after the
+user confirms the proposal in the dialogue, and the finished run stays in the
+feed as a card whose report is folded until it is opened. The settings dialog
+keeps its third tab for the service LLM, including whether that model can call
+tools.
 
 Selectors stay on roles, labels, and the data attributes the components own, so a
 styling change does not break the checks.
@@ -17,16 +17,21 @@ import re
 
 from playwright.sync_api import Locator, Page, expect
 
+from app import configured_application
+
 SETTINGS_DIALOG = "Настройки API"
 SEO_TAB = "SEO-анализ"
 SEO_PANEL = "SEO-анализ"
-SUBMIT = "Запустить анализ"
-OPEN_REPORT = "Открыть отчёт"
-DELETE_ANALYSIS = "Удалить"
 SHOW_MORE = "Показать ещё"
 
+# The three card kinds of the feed, used to wait for a turn to be absorbed.
+CARDS = "[data-chat-message], [data-chat-proposal], [data-chat-run]"
+CARDS_IN_FEED = (
+    "[data-chat-feed] :is([data-chat-message], [data-chat-proposal], [data-chat-run])"
+)
+
 # The six agents in their fixed supervisor-to-report order, with the labels the
-# run screen renders.
+# run card renders.
 AGENT_IDS = ("supervisor", "site", "competitors", "queries", "checks", "report")
 AGENT_LABELS = {
     "supervisor": "Супервизор",
@@ -37,97 +42,113 @@ AGENT_LABELS = {
     "report": "Агент отчёта",
 }
 
+# The JS condition of `send`: the turn landed as a new card, or it failed into an
+# alert. Waiting on either keeps a failing turn from hanging the check.
+SETTLED = """([selector, cards, alerts]) => {
+    const feed = document.querySelector('[data-chat-feed]');
+    const now = feed ? feed.querySelectorAll(selector).length : 0;
+    return now > cards || document.querySelectorAll('[role="alert"]').length > alerts;
+}"""
 
-class SeoPage:
-    """Driving one SEO analysis from the form to the saved report."""
 
-    def __init__(self, page: Page, base_url: str) -> None:
+class SeoChatPage:
+    """Driving one SEO dialogue from the first message to the saved report."""
+
+    def __init__(self, page: Page, base_url: str | None = None) -> None:
         self.page = page
-        self.base_url = base_url
+        self.base_url = base_url or configured_application().base_url
 
     # -- shell -------------------------------------------------------------
 
-    def open(self) -> SeoPage:
+    def open(self) -> SeoChatPage:
+        """Open the screen and start a fresh dialogue.
+
+        The chat list comes from the server-side load of the live API, so the
+        newest stored chat may open by itself. Starting a new dialogue keeps a
+        check independent of whatever the instance already holds.
+        """
         self.page.goto(self.base_url, wait_until="networkidle")
-        expect(self.form).to_be_visible()
+        expect(self.composer).to_be_visible()
+        return self.new_chat()
+
+    def new_chat(self) -> SeoChatPage:
+        """Reset the dialogue without creating a chat: the first message does that."""
+        self.page.get_by_role("button", name="Новый чат").click()
+        expect(self.page.locator("[data-chat-empty]")).to_be_visible()
         return self
 
-    @property
-    def form(self) -> Locator:
-        return self.page.locator("form").filter(has=self.page.get_by_role("heading", name="Параметры анализа"))
-
-    # -- form --------------------------------------------------------------
+    # -- the dialogue ------------------------------------------------------
 
     @property
-    def url_input(self) -> Locator:
-        return self.page.get_by_label("Адрес главной страницы")
+    def composer(self) -> Locator:
+        return self.page.locator("#chat-composer")
 
-    @property
-    def sphere_input(self) -> Locator:
-        return self.page.get_by_label("Сфера бизнеса")
+    def send(self, text: str) -> SeoChatPage:
+        """Write one message and wait until the turn has painted something.
 
-    def seed_input(self, index: int) -> Locator:
-        return self.page.get_by_label(["Первый", "Второй", "Третий"][index - 1] + " ключевой запрос")
-
-    @property
-    def services_input(self) -> Locator:
-        return self.page.get_by_label("Услуги")
-
-    @property
-    def submit_button(self) -> Locator:
-        return self.page.get_by_role("button", name=SUBMIT)
-
-    @property
-    def form_error(self) -> Locator:
-        """The validation or server message inside the form."""
-        return self.form.get_by_role("alert")
-
-    @property
-    def estimate_search(self) -> Locator:
-        return self.page.locator("[data-estimate-search]")
-
-    @property
-    def estimate_model(self) -> Locator:
-        return self.page.locator("[data-estimate-model]")
-
-    def connection_checkbox(self, name: str) -> Locator:
-        return self.page.get_by_role("checkbox", name=re.compile(re.escape(name)))
-
-    def uncheck_all_connections(self) -> SeoPage:
-        for checkbox in self.page.get_by_role("checkbox").all():
-            if checkbox.is_checked() and checkbox.is_enabled():
-                checkbox.uncheck()
+        A successful turn adds a card; a refused one adds an alert. Either is the
+        end of the turn, so a check never reads the feed mid-flight.
+        """
+        cards = self.page.locator(CARDS_IN_FEED).count()
+        alerts = self.page.locator('[role="alert"]').count()
+        self.composer.fill(text)
+        self.composer.press("Enter")
+        self.page.wait_for_function(SETTLED, arg=[CARDS, cards, alerts])
         return self
 
-    def fill_form(
-        self,
-        *,
-        url: str = "https://example.ru/",
-        sphere: str = "Доставка цветов",
-        seeds: list[str] | None = None,
-        services: str = "Доставка цветов",
-    ) -> SeoPage:
-        self.url_input.fill(url)
-        self.sphere_input.fill(sphere)
-        values = seeds if seeds is not None else ["купить цветы", "доставка букетов", "цветочный магазин"]
-        for index in range(1, 4):
-            self.seed_input(index).fill(values[index - 1] if index <= len(values) else "")
-        self.services_input.fill(services)
+    def message(self, text: str) -> Locator:
+        """The rendered text of one message, found by a fragment of its words."""
+        return self.page.locator("[data-chat-message-text]").filter(has_text=text)
+
+    def error_text(self) -> str:
+        """The whole visible error text of the dialogue, joined into one string."""
+        return "\n".join(self.page.locator('main [role="alert"]').all_inner_texts())
+
+    def proposal(self) -> Locator:
+        """The newest parameter proposal of the dialogue."""
+        return self.page.locator("[data-chat-proposal]").last
+
+    def run_card(self) -> Locator:
+        """The newest run card of the dialogue."""
+        return self.page.locator("[data-chat-run]").last
+
+    def run_cards(self) -> Locator:
+        return self.page.locator("[data-chat-run]")
+
+    # -- the sidebar -------------------------------------------------------
+
+    @property
+    def chats(self) -> Locator:
+        return self.page.get_by_role("list", name="Чаты").get_by_role("listitem")
+
+    def chat_row(self, title_fragment: str) -> Locator:
+        """The sidebar row of one chat, found by a fragment of its title."""
+        return self.page.get_by_role("button", name=re.compile("Открыть чат")).filter(
+            has_text=title_fragment
+        )
+
+    def open_chat(self, title_fragment: str) -> SeoChatPage:
+        """Open one stored chat from the sidebar by a fragment of its title."""
+        self.chat_row(title_fragment).click()
+        expect(self.page.locator("[data-chat-feed]")).to_be_visible()
         return self
 
-    def submit(self) -> SeoPage:
-        self.submit_button.click()
+    def delete_chat(self, chat_id: str) -> SeoChatPage:
+        """Deletion asks for confirmation through a native dialog."""
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.get_by_role("button", name=f"Удалить чат {chat_id}").click()
         return self
 
-    # -- run screen --------------------------------------------------------
+    # -- the run card ------------------------------------------------------
 
     @property
     def run_screen(self) -> Locator:
-        return self.page.locator("#seo-run")
+        return self.page.locator("[data-chat-run]")
 
     @property
     def analysis_status(self) -> Locator:
-        return self.page.locator("[data-analysis-status]")
+        """The status pill: live progress and the terminal card both carry one."""
+        return self.page.locator("[data-analysis-status], [data-run-status]").last
 
     def stage(self, number: int) -> Locator:
         return self.page.locator(f"[data-stage='{number}']")
@@ -168,7 +189,7 @@ class SeoPage:
         """The fold control of the trace feed; it exists only when steps are saved."""
         return self.trace_feed.get_by_role("button", name=re.compile("Показать трассу|Скрыть трассу"))
 
-    def open_trace(self) -> SeoPage:
+    def open_trace(self) -> SeoChatPage:
         """Unfold the trace feed: a folded feed renders no step at all."""
         toggle = self.trace_toggle
         if toggle.count() and toggle.get_attribute("aria-expanded") != "true":
@@ -197,19 +218,28 @@ class SeoPage:
     def cancel_button(self) -> Locator:
         return self.page.get_by_role("button", name="Отменить анализ")
 
-    def cancel(self) -> SeoPage:
+    def cancel(self) -> SeoChatPage:
         self.cancel_button.click()
         return self
 
-    # -- report ------------------------------------------------------------
+    # -- the report --------------------------------------------------------
 
     @property
+    def report_toggle(self) -> Locator:
+        return self.page.locator("[data-report-toggle]").last
+
     def report(self) -> Locator:
-        return self.page.locator("[data-seo-report]")
+        """Unfold the report of the newest run card and return it."""
+        toggle = self.report_toggle
+        expect(toggle).to_be_visible()
+        if toggle.get_attribute("aria-expanded") != "true":
+            toggle.click()
+        expect(self.page.locator("[data-seo-report]").last).to_be_visible()
+        return self.page.locator("[data-seo-report]").last
 
     @property
     def report_status(self) -> Locator:
-        return self.page.locator("[data-report-status]")
+        return self.page.locator("[data-report-status]").last
 
     def metric(self, key: str) -> Locator:
         """One report cell, for example `site-overall` or `category-comparative`."""
@@ -224,15 +254,15 @@ class SeoPage:
     @property
     def conclusions(self) -> Locator:
         """The report agent's text, shown apart from the server-computed numbers."""
-        return self.page.locator("[data-report-conclusions]")
+        return self.page.locator("[data-report-conclusions]").last
 
     @property
     def conclusions_summary(self) -> Locator:
-        return self.page.locator("[data-conclusions-summary]")
+        return self.page.locator("[data-conclusions-summary]").last
 
     @property
     def conclusions_recommendations(self) -> Locator:
-        return self.page.locator("[data-conclusions-recommendations]")
+        return self.page.locator("[data-conclusions-recommendations]").last
 
     @property
     def search_detail_rows(self) -> Locator:
@@ -242,43 +272,15 @@ class SeoPage:
     def model_detail_rows(self) -> Locator:
         return self.page.locator("[data-model-detail]")
 
-    def show_more(self, table: str) -> SeoPage:
+    def show_more(self, table: str) -> SeoChatPage:
         """Load the next page of one detail table: «Проверки в Яндексе» or «Ответы моделей»."""
-        wrapper = self.report.get_by_role("table", name=table).locator("..")
+        wrapper = self.report().get_by_role("table", name=table).locator("..")
         wrapper.get_by_role("button", name=SHOW_MORE).click()
-        return self
-
-    # -- history -----------------------------------------------------------
-
-    @property
-    def history(self) -> Locator:
-        return self.page.locator("section").filter(has=self.page.get_by_role("heading", name="SEO-история"))
-
-    @property
-    def history_rows(self) -> Locator:
-        return self.history.locator("[data-seo-history]")
-
-    def history_row(self, analysis_id: str) -> Locator:
-        return self.history.locator(f"[data-seo-history][data-analysis='{analysis_id}']")
-
-    def open_report(self, analysis_id: str) -> SeoPage:
-        self.history_row(analysis_id).get_by_role("button", name=OPEN_REPORT).click()
-        expect(self.report).to_be_visible()
-        return self
-
-    def delete_analysis(self, analysis_id: str) -> SeoPage:
-        """Deletion asks for confirmation through a native dialog."""
-        self.page.once("dialog", lambda dialog: dialog.accept())
-        self.history_row(analysis_id).get_by_role("button", name=DELETE_ANALYSIS).click()
-        return self
-
-    def show_more_history(self) -> SeoPage:
-        self.history.get_by_role("button", name=SHOW_MORE).click()
         return self
 
     # -- settings ----------------------------------------------------------
 
-    def open_seo_settings(self) -> SeoPage:
+    def open_seo_settings(self) -> SeoChatPage:
         self.page.get_by_role("button", name="Настройки API").click()
         dialog = self.page.get_by_role("dialog", name=SETTINGS_DIALOG)
         expect(dialog).to_be_visible()
@@ -319,7 +321,7 @@ class SeoPage:
     def seo_settings_alert(self) -> Locator:
         return self.seo_panel.get_by_role("alert")
 
-    def save_seo_settings(self, *, endpoint: str, model: str, key: str = "") -> SeoPage:
+    def save_seo_settings(self, *, endpoint: str, model: str, key: str = "") -> SeoChatPage:
         self.seo_endpoint_input.fill(endpoint)
         self.seo_model_input.fill(model)
         if key:
@@ -327,6 +329,6 @@ class SeoPage:
         self.seo_save_button.click()
         return self
 
-    def test_seo_connection(self) -> SeoPage:
+    def test_seo_connection(self) -> SeoChatPage:
         self.seo_test_button.click()
         return self

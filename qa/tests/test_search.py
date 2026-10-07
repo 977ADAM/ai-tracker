@@ -1,33 +1,32 @@
-"""The SEO run screen, driven by controlled browser responses.
+"""The SEO run card inside the chat, driven by controlled browser responses.
 
-The home page now runs the one-shot SEO analysis on the agent runtime instead of
-the old brand check. Every `/api/seo/analyses` response is answered through
-`page.route`, so the checks observe the six agents, their budget, the trace feed
-with its cursor, the conclusions block, the counters, the actual estimates and the
-cancel action without starting a run and without reaching Yandex or a model API.
+The run screen is no longer a page of its own: the chat feed holds it, and a run
+appears only after the dialogue confirms a proposal. Every chat turn and every
+`/api/seo/analyses` response is answered by the `api` fake through `page.route`,
+so the checks observe the six agents, their budget, the trace feed with its
+cursor, the conclusions, the counters, the actual estimates and the cancel action
+without starting a run and without reaching Yandex or a model API.
 
-An analysis without agent rows exercises the pre-agent screen: the six saved stages
-stay the honest view of a run that the agent runtime never touched.
+An analysis without agent rows exercises the pre-agent screen: the six saved
+stages stay the honest view of a run that the agent runtime never touched.
 """
 
 from __future__ import annotations
 
-import re
-from collections.abc import Callable
-from uuid import uuid4
+from playwright.sync_api import Page, expect
 
-from playwright.sync_api import Page, Route, expect
+from pages.fake_api import ANALYSIS_ID
+from pages.seo import AGENT_IDS, SeoChatPage
 
-from app import Application
-from pages.seo import AGENT_IDS, SeoPage
-from pages.settings import SettingsPage
-
-ANALYSIS_ID = "qa-seo-run"
-GENERATED = 3
+DESCRIPTION = (
+    "Проанализируй https://example.ru, доставка цветов, запросы: "
+    "букеты москва, доставка цветов, цветы с доставкой, услуги: букеты"
+)
+# The service model's answer to «да»: the fake server takes the launch decision.
+CONFIRM_JSON = '{"reply": "Запускаю прогон.", "intent": "confirm", "params": {}}'
 TRACE_CURSOR = "cursor-trace-2"
-PROVIDER_NAME = f"QA прогон {uuid4().hex[:6]}"
-MODEL_ID = "qa-run-model"
-MODEL_NAME = "Модель"
+GENERATED = 3
+MODEL_ID = "qa-run-connection"
 CONCLUSIONS_SUMMARY = "Ромашка видна в половине ответов моделей."
 CONCLUSIONS_MODEL = "qa-service-model"
 STAGE_NAMES = [
@@ -163,208 +162,118 @@ def agent_snapshot(status: str, *, exhausted: bool = False) -> dict:
     return data
 
 
-def seeded_agent_run(page: Page, state: dict) -> None:
-    """Answer the agent resource locally, including the paginated trace."""
-    page.route("**/api/seo/analyses**", lambda route: _answer_agent(route, state))
+def start_run(page: Page, api) -> SeoChatPage:
+    """Drive the dialogue to a run: describe the task, then confirm the proposal."""
+    chat = SeoChatPage(page).open()
+    chat.send(DESCRIPTION)
+    expect(chat.proposal()).to_be_visible()
+    api.route_completion(answer=CONFIRM_JSON)
+    chat.send("да")
+    expect(chat.run_card()).to_be_visible()
+    return chat
 
 
-def _answer_agent(route: Route, state: dict) -> None:
-    request = route.request
-    url = request.url
-    path = url.split("?", 1)[0]
-    query = url.split("?", 1)[1] if "?" in url else ""
-    if path.endswith("/api/seo/analyses") and request.method == "POST":
-        state["posts"] += 1
-        route.fulfill(status=202, json={
-            "id": ANALYSIS_ID, "status": "running",
-            "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
-        })
-    elif path.endswith("/api/seo/analyses") and request.method == "GET":
-        route.fulfill(json={"items": [], "next_cursor": None})
-    elif path.endswith(f"/api/seo/analyses/{ANALYSIS_ID}/trace"):
-        state["traces"].append(query)
-        if "cursor=" in query:
-            route.fulfill(json={"items": [trace_step(
-                2, "site", "tool", "fetch_site", {"max_pages": 2}, '{"pages":2}', "done", None,
-            )], "next_cursor": None})
-        else:
-            route.fulfill(json={"items": [trace_step(
-                1, "supervisor", "handoff", "handoff_to", {"agent": "site"},
-                '{"status":"accepted"}', "done", None,
-            )], "next_cursor": TRACE_CURSOR})
-    elif path.endswith("/rows"):
-        route.fulfill(json={"items": [], "next_cursor": None})
-    elif path.endswith(f"/api/seo/analyses/{ANALYSIS_ID}"):
-        state["polls"] += 1
-        finished = state["polls"] >= 2
-        route.fulfill(json=agent_snapshot("completed" if finished else "running", exhausted=finished))
-    else:
-        route.fulfill(status=404, json={"detail": "Не найдено"})
-
-
-def seeded_run(page: Page, state: dict) -> None:
-    """Answer the whole SEO resource locally: no real analysis ever starts."""
-
-    def answer(route: Route) -> None:
-        request = route.request
-        path = request.url.split("?", 1)[0]
-        method = request.method
-        if path.endswith("/api/seo/analyses") and method == "POST":
-            state["posts"] += 1
-            route.fulfill(status=202, json={
-                "id": ANALYSIS_ID, "status": "running",
-                "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
-            })
-        elif path.endswith("/api/seo/analyses") and method == "GET":
-            route.fulfill(json={"items": [], "next_cursor": None})
-        elif path.endswith(f"/api/seo/analyses/{ANALYSIS_ID}/cancel"):
-            state["cancels"] += 1
-            route.fulfill(json=snapshot("cancelled"))
-        elif path.endswith(f"/api/seo/analyses/{ANALYSIS_ID}"):
-            state["polls"] += 1
-            route.fulfill(json=snapshot("running" if state["polls"] < 2 else "completed"))
-        elif path.endswith("/rows"):
-            route.fulfill(json={"items": [], "next_cursor": None})
-        else:
-            route.fulfill(status=404, json={"detail": "Не найдено"})
-
-    page.route("**/api/seo/analyses**", answer)
-
-
-def seeded_cancel(page: Page, state: dict) -> None:
-    """Answer the same resource for a run that is cancelled by the user."""
-
-    def answer(route: Route) -> None:
-        request = route.request
-        path = request.url.split("?", 1)[0]
-        if path.endswith("/api/seo/analyses") and request.method == "POST":
-            state["posts"] += 1
-            route.fulfill(status=202, json={
-                "id": ANALYSIS_ID, "status": "running",
-                "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
-            })
-        elif path.endswith("/api/seo/analyses") and request.method == "GET":
-            route.fulfill(json={"items": [], "next_cursor": None})
-        elif path.endswith(f"/api/seo/analyses/{ANALYSIS_ID}/cancel"):
-            state["cancels"] += 1
-            state["cancel_body"] = request.post_data
-            route.fulfill(json=snapshot("cancelled"))
-        elif path.endswith(f"/api/seo/analyses/{ANALYSIS_ID}"):
-            route.fulfill(json=snapshot("running"))
-        else:
-            route.fulfill(json={"items": [], "next_cursor": None})
-
-    page.route("**/api/seo/analyses**", answer)
-
-
-def prepare(
-    page: Page, settings_page: SettingsPage, application: Application, mock: Callable[[], None]
-) -> None:
-    settings_page.add_provider(
-        PROVIDER_NAME, "https://api.example.com/v1/chat/completions", "qa-run-key",
-        model_id=MODEL_ID, model_name=MODEL_NAME,
-    )
-    settings_page.close()
-    # The route and the fake clock are installed before the page loads: the run
-    # resource is answered locally, and the 30-second poll is advanced by
-    # `fast_forward` instead of waiting for real seconds.
-    mock()
+def test_the_run_card_shows_six_stages_and_reaches_the_report(page: Page, api) -> None:
+    api.route_snapshots(snapshot("running"), snapshot("completed"))
     page.clock.install()
-    page.goto(application.base_url, wait_until="networkidle")
-    page.get_by_role("checkbox", name=re.compile(PROVIDER_NAME)).check()
-    page.get_by_label("Адрес главной страницы").fill("https://example.ru/")
-    page.get_by_label("Сфера бизнеса").fill("Цветы")
-    for index, seed in enumerate(["купить цветы", "доставка букетов", "цветочный магазин"], start=1):
-        page.get_by_label(["Первый", "Второй", "Третий"][index - 1] + " ключевой запрос").fill(seed)
-    page.get_by_label("Услуги").fill("Доставка цветов")
+    chat = start_run(page, api)
 
-
-def test_seo_run_shows_six_stages_and_the_report(page: Page, settings_page: SettingsPage, application: Application) -> None:
-    state = {"posts": 0, "polls": 0, "cancels": 0}
-    prepare(page, settings_page, application, lambda: seeded_run(page, state))
-    page.get_by_role("button", name="Запустить анализ").click()
-
-    expect(page.locator("#seo-run")).to_be_visible()
-    assert state["posts"] == 1
+    # The run appears in the chat feed, funded by exactly one chat and one turn.
+    assert api.requests.count("POST /api/seo/chats") == 1
     stages = page.locator("[data-stage]")
     expect(stages).to_have_count(6)
     for index, name in enumerate(STAGE_NAMES, start=1):
         expect(stages.nth(index - 1)).to_contain_text(name)
     expect(stages.nth(3)).to_contain_text("Выполняется")
     expect(page.locator("[data-analysis-status]")).to_have_text("Выполняется")
-    expect(page.locator("[aria-label='Счётчики строк']")).to_contain_text("Запросы: 3")
-    expect(page.locator("[aria-label='Счётчики строк']")).to_contain_text("ошибок 1")
-    estimate = page.locator("[aria-label='Фактическая оценка вызовов']")
-    expect(estimate).to_contain_text("3 запросов")
-    expect(estimate).to_contain_text("6 поисковых")
-    expect(estimate).to_contain_text("3 модельных")
+    expect(chat.counters).to_contain_text("Запросы: 3")
+    expect(chat.counters).to_contain_text("ошибок 1")
+    expect(chat.actual_estimate).to_contain_text("3 запросов")
+    expect(chat.actual_estimate).to_contain_text("6 поисковых")
+    expect(chat.actual_estimate).to_contain_text("3 модельных")
 
     page.clock.fast_forward(30_000)
-    expect(page.locator("[data-analysis-status]")).to_have_text("Завершён")
-    expect(page.get_by_role("button", name="Отменить анализ")).to_have_count(0)
-    expect(page.locator("[data-seo-report]")).to_be_visible()
-    assert page.locator("[data-metric='site-overall']").inner_text().strip() == "50 %"
-    assert page.locator("[data-metric='category-informational']").inner_text().strip() == "—"
+    expect(page.locator("[data-run-status]")).to_have_text("Завершён")
+    expect(chat.cancel_button).to_have_count(0)
+    expect(chat.report()).to_be_visible()
+    assert chat.metric_text("site-overall") == "50 %"
+    assert chat.metric_text("category-informational") == "—"
+    expect(chat.report_status).to_have_text("Завершён")
 
 
-def test_agent_run_shows_agents_budget_trace_and_conclusions(
-    page: Page, settings_page: SettingsPage, application: Application
-) -> None:
-    state = {"posts": 0, "polls": 0, "traces": []}
-    prepare(page, settings_page, application, lambda: seeded_agent_run(page, state))
-    page.get_by_role("button", name="Запустить анализ").click()
+def test_the_agent_run_shows_agents_budget_trace_and_conclusions(page: Page, api) -> None:
+    api.route_snapshots(agent_snapshot("running", exhausted=True), agent_snapshot("completed"))
+    api.route_trace({
+        None: {
+            "items": [trace_step(
+                1, "supervisor", "handoff", "handoff_to", {"agent": "site"},
+                '{"status":"accepted"}', "done", None,
+            )],
+            "next_cursor": TRACE_CURSOR,
+        },
+        TRACE_CURSOR: {
+            "items": [trace_step(
+                2, "site", "tool", "fetch_site", {"max_pages": 2}, '{"pages":2}', "done", None,
+            )],
+            "next_cursor": None,
+        },
+    })
+    page.clock.install()
+    chat = start_run(page, api)
 
     # The agent screen replaces the stage list: six agents with their statuses.
-    expect(page.locator("[data-agent-panel]")).to_be_visible()
+    expect(chat.agents_panel).to_be_visible()
     expect(page.locator("[data-stage]")).to_have_count(0)
     expect(page.locator("[data-agent]")).to_have_count(6)
-    expect(page.locator("[data-agent='supervisor']")).to_contain_text("Супервизор")
-    expect(page.locator("[data-agent-status='supervisor']")).to_have_text("Выполняется")
-    expect(page.locator("[data-agent-status='site']")).to_have_text("Ожидает")
+    expect(chat.agent("supervisor")).to_contain_text("Супервизор")
+    expect(chat.agent_status("supervisor")).to_have_text("Выполняется")
+    expect(chat.agent_status("site")).to_have_text("Ожидает")
 
-    # The budget pairs what was spent with the caps of the run.
-    assert page.locator("[data-budget-used='pages']").inner_text().strip() == "1 / 5"
-    assert page.locator("[data-budget-used='searches']").inner_text().strip() == "2 / 5"
-    assert page.locator("[data-budget-used='tool_calls']").inner_text().strip() == "5 / 120"
-    assert page.locator("[data-budget-used='handoffs']").inner_text().strip() == "1 / 15"
-    expect(page.locator("[data-budget-exhausted]")).to_have_count(0)
+    # The budget pairs what was spent with the caps of the run, and the live card
+    # is where an exhausted run says so.
+    assert chat.budget_text("pages") == "1 / 5"
+    assert chat.budget_text("searches") == "2 / 5"
+    assert chat.budget_text("tool_calls") == "5 / 120"
+    assert chat.budget_text("handoffs") == "1 / 15"
+    expect(chat.budget_exhausted).to_contain_text("остановлен по лимиту")
 
     # The trace feed starts folded: the header counts the steps, the toggle opens them.
-    feed = page.locator("[data-trace-feed]")
-    expect(feed.get_by_role("button", name="Показать трассу")).to_have_attribute("aria-expanded", "false")
-    expect(page.locator("[data-trace-step='1']")).to_have_count(0)
+    feed = chat.trace_feed
+    expect(chat.trace_toggle).to_have_attribute("aria-expanded", "false")
+    expect(chat.trace_step(1)).to_have_count(0)
     expect(page.locator("[data-trace-summary]")).to_contain_text("1 шаг")
-    feed.get_by_role("button", name="Показать трассу").click()
-    expect(page.locator("[data-trace-step='1']")).to_contain_text("handoff_to")
-    expect(page.locator("[data-trace-step='1']")).to_contain_text('{"agent":"site"}')
-    page.locator("[data-trace-feed]").get_by_role("button", name="Показать ещё").click()
-    expect(page.locator("[data-trace-step='2']")).to_contain_text("fetch_site")
-    expect(page.locator("[data-trace-feed]").get_by_role("button", name="Показать ещё")).to_have_count(0)
-    assert state["traces"] == ["", f"cursor={TRACE_CURSOR}"]
+    chat.open_trace()
+    expect(chat.trace_step(1)).to_contain_text("handoff_to")
+    expect(chat.trace_step(1)).to_contain_text('{"agent":"site"}')
+    feed.get_by_role("button", name="Показать ещё").click()
+    expect(chat.trace_step(2)).to_contain_text("fetch_site")
+    expect(feed.get_by_role("button", name="Показать ещё")).to_have_count(0)
+    assert api.trace_cursors == [None, TRACE_CURSOR]
 
-    # The finished run reports its exhaustion and shows the model-written conclusions.
+    # The finished run shows the model-written conclusions inside its report.
     page.clock.fast_forward(30_000)
-    expect(page.locator("[data-analysis-status]")).to_have_text("Завершён")
-    expect(page.locator("[data-budget-exhausted]")).to_contain_text("остановлен по лимиту")
-    expect(page.locator("[data-agent-status='report']")).to_have_text("Готово")
-    conclusions = page.locator("[data-report-conclusions]")
+    expect(page.locator("[data-run-status]")).to_have_text("Завершён")
+    expect(chat.report()).to_be_visible()
+    conclusions = chat.conclusions
     expect(conclusions).to_be_visible()
     expect(conclusions).to_contain_text("Текст модели")
     expect(conclusions).to_contain_text(CONCLUSIONS_MODEL)
-    expect(page.locator("[data-conclusions-summary]")).to_have_text(CONCLUSIONS_SUMMARY)
+    expect(chat.conclusions_summary).to_have_text(CONCLUSIONS_SUMMARY)
     # The numbers stay server-computed next to the labelled model text.
-    assert page.locator("[data-metric='site-overall']").inner_text().strip() == "50 %"
+    assert chat.metric_text("site-overall") == "50 %"
 
 
-def test_cancel_stops_the_run_without_a_body(page: Page, settings_page: SettingsPage, application: Application) -> None:
-    state = {"posts": 0, "polls": 0, "cancels": 0, "cancel_body": "not called"}
-    prepare(page, settings_page, application, lambda: seeded_cancel(page, state))
-    page.get_by_role("button", name="Запустить анализ").click()
-    expect(page.get_by_role("button", name="Отменить анализ")).to_be_visible()
-    page.get_by_role("button", name="Отменить анализ").click()
+def test_cancel_stops_the_run_without_a_body(page: Page, api) -> None:
+    api.route_snapshots(snapshot("running"))
+    api.route_cancel(snapshot("cancelled"))
+    page.clock.install()
+    chat = start_run(page, api)
 
-    expect(page.locator("[data-analysis-status]")).to_have_text("Отменён")
+    expect(chat.cancel_button).to_be_visible()
+    chat.cancel()
+
+    expect(page.locator("[data-run-status]")).to_have_text("Отменён")
     expect(page.get_by_text("Анализ отменён")).to_be_visible()
-    expect(page.get_by_role("button", name="Отменить анализ")).to_have_count(0)
-    assert state["cancels"] == 1
-    assert state["cancel_body"] is None
+    expect(chat.cancel_button).to_have_count(0)
+    assert api.requests.count(f"POST /api/seo/analyses/{ANALYSIS_ID}/cancel") == 1
+    assert api.cancel_body is None

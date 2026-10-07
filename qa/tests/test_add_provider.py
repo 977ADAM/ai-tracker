@@ -31,11 +31,6 @@ CONFIGURED = "Настроен"
 NEEDS_KEY = "Ключ не задан"
 
 
-def _option(provider: str, model_name: str) -> str:
-    """The main page labels every model as «provider · model»."""
-    return f"{provider} · {model_name}"
-
-
 def _create(settings_page: SettingsPage, *, key: str = KEY) -> None:
     settings_page.add_provider(NAME, ENDPOINT, key, model_id=MODEL, model_name=MODEL_NAME)
 
@@ -178,9 +173,13 @@ def test_applies_a_renamed_model(settings_page: SettingsPage) -> None:
     settings_page.apply(NAME)
     expect(settings_page.notice).to_contain_text("Провайдер сохранён")
 
-    settings_page.close()
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, "Переименованная модель"))).to_be_visible()
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, MODEL_NAME))).to_have_count(0)
+    # The chat offers a chip per provider, not per model, so the stored name is
+    # read back from the editor that owns the model rows.
+    settings_page.configure(NAME)
+    settings_page.expand_advanced(NAME)
+    expect(settings_page.model_row(NAME, MODEL).get_by_label("Название модели")).to_have_value(
+        "Переименованная модель"
+    )
 
 
 def test_cancel_discards_edits(settings_page: SettingsPage) -> None:
@@ -261,38 +260,46 @@ def test_removes_a_model_from_its_provider(settings_page: SettingsPage) -> None:
     expect(settings_page.retain_model_button(NAME)).to_be_disabled()
 
 
-def test_removes_a_provider_with_confirmation(settings_page: SettingsPage) -> None:
+def test_removes_a_provider_with_confirmation(
+    settings_page: SettingsPage, application: Application
+) -> None:
     _create_with_second_model(settings_page)
     expect(settings_page.card(NAME)).to_be_visible()
 
     settings_page.remove_provider(NAME)
 
     expect(settings_page.card(NAME)).to_have_count(0)
-    settings_page.close()
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, MODEL_NAME))).to_have_count(0)
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, SECOND_MODEL_NAME))).to_have_count(0)
+    # The public list the chat reads chips from no longer carries it either.
+    assert NAME not in [item["name"] for item in application.connections()]
 
 
-# -- the main page ------------------------------------------------------------
+# -- the stored models --------------------------------------------------------
 
 
-def test_every_model_is_a_separate_check_option(settings_page: SettingsPage) -> None:
+def test_every_model_keeps_its_own_row(settings_page: SettingsPage) -> None:
+    """The chat offers a chip per provider, so separate models are checked in the editor."""
     _create_with_second_model(settings_page)
-    settings_page.close()
+    settings_page.configure(NAME)
+    settings_page.expand_advanced(NAME)
 
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, MODEL_NAME))).to_be_visible()
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, SECOND_MODEL_NAME))).to_be_visible()
+    assert settings_page.model_ids(NAME) == [MODEL, SECOND_MODEL]
+    expect(settings_page.model_row(NAME, MODEL).get_by_label("Название модели")).to_have_value(MODEL_NAME)
+    expect(settings_page.model_row(NAME, SECOND_MODEL).get_by_label("Название модели")).to_have_value(
+        SECOND_MODEL_NAME
+    )
 
 
-def test_a_removed_model_leaves_the_check_list(settings_page: SettingsPage) -> None:
+def test_a_removed_model_leaves_the_provider(settings_page: SettingsPage) -> None:
     _create_with_second_model(settings_page)
     settings_page.configure(NAME)
     settings_page.remove_model(NAME, SECOND_MODEL)
     settings_page.apply(NAME)
-    settings_page.close()
+    expect(settings_page.notice).to_contain_text("Провайдер сохранён")
 
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, MODEL_NAME))).to_be_visible()
-    expect(settings_page.page.get_by_role("checkbox", name=_option(NAME, SECOND_MODEL_NAME))).to_have_count(0)
+    settings_page.configure(NAME)
+    settings_page.expand_advanced(NAME)
+    assert settings_page.model_ids(NAME) == [MODEL]
+    expect(settings_page.model_row(NAME, MODEL).get_by_label("Название модели")).to_have_value(MODEL_NAME)
 
 
 # -- closing ------------------------------------------------------------------

@@ -1,25 +1,34 @@
-"""The SEO history and the saved report, driven by controlled browser responses.
+"""The saved report inside a chat run card, driven by controlled responses.
 
-The old mixed-run history screen is gone: the home page keeps a separate SEO
-history instead. Every `/api/seo/analyses` response is answered through
-`page.route`, so the check observes the cursor pages, the saved report with its
-detail rows, the delete confirmation and the empty state without starting a run,
-reading the real database or reaching a paid API.
+The separate SEO history is gone: the chats themselves are the history, and a
+finished run keeps its report in the feed, folded until it is opened. Every chat
+turn and every `/api/seo/analyses` response is answered by the `api` fake through
+`page.route`, so the check observes the report, its detail rows with their
+cursor, the full model answer and the deletion of the chat without a run, without
+reading the real database and without reaching a paid API.
 """
 
 from __future__ import annotations
 
-from playwright.sync_api import Page, Route, expect
+from playwright.sync_api import Page, expect
 
-from app import Application
-from pages.seo import SeoPage
+from pages.fake_api import ANALYSIS_ID, CHAT_ID, MODEL_ID
+from pages.seo import SeoChatPage
 
-FIRST_ID = "qa-seo-first"
-SECOND_ID = "qa-seo-second"
-THIRD_ID = "qa-seo-third"
-CURSOR = "cursor-page-2"
+DESCRIPTION = (
+    "Проанализируй https://example.ru, доставка цветов, запросы: "
+    "букеты москва, доставка цветов, цветы с доставкой, услуги: букеты"
+)
+CONFIRM_JSON = '{"reply": "Запускаю прогон.", "intent": "confirm", "params": {}}'
 ROWS_CURSOR = "cursor-rows-2"
 CANDIDATE_HOST = "flower-shop.example"
+# The answer is Markdown, exactly as a model writes it: the table shows its
+# preview as prose and the full text is rendered as Markdown in the dialog.
+MODEL_ANSWER = (
+    "Ромашка и flower-shop.example предлагают доставку цветов.\n\n"
+    "### Что уточнить\n- **материалы** и сроки\n- бригада и смета\n\n"
+    + "Подробности заказа: сроки, бригада, смета и материалы. " * 12
+)
 
 
 def metric(denominator: int, successes: int, average: float | None = None) -> dict:
@@ -31,26 +40,18 @@ def metric(denominator: int, successes: int, average: float | None = None) -> di
     }
 
 
-def history_item(analysis_id: str, *, status: str, sphere: str, created_at: str) -> dict:
+def snapshot() -> dict:
+    counts = {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0}
     return {
-        "id": analysis_id, "created_at": created_at,
-        "finished_at": None if status == "running" else "2026-09-28T01:00:00Z",
-        "status": status, "sphere": sphere, "host": "example.ru", "company_name": "Ромашка",
-        "counters": {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0},
-    }
-
-
-def snapshot(status: str = "completed") -> dict:
-    return {
-        "id": FIRST_ID,
-        "status": status,
+        "id": ANALYSIS_ID,
+        "status": "completed",
         "created_at": "2026-09-28T00:00:00Z",
         "updated_at": "2026-09-28T01:00:00Z",
         "finished_at": "2026-09-28T01:00:00Z",
         "input": {
             "url": "https://example.ru/", "host": "example.ru", "sphere": "Цветы",
             "seeds": ["купить цветы", "доставка букетов", "цветочный магазин"],
-            "services": ["Доставка цветов"], "connection_ids": ["model-1"],
+            "services": ["Доставка цветов"], "connection_ids": [MODEL_ID],
         },
         "estimate": {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1},
         "company_name": "Ромашка",
@@ -72,7 +73,7 @@ def snapshot(status: str = "completed") -> dict:
             for index in range(3)
         ],
         "summary": "Ромашка упоминается в половине ответов.",
-        "counters": {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0},
+        "counters": counts,
         "readiness": {
             "report_ready": True, "summary_ready": True, "queries_ready": True,
             "has_submitted_search_rows": False, "has_unsubmitted_search_rows": False,
@@ -81,7 +82,7 @@ def snapshot(status: str = "completed") -> dict:
         "aggregates": {
             "site": {
                 "search": {"overall": metric(2, 1, 3), "branded": metric(1, 1, 3), "unbranded": metric(1, 0)},
-                "ai": {"model-1": {
+                "ai": {MODEL_ID: {
                     "name": metric(2, 1), "host": metric(2, 1), "combined": metric(2, 1),
                     "branded": {"name": metric(1, 1), "host": metric(1, 1), "combined": metric(1, 1)},
                     "unbranded": {"name": metric(1, 0), "host": metric(1, 1), "combined": metric(1, 1)},
@@ -91,22 +92,22 @@ def snapshot(status: str = "completed") -> dict:
                 {"host": CANDIDATE_HOST, "title": "Цветочный магазин — доставка", "occurrences": 2,
                  "average_position": 2.5, "seed_indexes": [0, 1],
                  "search": {"overall": metric(2, 1, 2), "branded": metric(0, 0), "unbranded": metric(2, 1, 2)},
-                 "ai": {"model-1": {"host": metric(2, 1)}}},
+                 "ai": {MODEL_ID: {"host": metric(2, 1)}}},
             ],
             "categories": {
-                "commercial": {"search": metric(2, 1, 3), "ai": {"model-1": metric(2, 1)}},
-                "informational": {"search": metric(0, 0), "ai": {"model-1": metric(0, 0)}},
-                "comparative": {"search": metric(0, 0), "ai": {"model-1": metric(0, 0)}},
+                "commercial": {"search": metric(2, 1, 3), "ai": {MODEL_ID: metric(2, 1)}},
+                "informational": {"search": metric(0, 0), "ai": {MODEL_ID: metric(0, 0)}},
+                "comparative": {"search": metric(0, 0), "ai": {MODEL_ID: metric(0, 0)}},
             },
-            "services": {"Доставка цветов": {"search": metric(2, 1, 3), "ai": {"model-1": metric(2, 1)}}},
-            "counts": {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0},
+            "services": {"Доставка цветов": {"search": metric(2, 1, 3), "ai": {MODEL_ID: metric(2, 1)}}},
+            "counts": counts,
         },
     }
 
 
 def model_row(index: int, answer: str) -> dict:
     return {
-        "query_index": index, "connection_id": "model-1", "provider_name": "Модель",
+        "query_index": index, "connection_id": MODEL_ID, "provider_name": "Модель",
         "status": "found", "answer": answer, "name_mentioned": True, "host_mentioned": False,
         "error": None, "query": f"запрос {index + 1}", "category": "commercial",
         "service": "Доставка цветов",
@@ -121,78 +122,66 @@ def search_row(index: int) -> dict:
     }
 
 
-def seeded_browser(page: Page) -> dict:
-    """Answer history, report, detail pages and deletion locally."""
-    state = {"deleted": False, "model_cursors": []}
-
-    def answer(route: Route) -> None:
-        request = route.request
-        url = request.url
-        path = url.split("?", 1)[0]
-        query = url.split("?", 1)[1] if "?" in url else ""
-        if path.endswith("/api/seo/analyses") and request.method == "GET":
-            if "cursor=" in query:
-                route.fulfill(json={"items": [history_item(THIRD_ID, status="cancelled", sphere="Третий прогон",
-                                                         created_at="2026-09-26T10:00:00Z")], "next_cursor": None})
-            elif state["deleted"]:
-                route.fulfill(json={"items": [], "next_cursor": None})
-            else:
-                route.fulfill(json={"items": [
-                    history_item(FIRST_ID, status="completed", sphere="Первый прогон",
-                                 created_at="2026-09-28T10:00:00Z"),
-                    history_item(SECOND_ID, status="interrupted", sphere="Второй прогон",
-                                 created_at="2026-09-27T10:00:00Z"),
-                ], "next_cursor": CURSOR})
-        elif path.endswith(f"/api/seo/analyses/{FIRST_ID}/rows"):
-            if "kind=model" in query:
-                if "cursor=" in query:
-                    state["model_cursors"].append(query)
-                    route.fulfill(json={"items": [model_row(1, "Второй сохранённый ответ")], "next_cursor": None})
-                else:
-                    route.fulfill(json={"items": [model_row(0, "Первый сохранённый ответ")], "next_cursor": ROWS_CURSOR})
-            else:
-                route.fulfill(json={"items": [search_row(0)], "next_cursor": None})
-        elif path.endswith(f"/api/seo/analyses/{FIRST_ID}") and request.method == "DELETE":
-            state["deleted"] = True
-            route.fulfill(status=204, body="")
-        elif path.endswith(f"/api/seo/analyses/{FIRST_ID}"):
-            route.fulfill(json=snapshot())
-        else:
-            route.fulfill(status=404, json={"detail": "Не найдено"})
-
-    page.route("**/api/seo/analyses**", answer)
-    return state
+def start_run(page: Page, api) -> SeoChatPage:
+    """Drive the dialogue to a finished run whose report the check can open."""
+    chat = SeoChatPage(page).open()
+    chat.send(DESCRIPTION)
+    expect(chat.proposal()).to_be_visible()
+    api.route_completion(answer=CONFIRM_JSON)
+    chat.send("да")
+    expect(chat.run_card()).to_be_visible()
+    return chat
 
 
-def test_seo_history_pages_opens_the_report_and_deletes(page: Page, application: Application) -> None:
-    state = seeded_browser(page)
-    seo = SeoPage(page, application.base_url).open()
+def test_the_chat_report_pages_rows_and_the_chat_deletes(page: Page, api) -> None:
+    api.route_snapshots(snapshot())
+    api.route_rows("model", {
+        None: {"items": [model_row(0, MODEL_ANSWER)], "next_cursor": ROWS_CURSOR},
+        ROWS_CURSOR: {"items": [model_row(1, "Второй сохранённый ответ")], "next_cursor": None},
+    })
+    api.route_rows("search", {None: {"items": [search_row(0)], "next_cursor": None}})
 
-    rows = seo.history_rows
-    expect(rows).to_have_count(2)
-    expect(rows.nth(0)).to_contain_text("Первый прогон")
-    expect(rows.nth(0)).to_contain_text("Завершён")
-    expect(rows.nth(1)).to_contain_text("Прерван")
-    # An active analysis cannot be deleted; the first page holds only terminal states.
-    expect(seo.history_row(FIRST_ID).get_by_role("button", name="Удалить")).to_be_enabled()
+    chat = start_run(page, api)
+    # The chat itself is the history now: it appears in the sidebar and is "Готов".
+    row = chat.chat_row("Проанализируй")
+    expect(row).to_be_visible()
+    expect(row).to_contain_text("Проанализируй")
+    expect(row.locator("[data-chat-status]")).to_have_text("Готов")
 
-    seo.show_more_history()
-    expect(rows).to_have_count(3)
-    expect(rows.nth(2)).to_contain_text("Третий прогон")
-    expect(rows.nth(2)).to_contain_text("Отменён")
+    expect(chat.report()).to_be_visible()
+    assert chat.metric_text("site-overall") == "50 %"
+    # The only comparative row is missing, so the denominator is empty and the report shows «—».
+    assert chat.metric_text("category-comparative") == "—"
+    candidate = chat.candidate(CANDIDATE_HOST)
+    expect(candidate).to_contain_text("Цветочный магазин — доставка")
+    expect(candidate.locator("[data-candidate-occurrences]")).to_have_text("2")
 
-    seo.open_report(FIRST_ID)
-    assert seo.metric_text("site-overall") == "50 %"
-    assert seo.metric_text("category-comparative") == "—"
-    expect(seo.candidate(CANDIDATE_HOST)).to_contain_text("Цветочный магазин — доставка")
-    expect(seo.model_detail_rows).to_have_count(1)
-    expect(seo.model_detail_rows.first).to_contain_text("Первый сохранённый ответ")
+    # The saved detail shows the answer and pages the second row by cursor.
+    expect(chat.model_detail_rows).to_have_count(1)
+    expect(chat.model_detail_rows.first).to_contain_text("flower-shop.example")
+    preview = chat.model_detail_rows.first.locator("[data-model-answer-preview]")
+    # The preview is prose: the Markdown markers never reach the table cell.
+    expect(preview).not_to_contain_text("**")
+    expect(preview).not_to_contain_text("###")
+    chat.show_more("Ответы моделей")
+    expect(chat.model_detail_rows).to_have_count(2)
+    expect(chat.model_detail_rows.nth(1)).to_contain_text("Второй сохранённый ответ")
+    assert ("model", ROWS_CURSOR) in api.row_cursors
 
-    seo.show_more("Ответы моделей")
-    expect(seo.model_detail_rows).to_have_count(2)
-    expect(seo.model_detail_rows.nth(1)).to_contain_text("Второй сохранённый ответ")
-    assert state["model_cursors"], "Вторая страница ответов должна запрашиваться по курсору"
+    # A long answer opens in full, rendered as Markdown rather than raw text.
+    chat.model_detail_rows.first.get_by_role("button", name="Читать полностью").click()
+    dialog = page.get_by_role("dialog", name="Ответ модели")
+    expect(dialog).to_be_visible()
+    expect(dialog.locator("[data-answer-full] h3")).to_contain_text("Что уточнить")
+    expect(dialog.locator("[data-answer-full] strong")).to_contain_text("материалы")
+    expect(dialog.locator("[data-answer-full] li")).to_have_count(2)
+    expect(dialog.locator("[data-answer-full]")).not_to_contain_text("###")
+    expect(dialog.locator("[data-answer-caption]")).to_contain_text("запрос 1")
+    dialog.get_by_role("button", name="Закрыть").click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
 
-    seo.delete_analysis(FIRST_ID)
-    expect(seo.history_row(FIRST_ID)).to_have_count(0)
-    expect(rows).to_have_count(2)
+    # Deleting the chat asks for confirmation and resets the screen.
+    chat.delete_chat(CHAT_ID)
+    expect(chat.chat_row("Проанализируй")).to_have_count(0)
+    expect(page.locator("[data-chat-empty]")).to_be_visible()
+    assert api.requests.count(f"DELETE /api/seo/chats/{CHAT_ID}") == 1
