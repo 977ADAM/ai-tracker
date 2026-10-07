@@ -190,6 +190,11 @@
   }
 
   async function loadTrace(id: string, cursor: string | null, append: boolean): Promise<void> {
+    // The pages the user loaded are the newer state, so a first-page request
+    // for a trace they already deepened paints nothing. It returns before the
+    // flag is raised: a stranded `loading` would leave the feed's "load more"
+    // control disabled on "Загружаем…" for the rest of the session.
+    if (!append && tracePaged.has(id)) return;
     traces = { ...traces, [id]: { ...(traces[id] ?? EMPTY_TRACE), loading: true, error: '' } };
     try {
       const query = cursor === null ? '' : `?cursor=${encodeURIComponent(cursor)}`;
@@ -198,8 +203,15 @@
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить трассу агентов'));
       if (destroyed) return;
       // A first-page refresh that was already in flight must not undo a page
-      // the user loaded while it travelled: their state is the newer one.
-      if (!append && tracePaged.has(id)) return;
+      // the user loaded while it travelled: their state is the newer one. This
+      // attempt paints nothing, so release the flag it raised on the way in.
+      if (!append && tracePaged.has(id)) {
+        const pending = traces[id];
+        if (pending !== undefined && pending.loading) {
+          traces = { ...traces, [id]: { ...pending, loading: false } };
+        }
+        return;
+      }
       const page = value as SeoTracePage;
       const current = traces[id] ?? EMPTY_TRACE;
       traces = { ...traces, [id]: {
@@ -234,13 +246,13 @@
   /**
    * Opening a report reads saved data only, and the trace comes with it: an
    * empty feed shows no "load more", so the first page must be requested here.
+   * A trace the user already paged deeper is theirs: asking for its first page
+   * would collapse their pages (and would leave the feed loading, see above).
    */
   function openReport(id: string): void {
-    void Promise.all([
-      loadRows(id, 'model', null, false),
-      loadRows(id, 'search', null, false),
-      loadTrace(id, null, false)
-    ]);
+    const requests = [loadRows(id, 'model', null, false), loadRows(id, 'search', null, false)];
+    if (!tracePaged.has(id)) requests.push(loadTrace(id, null, false));
+    void Promise.all(requests);
   }
 
   async function openChat(id: string): Promise<void> {

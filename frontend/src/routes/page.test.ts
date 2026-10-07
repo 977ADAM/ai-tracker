@@ -330,6 +330,77 @@ describe('chat page', () => {
     expect(String(trace[0][0])).not.toContain('cursor=');
   });
 
+  it('still loads the first trace page when an unpaged finished report is opened', async () => {
+    const mock = stubFetch((url) => {
+      if (url.includes('/api/seo/analyses/a-1/rows')) return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1/trace')) {
+        return jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' });
+      }
+      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'completed' }));
+      if (url.includes('/api/seo/chats/')) {
+        return jsonResponse(chatPage({ messages: [runMessage('a-1')] }));
+      }
+      return jsonResponse({ detail: 'Нет маршрута' }, 404);
+    });
+    render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1' })] }) } });
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Открыть отчёт' }));
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(1));
+    expect(String(calls(mock, '/trace')[0][0])).not.toContain('cursor=');
+
+    // The first page is on screen and its "load more" control is usable.
+    await fireEvent.click(await screen.findByRole('button', { name: 'Показать трассу' }));
+    expect(screen.getByText('first_step')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Показать ещё' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('never strands the trace loading flag when a paged report is opened', async () => {
+    const timeout = vi.spyOn(globalThis, 'setTimeout');
+    let analysis = snapshot({ status: 'running' });
+    const mock = stubFetch((url) => {
+      if (url.includes('/api/seo/analyses/a-1/rows')) return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1/trace')) {
+        return url.includes('cursor=p1')
+          ? jsonResponse({ items: [traceStep(2, 'deep_step')], next_cursor: 'p2' })
+          : jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' });
+      }
+      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(analysis);
+      if (url.includes('/api/seo/chats/')) {
+        return jsonResponse(chatPage({
+          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
+        }));
+      }
+      return jsonResponse({ detail: 'Нет маршрута' }, 404);
+    });
+    render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1', running: true })] }) } });
+
+    // The user pages the live trace past its first page.
+    await screen.findByText('Прогон SEO-анализа');
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(1));
+    await fireEvent.click(screen.getByRole('button', { name: /показать трассу/i }));
+    await fireEvent.click(screen.getByRole('button', { name: /показать ещё/i }));
+    await waitFor(() => expect(calls(mock, '/trace')).toHaveLength(2));
+    expect(String(calls(mock, '/trace')[1][0])).toContain('cursor=p1');
+    expect(screen.getByText('deep_step')).toBeTruthy();
+
+    // The run finishes, then the report of that same analysis is opened: the
+    // first page must not be requested again, so the flag cannot be stranded.
+    analysis = snapshot({ status: 'completed' });
+    const scheduled = timeout.mock.calls.filter((call) => call[1] === 30_000);
+    (scheduled[scheduled.length - 1][0] as () => void)();
+    await fireEvent.click(await screen.findByRole('button', { name: 'Открыть отчёт' }));
+    await waitFor(() => expect(calls(mock, '/rows?kind=search')).toHaveLength(1));
+
+    // Let a redundant first-page trace request settle before reading the feed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await fireEvent.click(screen.getByRole('button', { name: 'Показать трассу' }));
+    expect(screen.getByText('first_step')).toBeTruthy();
+    expect(screen.getByText('deep_step')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Показать ещё' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Загружаем…' })).toBeNull();
+    expect(calls(mock, '/trace')).toHaveLength(2);
+  });
+
   it('keeps the agent trace of a running run up to date while it polls', async () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     const mock = stubFetch((url) => {
