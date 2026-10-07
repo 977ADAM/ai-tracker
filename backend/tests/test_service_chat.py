@@ -237,6 +237,68 @@ async def test_a_turn_that_lost_the_proposal_starts_no_run(
 
 
 @pytest.mark.anyio
+async def test_a_failed_start_keeps_the_proposal_for_the_retry(
+    chats: ChatRepository,
+    connections: ConnectionService,
+    form: FormService,
+    chat_id: str,
+):
+    """A refused paid start must not burn the proposal the user confirmed.
+
+    `SeoService.start` refuses on configuration gaps the user fixes in the
+    settings, and `send_message` must let that refusal reach the API. The claim
+    has already cleared the pointer, so the launch path owes the proposal back:
+    without the restore the card would stay `pending` while the pointer is gone,
+    and the next «да» would build a brand-new proposal instead of launching the
+    one the user already confirmed.
+    """
+    await ChatService(
+        chats, FakeChatSeoService(), connections, form,
+        client_factory=lambda: FakeChatClient([FULL_ANSWER]),
+    ).send_message(chat_id, FULL_MESSAGE)
+    proposal_id = chats.chat(chat_id)["pending_proposal_id"]
+    assert isinstance(proposal_id, str)
+
+    class RefusingStartSeo(FakeChatSeoService):
+        """Refuses the first paid start, then starts like a fixed service."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.refusals = 0
+
+        async def start(self, payload: dict[str, object]) -> dict[str, object]:
+            if self.refusals == 0:
+                self.refusals += 1
+                raise ConfigurationError(LLM_NOT_CONFIGURED)
+            return await super().start(payload)
+
+    seo = RefusingStartSeo()
+    service = ChatService(
+        chats, seo, connections, form, client_factory=lambda: FakeChatClient([CONFIRM_ANSWER]),
+    )
+
+    with pytest.raises(ConfigurationError):
+        await service.send_message(chat_id, "да")
+
+    stored = chats.chat(chat_id)
+    assert stored["pending_proposal_id"] == proposal_id
+    assert stored["active_analysis_id"] is None
+    assert chats.message(proposal_id)["payload"]["status"] == "pending"
+    kinds = [item["kind"] for item in chats.messages(chat_id)["items"]]
+    assert "run" not in kinds
+    assert seo.started == []
+
+    result = await service.send_message(chat_id, "да")
+
+    assert seo.refusals == 1
+    assert len(seo.started) == 1
+    assert chats.message(proposal_id)["payload"]["status"] == "confirmed"
+    assert chats.chat(chat_id)["pending_proposal_id"] is None
+    assert [item["kind"] for item in result["messages"]] == ["text", "run"]
+    assert result["messages"][-1]["payload"]["analysis_id"] == seo.analysis_id
+
+
+@pytest.mark.anyio
 async def test_overlapping_confirmations_start_exactly_one_run(
     chats: ChatRepository,
     connections: ConnectionService,

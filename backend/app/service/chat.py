@@ -7,7 +7,8 @@ feature: the first match wins, so an incomplete draft always asks a question, a
 run already going always refuses, and a launch happens only from the chat's own
 open proposal whose parameters still equal the draft — after the store has
 atomically claimed that proposal for this turn, so two overlapping confirmations
-can never fund two runs.
+can never fund two runs. A start that raises hands the claimed proposal back, so
+a configuration refusal the user can fix does not consume the confirmation.
 
 The launch itself is `SeoService.start`, so the paid path, its configuration
 refusals, and its budget stay untouched here. `ConfigurationError` and
@@ -176,13 +177,19 @@ class ChatService:
         proposal_id: str | None,
         proposal: Mapping[str, object] | None,
     ) -> list[dict]:
-        """Claim the confirmed proposal, then start the paid run and close it as used.
+        """Claim the confirmed proposal, start the paid run, and close it as used.
 
         `can_launch` only proved that the proposal this turn *read* was pending and
         matched the draft; that read happened before the model call, so another
         turn may have consumed the proposal since. The claim is the authority: one
         conditional update in the store picks exactly one winner, and a loser
         answers that the run is under way instead of funding a second one.
+
+        A start that raises — `ConfigurationError` and `ValidationError` from the
+        paid path are the expected ones — gives the claimed proposal back before
+        the error continues to the HTTP layer: the user can fix the setting and
+        confirm the same card again. Only a free pointer is written back, so the
+        restore never fights the claim for the right to start.
 
         The parameters come from the draft, which `can_launch` has just proven
         equal to the stored proposal: the model answer can name a run, but only
@@ -192,7 +199,11 @@ class ChatService:
         """
         if proposal_id is None or not self.chats.claim_proposal(chat_id, proposal_id):
             return [self._text_message(chat_id, RUN_IN_PROGRESS)]
-        started = await self.seo.start(proposal_params(draft))
+        try:
+            started = await self.seo.start(proposal_params(draft))
+        except BaseException:
+            self.chats.restore_proposal(chat_id, proposal_id)
+            raise
         analysis_id = str(started["id"])
         self.chats.set_active_analysis(chat_id, analysis_id)
         if proposal_id is not None and proposal is not None:

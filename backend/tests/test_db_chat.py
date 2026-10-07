@@ -147,6 +147,28 @@ def test_claim_proposal_has_exactly_one_winner(tmp_path):
     assert repository.chat(chat_id)["pending_proposal_id"] is None
 
 
+def test_restore_proposal_reopens_the_pointer_only_while_it_is_free(tmp_path):
+    """The restore writes the pointer back only when no other turn owns it."""
+    repository = _repository(tmp_path)
+    chat_id = repository.create_chat("Чат")
+    proposal = repository.append_message(
+        chat_id, "assistant", "proposal", None, {"status": "pending"},
+    )
+
+    # A free pointer takes the proposal back.
+    assert repository.restore_proposal(chat_id, proposal["id"]) is True
+    assert repository.chat(chat_id)["pending_proposal_id"] == proposal["id"]
+    # A second restore cannot overwrite the pointer it has just written.
+    assert repository.restore_proposal(chat_id, proposal["id"]) is False
+    assert repository.chat(chat_id)["pending_proposal_id"] == proposal["id"]
+
+    # Claim then restore leaves the pointer on the same proposal again.
+    assert repository.claim_proposal(chat_id, proposal["id"]) is True
+    assert repository.chat(chat_id)["pending_proposal_id"] is None
+    assert repository.restore_proposal(chat_id, proposal["id"]) is True
+    assert repository.chat(chat_id)["pending_proposal_id"] == proposal["id"]
+
+
 def test_list_chats_is_newest_updated_first(tmp_path):
     repository = _repository(tmp_path)
     first = repository.create_chat("Первый")
@@ -195,6 +217,8 @@ def test_unknown_chat_writes_raise(tmp_path):
         repository.set_pending_proposal("нет-такого", None)
     with pytest.raises(ChatNotFound):
         repository.claim_proposal("нет-такого", "сообщение")
+    with pytest.raises(ChatNotFound):
+        repository.restore_proposal("нет-такого", "сообщение")
     with pytest.raises(ChatNotFound):
         repository.set_active_analysis("нет-такого", None)
     with pytest.raises(ChatNotFound):

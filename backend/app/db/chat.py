@@ -252,6 +252,26 @@ class ChatRepository:
             )
             return cursor.rowcount == 1
 
+    def restore_proposal(self, chat_id: str, message_id: str) -> bool:
+        """Point a chat with no open proposal back at the one named here.
+
+        The inverse of `claim_proposal`, for a launch that could not start: the
+        claim already cleared the pointer, so a refused `SeoService.start` would
+        otherwise leave the card `pending` with nothing pointing at it. The
+        `IS NULL` test makes the restore a compare-and-swap of its own: if
+        another turn has claimed or created a proposal since, that pointer is
+        not this caller's to overwrite, and the update reports `rowcount == 0`.
+        """
+        now = _now()
+        with self._connection(write=True) as connection:
+            self._require_chat(connection, chat_id)
+            cursor = connection.execute(
+                "UPDATE seo_chats SET pending_proposal_id=?, updated_at=? "
+                "WHERE id=? AND pending_proposal_id IS NULL",
+                (message_id, now, chat_id),
+            )
+            return cursor.rowcount == 1
+
     def set_active_analysis(self, chat_id: str, analysis_id: str | None) -> None:
         """Point the chat at the analysis it started, or clear the pointer."""
         now = _now()
