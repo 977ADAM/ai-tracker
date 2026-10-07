@@ -14,6 +14,7 @@ from app.api.routers import (
     search,
     search_settings,
     seo,
+    seo_chats,
     seo_settings,
 )
 
@@ -29,3 +30,5 @@ api_router.include_router(runs.router)
 # The settings resource is registered before the analyses resource.
 api_router.include_router(seo_settings.router)
 api_router.include_router(seo.router)
+# The chat resource can start an analysis, so it is registered after it.
+api_router.include_router(seo_chats.router)

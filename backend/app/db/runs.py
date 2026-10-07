@@ -28,10 +28,11 @@ PENDING_MODEL = frozenset({"pending"})
 PENDING_SEARCH = frozenset({"submitting", "waiting"})
 CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 REGION_NAMES = dict(REGIONS)
-# Versions this repository can open: 3 is added by the SEO repository, and 4
-# adds the SEO agent state, trace, and conclusions. The SEO repository owns
-# those tables and never touches the run tables below.
-SUPPORTED_VERSIONS = (0, 1, 2, 3, 4)
+# Versions this repository can open: 3 is added by the SEO repository, 4 adds
+# the SEO agent state, trace, and conclusions, and 5 adds the chat tables. The
+# repositories that own the later tables never touch the run tables below, so a
+# file at the newest version is still opened here without a downgrade.
+SUPPORTED_VERSIONS = (0, 1, 2, 3, 4, 5)
 
 
 class RunRepository:

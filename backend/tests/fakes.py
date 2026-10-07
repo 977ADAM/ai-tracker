@@ -464,16 +464,25 @@ class FakeSeoSettingsService:
 
     `build_agent_model` answers `None` when `model` is `None`, which is exactly
     the "service LLM is not configured" case a run creation must refuse.
+    `build_client` answers `chat_client`, the chat's own model, which is `None`
+    unless a test scripts one.
     """
 
-    def __init__(self, model: Any = None, *, model_name: str = "seo-model") -> None:
+    def __init__(
+        self, model: Any = None, *, model_name: str = "seo-model", chat_client: Any = None,
+    ) -> None:
         self.model = model
         self.model_name = model_name
+        self.chat_client = chat_client
         self.builds = 0
 
     def build_agent_model(self) -> Any:
         self.builds += 1
         return self.model
+
+    def build_client(self) -> Any:
+        """Return the scripted chat model, or `None` while the LLM is unconfigured."""
+        return self.chat_client
 
     def public(self) -> dict[str, object]:
         return {

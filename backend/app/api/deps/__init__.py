@@ -15,6 +15,7 @@ from __future__ import annotations
 from app.api.deps.checkpoints import agent_checkpointer, checkpoint_probe
 from app.api.deps.container import Container, build_container, make_seo_toolbox_factory
 from app.api.deps.dependencies import (
+    ChatServiceDep,
     CheckServiceDep,
     ConfigServiceDep,
     ConnectionServiceDep,
@@ -26,6 +27,7 @@ from app.api.deps.dependencies import (
     SearchSettingsServiceDep,
     SeoServiceDep,
     SeoSettingsServiceDep,
+    get_chat_service,
     get_check_service,
     get_config_service,
     get_connection_service,
@@ -41,6 +43,7 @@ from app.api.deps.dependencies import (
 from app.api.deps.fallbacks import UnconfiguredAgentModel
 
 __all__ = [
+    "ChatServiceDep",
     "CheckServiceDep",
     "ConfigServiceDep",
     "ConnectionServiceDep",
@@ -57,6 +60,7 @@ __all__ = [
     "agent_checkpointer",
     "build_container",
     "checkpoint_probe",
+    "get_chat_service",
     "get_check_service",
     "get_config_service",
     "get_connection_service",

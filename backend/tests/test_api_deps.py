@@ -29,6 +29,7 @@ DEPENDENCIES = {
     "RunServiceDep": "get_run_service",
     "SeoServiceDep": "get_seo_service",
     "SeoSettingsServiceDep": "get_seo_settings_service",
+    "ChatServiceDep": "get_chat_service",
 }
 
 
@@ -71,6 +72,7 @@ def test_the_routers_get_the_service_their_alias_names():
         "RunServiceDep": "runs",
         "SeoServiceDep": "seo_service",
         "SeoSettingsServiceDep": "seo_settings",
+        "ChatServiceDep": "chat_service",
     }
 
     assert set(fields.values()) <= set(container)

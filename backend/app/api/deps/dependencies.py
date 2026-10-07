@@ -13,6 +13,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from app.api.deps.container import Container
+from app.service.chat import ChatService
 from app.service.checks import CheckService
 from app.service.config import ConfigService
 from app.service.connections import ConnectionService
@@ -69,6 +70,10 @@ def get_seo_settings_service(container: ContainerDep) -> SeoSettingsService:
     return container.seo_settings
 
 
+def get_chat_service(container: ContainerDep) -> ChatService:
+    return container.chat_service
+
+
 ContainerDep = Annotated[Container, Depends(get_container)]
 ConnectionServiceDep = Annotated[ConnectionService, Depends(get_connection_service)]
 CheckServiceDep = Annotated[CheckService, Depends(get_check_service)]
@@ -80,3 +85,4 @@ SearchSettingsServiceDep = Annotated[SearchSettingsService, Depends(get_search_s
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]
 SeoServiceDep = Annotated[SeoService, Depends(get_seo_service)]
 SeoSettingsServiceDep = Annotated[SeoSettingsService, Depends(get_seo_settings_service)]
+ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]

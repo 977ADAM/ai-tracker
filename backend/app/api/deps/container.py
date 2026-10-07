@@ -19,6 +19,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from app.api.deps.checkpoints import agent_checkpointer, checkpoint_probe
 from app.api.deps.fallbacks import UnconfiguredAgentModel
 from app.core.config import Settings
+from app.db.chat import ChatRepository
 from app.db.connections import ConnectionRepository
 from app.db.runs import RunRepository
 from app.db.search_settings import SearchSettingsRepository
@@ -33,6 +34,7 @@ from app.domain.seo_tools import SeoBudget
 from app.domain.site_fetch import SiteFetcher
 from app.integrations.factory import build_provider
 from app.integrations.site_fetcher import HttpxSiteFetcher
+from app.service.chat import ChatService
 from app.service.checks import CheckService
 from app.service.config import ConfigService
 from app.service.connections import ConnectionService
@@ -68,6 +70,8 @@ class Container:
     seo: SeoRepository
     seo_service: SeoService
     seo_settings: SeoSettingsService
+    chats: ChatRepository
+    chat_service: ChatService
 
 
 def make_seo_toolbox_factory(
@@ -120,6 +124,8 @@ def build_container(
     seo_toolbox_factory: Callable[[str, SeoInput, SeoBudget], SeoToolbox] | None = None,
     seo_checkpointer: BaseCheckpointSaver | CheckpointFactory | None = None,
     fetcher: SiteFetcher | None = None,
+    chats: ChatRepository | None = None,
+    chat_service: ChatService | None = None,
 ) -> Container:
     """Assemble the services of one application; every collaborator is injectable."""
     secret_store = secrets or KeyringSecrets()
@@ -152,6 +158,11 @@ def build_container(
     if seo_repository is None:
         seo_repository = SeoRepository(Path(settings.config_dir))
     seo_repository.initialize()
+    # The chat repository owns the version-5 migration of the same file, so it
+    # always initializes after the SEO repository opened the file at version 4.
+    if chats is None:
+        chats = ChatRepository(Path(settings.config_dir))
+    chats.initialize()
     checks = CheckService(connections, factory)
     search = SearchService(None)
     search_settings = SearchSettingsService(
@@ -212,12 +223,21 @@ def build_container(
             checkpoint_probe=checkpoint_probe(Path(settings.config_dir)),
         )
         seo_service.recover()
+    form = FormService(connections)
+    if chat_service is None:
+        # The chat asks for its model on every turn, not once at build time: the
+        # application boots before the user configures the service LLM, so a
+        # client resolved here would freeze that unconfigured state.
+        chat_service = ChatService(
+            chats, seo_service, connections, form,
+            client_factory=seo_settings_service.build_client,
+        )
     return Container(
         settings=settings,
         repository=repository,
         connections=connections,
         checks=checks,
-        form=FormService(connections),
+        form=form,
         provider_settings=ProviderSettingsService(repository),
         config=ConfigService(Path(settings.config_dir)),
         search=search,
@@ -227,4 +247,6 @@ def build_container(
         seo=seo_repository,
         seo_service=seo_service,
         seo_settings=seo_settings_service,
+        chats=chats,
+        chat_service=chat_service,
     )

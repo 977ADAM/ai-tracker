@@ -343,12 +343,35 @@ def test_version_four_database_from_the_agent_migration_stays_readable(tmp_path,
         version.close()
 
 
+def test_version_five_database_from_the_chat_migration_stays_readable(tmp_path, run_input):
+    """The chat repository raises `user_version` to 5; runs must still open it."""
+    import sqlite3
+
+    repository = repo(tmp_path)
+    repository.create("run-1", run_input, {"p": "ChatGPT"}, "2026-09-25T14:00:00Z")
+    connection = sqlite3.connect(tmp_path / "runs.sqlite3")
+    connection.execute("PRAGMA user_version=5")
+    connection.commit()
+    connection.close()
+
+    reopened = repo(tmp_path)
+    reopened.recover_unfinished()
+    saved = reopened.get("run-1")
+    assert saved["status"] == "interrupted"
+    assert [row["status"] for row in saved["models"]] == ["interrupted", "interrupted"]
+    version = sqlite3.connect(tmp_path / "runs.sqlite3")
+    try:
+        assert version.execute("PRAGMA user_version").fetchone()[0] == 5
+    finally:
+        version.close()
+
+
 def test_a_newer_database_version_is_refused(tmp_path):
     import sqlite3
 
     path = tmp_path / "runs.sqlite3"
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA user_version=5")
+    connection.execute("PRAGMA user_version=6")
     connection.commit()
     connection.close()
 
@@ -358,6 +381,6 @@ def test_a_newer_database_version_is_refused(tmp_path):
 
     fresh = sqlite3.connect(path)
     try:
-        assert fresh.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert fresh.execute("PRAGMA user_version").fetchone()[0] == 6
     finally:
         fresh.close()

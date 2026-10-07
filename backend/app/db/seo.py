@@ -54,6 +54,10 @@ from app.domain.seo_report import build_report
 
 FILE_NAME = "runs.sqlite3"
 SCHEMA_VERSION = 4
+# A later owner of the shared file — the chat repository — raises `user_version`
+# to 5. This repository opens such a file and only writes its own version when
+# the file is older, so version 5 is never downgraded back to 4.
+MAX_FILE_VERSION = 5
 BUSY_TIMEOUT_MS = 5000
 STAGE_COUNT = 6
 
@@ -306,7 +310,7 @@ class SeoRepository:
         except OSError as exc:
             raise StorageError(STORAGE_FAILED) from exc
         version = self._read_version()
-        if version > SCHEMA_VERSION:
+        if version > MAX_FILE_VERSION:
             # A database written by a newer application version stays untouched.
             raise StorageError(STORAGE_FAILED)
         self._enable_wal()

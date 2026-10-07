@@ -449,17 +449,34 @@ def test_migration_from_populated_version_two_keeps_runs_and_adds_seo(tmp_path):
     assert saved["search"][0]["position"] == 2
 
 
+def test_a_version_five_file_from_the_chat_migration_is_not_downgraded(tmp_path):
+    """The chat repository owns version 5; opening the file must leave it there."""
+    path = tmp_path / DB_FILE
+    seo_repo(tmp_path)
+    raw = sqlite3.connect(path)
+    try:
+        raw.execute("PRAGMA user_version=5")
+        raw.commit()
+    finally:
+        raw.close()
+
+    repository = seo_repo(tmp_path)
+
+    assert user_version(path) == 5
+    assert create(repository)
+
+
 def test_newer_schema_version_is_refused_without_leaking_the_path(tmp_path):
     path = tmp_path / DB_FILE
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA user_version=5")
+    connection.execute("PRAGMA user_version=6")
     connection.commit()
     connection.close()
 
     with pytest.raises(StorageError) as raised:
         SeoRepository(tmp_path).initialize()
     assert str(path) not in str(raised.value)
-    assert user_version(path) == 5
+    assert user_version(path) == 6
 
 
 def test_unusable_database_file_fails_safely(tmp_path):

@@ -118,6 +118,8 @@ def test_openapi_documents_every_operation(client):
         "/api/seo/settings", "/api/seo/settings/credentials", "/api/seo/settings/test",
         "/api/seo/analyses", "/api/seo/analyses/{id}",
         "/api/seo/analyses/{id}/rows", "/api/seo/analyses/{id}/trace", "/api/seo/analyses/{id}/cancel",
+        "/api/seo/chats", "/api/seo/chats/{chat_id}",
+        "/api/seo/chats/{chat_id}/messages", "/api/seo/chats/{chat_id}/proposal",
     }
     for path, operations in spec["paths"].items():
         for method, operation in operations.items():
@@ -135,5 +137,8 @@ def test_openapi_documents_every_operation(client):
                  "SearchSettingsWriteRequest", "SearchSettingsResponse", "YandexSettingsResponse",
                  "SeoSettingsWriteRequest", "SeoSettingsResponse", "SeoSettingsTestResponse",
                  "SeoAnalysisRequest", "SeoAnalysisCreatedResponse", "SeoSnapshotResponse",
-                 "SeoHistoryPageResponse", "SeoRowsResponse"):
+                 "SeoHistoryPageResponse", "SeoRowsResponse",
+                 "ChatMessageRequest", "ProposalUpdateRequest", "ChatMessageResponse",
+                 "ChatSummaryResponse", "ChatListResponse", "ChatCreatedResponse",
+                 "ChatDetailResponse", "ChatMessagesResponse", "ProposalResponse"):
         assert name in spec["components"]["schemas"]
