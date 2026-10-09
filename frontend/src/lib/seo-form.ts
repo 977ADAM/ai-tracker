@@ -40,7 +40,7 @@ export const SEO_STAGE_LABELS: readonly string[] = [
   'Генерация запросов',
   'Проверки в ИИ и Поиске',
   'Анализ результатов',
-  'Отчёт'
+  'Отчёт',
 ];
 
 /**
@@ -55,7 +55,7 @@ export function estimateUpper(connections: number): SeoUpperEstimate {
     searchUpper: SEARCH_UPPER,
     modelUpper: connections > 0 ? MAX_MODEL_ANSWERS : 0,
     generatedLimit: GENERATED_QUERY_LIMIT,
-    connections
+    connections,
   };
 }
 
@@ -63,7 +63,7 @@ export function estimateUpper(connections: number): SeoUpperEstimate {
 export function estimateActual(queries: number, connections: number): SeoActualEstimate {
   return {
     searchActual: SEED_SEARCHES + queries,
-    modelActual: Math.min(queries * connections, MAX_MODEL_ANSWERS)
+    modelActual: Math.min(queries * connections, MAX_MODEL_ANSWERS),
   };
 }
 

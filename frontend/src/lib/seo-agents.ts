@@ -10,7 +10,7 @@ export const SEO_AGENT_LABELS: readonly { id: string; label: string }[] = [
   { id: 'site', label: 'Агент сайта' },
   { id: 'competitors', label: 'Агент конкурентов' },
   { id: 'queries', label: 'Агент запросов' },
-  { id: 'checks', label: 'Агент проверок' }
+  { id: 'checks', label: 'Агент проверок' },
 ];
 
 export const SEO_AGENT_STATUS_LABELS: Record<SeoAgentStatus, string> = {
@@ -19,7 +19,7 @@ export const SEO_AGENT_STATUS_LABELS: Record<SeoAgentStatus, string> = {
   waiting: 'Ждёт',
   done: 'Готово',
   error: 'Ошибка',
-  skipped: 'Пропущен'
+  skipped: 'Пропущен',
 };
 
 /** The Russian label of an agent; an unknown id is shown as the backend sent it. */

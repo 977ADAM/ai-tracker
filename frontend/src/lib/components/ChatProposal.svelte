@@ -6,7 +6,7 @@
     message,
     providers,
     busy = false,
-    onToggle
+    onToggle,
   }: {
     message: ChatMessage;
     providers: PublicProvider[];
@@ -16,8 +16,15 @@
 
   /** Every key the card reads; a run payload carries `analysis_id` instead. */
   const PROPOSAL_KEYS = [
-    'status', 'url', 'sphere', 'seeds', 'services', 'connection_ids',
-    'search_upper', 'model_upper', 'generated_limit'
+    'status',
+    'url',
+    'sphere',
+    'seeds',
+    'services',
+    'connection_ids',
+    'search_upper',
+    'model_upper',
+    'generated_limit',
   ] as const;
 
   /**
@@ -40,18 +47,22 @@
   const selected = $derived(new Set(proposal?.connection_ids ?? []));
   // The card is the only place a connection is chosen, so it lists the usable
   // ones only and never more than the run's own limit.
-  const chips = $derived(providers.filter((provider) => provider.configured).slice(0, MAX_CONNECTIONS));
-  const statusLabel = $derived(superseded ? 'Устарело' : confirmed ? 'Подтверждено' : 'Ожидает подтверждения');
+  const chips = $derived(
+    providers.filter((provider) => provider.configured).slice(0, MAX_CONNECTIONS),
+  );
+  const statusLabel = $derived(
+    superseded ? 'Устарело' : confirmed ? 'Подтверждено' : 'Ожидает подтверждения',
+  );
   const statusClass = $derived(
     superseded
       ? 'border-line bg-canvas text-muted'
       : confirmed
         ? 'border-accent/40 bg-accent-soft text-accent-dark'
-        : 'border-line bg-canvas/70 text-muted'
+        : 'border-line bg-canvas/70 text-muted',
   );
 
   const term = 'text-xs font-semibold text-muted';
-  const value = 'mt-1 text-sm leading-6 text-ink';
+  const value = 'mt-1 text-[13px] leading-5 text-ink';
 </script>
 
 {#if proposal}
@@ -59,14 +70,16 @@
     data-chat-proposal
     data-status={proposal.status}
     aria-label="Предложение параметров SEO-анализа"
-    class={`rounded-3xl border border-line px-5 py-4 shadow-sm ${superseded ? 'bg-canvas opacity-60' : 'bg-white'}`}
+    class={`rounded-xl border border-line px-3.5 py-1.5 shadow-sm ${superseded ? 'bg-canvas opacity-60' : 'bg-white'}`}
   >
     <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <h3 class="text-sm font-bold text-ink">Параметры SEO-анализа</h3>
-      <span class={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass}`}>{statusLabel}</span>
+      <h3 class="text-[13px] font-bold text-ink">Параметры SEO-анализа</h3>
+      <span class={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass}`}
+        >{statusLabel}</span
+      >
     </header>
 
-    <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+    <dl class="mt-2.5 grid gap-2.5 sm:grid-cols-2">
       <div class="min-w-0">
         <dt class={term}>Адрес сайта</dt>
         <dd class={`${value} break-words`}>{proposal.url}</dd>
@@ -78,8 +91,8 @@
       <div class="min-w-0">
         <dt class={term}>Ключевые запросы</dt>
         <dd>
-          <ul class="mt-1 space-y-1 text-sm leading-6 text-ink">
-            {#each proposal.seeds as seed}
+          <ul class="mt-1 space-y-1 text-[13px] leading-5 text-ink">
+            {#each proposal.seeds as seed (seed)}
               <li class="break-words">{seed}</li>
             {/each}
           </ul>
@@ -88,8 +101,8 @@
       <div class="min-w-0">
         <dt class={term}>Услуги</dt>
         <dd>
-          <ul class="mt-1 space-y-1 text-sm leading-6 text-ink">
-            {#each proposal.services as service}
+          <ul class="mt-1 space-y-1 text-[13px] leading-5 text-ink">
+            {#each proposal.services as service (service)}
               <li class="break-words">{service}</li>
             {/each}
           </ul>
@@ -97,16 +110,16 @@
       </div>
     </dl>
 
-    <p class="mt-4 border-t border-line pt-4 text-sm leading-6 text-ink">
+    <p class="mt-2.5 border-t border-line pt-4 text-[13px] leading-5 text-ink">
       Оценка: не больше {proposal.search_upper} поисковых запросов и {proposal.model_upper} ответов моделей.
     </p>
 
-    <fieldset class="mt-4 border-t border-line pt-4">
+    <fieldset class="mt-2.5 border-t border-line pt-4">
       <legend class={term}>Подключения моделей</legend>
       <div class="mt-2 flex flex-wrap gap-2">
         {#each chips as provider (provider.id)}
           <label
-            class={`inline-flex items-center gap-2 rounded-full border border-line bg-canvas/50 px-3 py-1.5 text-sm text-ink ${blocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-accent/50'}`}
+            class={`inline-flex items-center gap-2 rounded-full border border-line bg-canvas/50 px-3 py-1.5 text-[13px] text-ink ${blocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-accent/50'}`}
           >
             <input
               type="checkbox"

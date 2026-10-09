@@ -15,7 +15,9 @@ export function availableSearchEngines(settings: YandexSearchSettings | null): S
 }
 
 export function enabledRegionTargets(
-  regions: (number | '')[], engines: SearchEngine[], available: SearchEngine[]
+  regions: (number | '')[],
+  engines: SearchEngine[],
+  available: SearchEngine[],
 ): RegionTarget[] {
   return regions.flatMap((region, index) => {
     const engine = engines[index] ?? 'yandex';
@@ -67,7 +69,8 @@ export function validateRun(input: RunInput): string | null {
   const searching = input.regions.length > 0;
   const checking = input.providerIds.length > 0;
 
-  if (!searching && !checking) return 'Выберите хотя бы одну модель или добавьте регион для поиска в Яндексе';
+  if (!searching && !checking)
+    return 'Выберите хотя бы одну модель или добавьте регион для поиска в Яндексе';
   if (!prompts.length) return 'Введите хотя бы один вопрос';
   if (prompts.length > MAX_PROMPTS) return `Не больше ${MAX_PROMPTS} вопросов`;
 
@@ -81,7 +84,8 @@ export function validateRun(input: RunInput): string | null {
   if (searching) {
     if (!input.domain.trim()) return 'Укажите сайт: без него поиск в Яндексе невозможен';
     if (input.regions.length > MAX_REGIONS) return `Не больше ${MAX_REGIONS} регионов`;
-    if (new Set(input.regions).size !== input.regions.length) return 'Один регион можно выбрать только один раз';
+    if (new Set(input.regions).size !== input.regions.length)
+      return 'Один регион можно выбрать только один раз';
     if (prompts.some((prompt) => prompt.length > MAX_SEARCH_PROMPT_LENGTH)) {
       return `Для поиска в Яндексе вопрос должен быть не длиннее ${MAX_SEARCH_PROMPT_LENGTH} символов`;
     }

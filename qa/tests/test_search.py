@@ -190,7 +190,9 @@ def test_the_run_card_shows_six_stages_and_reaches_the_report(page: Page, api) -
     expect(chat.cancel_button).to_have_count(0)
     expect(chat.report()).to_be_visible()
     assert chat.metric_text("site-overall") == "50 %"
-    assert chat.metric_text("category-informational") == "—"
+    # The report is numbers-only and compact: no breakdown table, no counters block.
+    expect(page.locator("[data-report-counters]")).to_have_count(0)
+    expect(page.get_by_role("table", name="Разрезы по категориям")).to_have_count(0)
     expect(chat.report_status).to_have_text("Завершён")
 
 

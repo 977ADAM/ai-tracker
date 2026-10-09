@@ -1,6 +1,12 @@
 <script lang="ts">
   import type {
-    ChatMessage, PublicProvider, SeoAnalysisSnapshot, SeoModelRow, SeoRowsKind, SeoSearchRow, SeoTraceStep
+    ChatMessage,
+    PublicProvider,
+    SeoAnalysisSnapshot,
+    SeoModelRow,
+    SeoRowsKind,
+    SeoSearchRow,
+    SeoTraceStep,
   } from '$lib/types';
   import ChatRun from './ChatRun.svelte';
   import ChatMessageCard from './ChatMessage.svelte';
@@ -8,7 +14,12 @@
 
   type RowsState = { model: SeoModelRow[]; search: SeoSearchRow[] };
   type CursorsState = { model: string | null; search: string | null };
-  type TraceState = { steps: SeoTraceStep[]; cursor: string | null; loading: boolean; error: string };
+  type TraceState = {
+    steps: SeoTraceStep[];
+    cursor: string | null;
+    loading: boolean;
+    error: string;
+  };
 
   const EMPTY_ROWS: RowsState = { model: [], search: [] };
   const EMPTY_CURSORS: CursorsState = { model: null, search: null };
@@ -38,7 +49,7 @@
     onLoadRows = () => {},
     onLoadTrace = () => {},
     onOpenReport = () => {},
-    onLoadOlder = () => {}
+    onLoadOlder = () => {},
   }: {
     messages: ChatMessage[];
     providers: PublicProvider[];
@@ -63,7 +74,9 @@
   /** The message the feed last scrolled to; prepending older ones must not move it. */
   let newestId: string | null = null;
 
-  const connectionNames = $derived(Object.fromEntries(providers.map((provider) => [provider.id, provider.name])));
+  const connectionNames = $derived(
+    Object.fromEntries(providers.map((provider) => [provider.id, provider.name])),
+  );
 
   function traceOf(analysisId: string): TraceState {
     return traces[analysisId] ?? EMPTY_TRACE;
@@ -99,7 +112,7 @@
   data-chat-feed
   role="log"
   aria-label="Лента сообщений"
-  class="flex max-h-[60vh] min-h-64 flex-col gap-4 overflow-y-auto rounded-3xl border border-line bg-canvas/30 px-4 py-5 sm:px-5"
+  class="flex max-h-[62vh] min-h-56 flex-col gap-2.5 overflow-y-auto rounded-xl border border-line bg-canvas/30 px-3 py-3 sm:px-5"
 >
   {#if olderCursor !== null}
     <div class="flex justify-center">
@@ -107,7 +120,7 @@
         type="button"
         onclick={onLoadOlder}
         disabled={loadingOlder}
-        class="inline-flex min-h-11 items-center rounded-xl border border-line bg-white px-5 py-2.5 text-sm font-semibold text-ink hover:border-accent disabled:opacity-50"
+        class="inline-flex min-h-8 items-center rounded-xl border border-line bg-white px-5 py-1.5 text-[13px] font-semibold text-ink hover:border-accent disabled:opacity-50"
       >
         {loadingOlder ? 'Загружаем…' : 'Показать более ранние'}
       </button>
@@ -115,7 +128,9 @@
   {/if}
 
   {#if messages.length === 0}
-    <p class="px-1 py-8 text-center text-sm text-muted">Сообщений пока нет. Напишите первое сообщение о сайте.</p>
+    <p class="px-1 py-8 text-center text-[13px] text-muted">
+      Сообщений пока нет. Напишите первое сообщение о сайте.
+    </p>
   {:else}
     {#each messages as message (message.id)}
       {@const analysisId = message.kind === 'run' ? runId(message) : null}

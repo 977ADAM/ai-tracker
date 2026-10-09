@@ -158,7 +158,10 @@
 | `make install` | `uv sync` в backend и `npm ci` в frontend |
 | `make backend` | Python API на `127.0.0.1:8000` |
 | `make frontend` | SvelteKit dev-сервер на `127.0.0.1:5173` |
-| `make check` | `svelte-check` по TypeScript и Svelte |
+| `make check` | Типы, форматирование и линт интерфейса: `types`, `format-check`, `lint` |
+| `make types` | `svelte-check` по TypeScript и Svelte |
+| `make lint`, `make lint-fix` | ESLint (flat-конфиг с `typescript-eslint` и `eslint-plugin-svelte`) и его автофиксы |
+| `make format`, `make format-check` | Prettier с плагинами Svelte и Tailwind: форматирование и проверка |
 | `make build`, `make frontend-prod` | Сборка интерфейса и запуск собранного |
 | `make ruff` | `ruff check --fix` в backend |
 | `make docker-up`, `make docker-down`, `make docker-logs` | Стек в Docker Compose |
@@ -169,7 +172,9 @@
 - Backend-тесты: `cd backend && uv run pytest` — модули в [backend/tests](backend/tests) по слоям
   (api, db, domain, integrations, service) на фейках, без внешних вызовов.
 - Frontend-тесты: `cd frontend && npx vitest run` — тесты лежат рядом с кодом (`*.test.ts`);
-  отдельного скрипта `test` в `package.json` нет.
+  отдельного скрипта `test` в `package.json` нет. Форматирование и правила заданы
+  `frontend/.prettierrc.json` и `frontend/eslint.config.js`, команды — `npm run format`,
+  `format:check`, `lint` и `lint:fix`.
 - Сквозные проверки: [qa](qa/README.md) — Playwright в настоящем браузере; требует поднятых
   `make backend` и `make frontend`, платные API не вызывает и подменяет ответы через `page.route`.
 

@@ -11,8 +11,12 @@
 
   function dateLabel(value: string): string {
     return new Date(value).toLocaleString('ru-RU', {
-      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-      timeZone: 'Europe/Moscow'
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Moscow',
     });
   }
 </script>
@@ -21,13 +25,18 @@
   <article
     data-chat-message
     data-role={message.role}
-    class={`rounded-3xl border border-line px-5 py-4 shadow-sm ${mine ? 'bg-accent-soft' : 'bg-white'}`}
+    class={`rounded-xl border border-line px-3.5 py-1.5 shadow-sm ${mine ? 'bg-accent-soft' : 'bg-white'}`}
     aria-label={mine ? 'Ваше сообщение' : 'Сообщение ассистента'}
   >
     <p class="flex flex-wrap items-center gap-x-2 text-xs text-muted">
       <span class="font-bold text-ink">{mine ? 'Вы' : 'Ассистент'}</span>
       <span>{dateLabel(message.created_at)}</span>
     </p>
-    <p data-chat-message-text class="mt-2 text-sm leading-6 whitespace-pre-wrap break-words text-ink">{text}</p>
+    <p
+      data-chat-message-text
+      class="mt-2 text-[13px] leading-5 break-words whitespace-pre-wrap text-ink"
+    >
+      {text}
+    </p>
   </article>
 {/if}

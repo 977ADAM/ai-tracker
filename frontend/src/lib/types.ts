@@ -1,14 +1,31 @@
 export type ApiPath =
   | '/api/config'
-  | '/api/providers' | '/api/check' | '/api/form' | '/api/providers/settings'
-  | '/api/search' | '/api/search/regions' | '/api/search/settings' | '/api/search/settings/credentials'
-  | '/api/runs' | `/api/runs?cursor=${string}` | `/api/runs/${string}`
-  | '/api/seo/settings' | '/api/seo/settings/credentials' | '/api/seo/settings/test'
-  | '/api/seo/chats' | `/api/seo/chats/${string}`
-  | `/api/seo/chats/${string}/messages` | `/api/seo/chats/${string}/proposal`
-  | '/api/seo/analyses' | `/api/seo/analyses?cursor=${string}` | `/api/seo/analyses/${string}`
-  | `/api/seo/analyses/${string}/trace` | `/api/seo/analyses/${string}/trace?cursor=${string}`
-  | `/api/providers/settings/${string}` | `/api/providers/${string}` | `/api/search/${string}`;
+  | '/api/providers'
+  | '/api/check'
+  | '/api/form'
+  | '/api/providers/settings'
+  | '/api/search'
+  | '/api/search/regions'
+  | '/api/search/settings'
+  | '/api/search/settings/credentials'
+  | '/api/runs'
+  | `/api/runs?cursor=${string}`
+  | `/api/runs/${string}`
+  | '/api/seo/settings'
+  | '/api/seo/settings/credentials'
+  | '/api/seo/settings/test'
+  | '/api/seo/chats'
+  | `/api/seo/chats/${string}`
+  | `/api/seo/chats/${string}/messages`
+  | `/api/seo/chats/${string}/proposal`
+  | '/api/seo/analyses'
+  | `/api/seo/analyses?cursor=${string}`
+  | `/api/seo/analyses/${string}`
+  | `/api/seo/analyses/${string}/trace`
+  | `/api/seo/analyses/${string}/trace?cursor=${string}`
+  | `/api/providers/settings/${string}`
+  | `/api/providers/${string}`
+  | `/api/search/${string}`;
 
 export type SettingsModel = { id: string; model: string; name: string };
 export type SettingsProvider = {
@@ -21,7 +38,13 @@ export type SettingsProvider = {
 };
 
 export type FormConfig = {
-  limits: { max_prompts: number; max_providers: number; max_prompt_length: number; max_brand_length: number; max_domain_length: number };
+  limits: {
+    max_prompts: number;
+    max_providers: number;
+    max_prompt_length: number;
+    max_brand_length: number;
+    max_domain_length: number;
+  };
   new_provider_fields: string[];
   default_provider_ids: string[];
 };
@@ -64,9 +87,23 @@ export type ProviderCheck = {
   results: CheckResult[];
 };
 
-export type CheckSummary = { successful: number; failed: number; mentioned: number; mention_percent: number | null; visibility_label: string; mentions_label: string; errors_label: string };
+export type CheckSummary = {
+  successful: number;
+  failed: number;
+  mentioned: number;
+  mention_percent: number | null;
+  visibility_label: string;
+  mentions_label: string;
+  errors_label: string;
+};
 export type CheckRow = CheckResult & { provider_name: string };
-export type CheckResponse = { brand: string; domain: string; checks: ProviderCheck[]; summary: CheckSummary; rows: CheckRow[] };
+export type CheckResponse = {
+  brand: string;
+  domain: string;
+  checks: ProviderCheck[];
+  summary: CheckSummary;
+  rows: CheckRow[];
+};
 
 export type SearchRegion = { id: number; name: string };
 
@@ -108,25 +145,59 @@ export type SearchSnapshot = {
 
 export type RunStatus = 'pending' | 'done' | 'interrupted';
 export type RunCreated = { id: string; status: RunStatus };
-export type RunHistoryItem = { id: string; created_at: string; status: RunStatus; prompts: string[] };
+export type RunHistoryItem = {
+  id: string;
+  created_at: string;
+  status: RunStatus;
+  prompts: string[];
+};
 export type RunHistoryPage = { items: RunHistoryItem[]; next_cursor: string | null };
 export type RunSummaryRow = {
-  prompt: string; source: string; language: string; region: string; ai_answer: string;
-  site_found: string; position: string; brand_found: string; status: string;
+  prompt: string;
+  source: string;
+  language: string;
+  region: string;
+  ai_answer: string;
+  site_found: string;
+  position: string;
+  brand_found: string;
+  status: string;
 };
 export type RunModelRow = {
-  provider_id: string; prompt_index: number; provider_name: string; prompt: string;
-  status: string; answer: string | null; mentioned: boolean | null; error: string | null;
+  provider_id: string;
+  prompt_index: number;
+  provider_name: string;
+  prompt: string;
+  status: string;
+  answer: string | null;
+  mentioned: boolean | null;
+  error: string | null;
 };
 export type RunSearchRow = {
-  search_index: number; prompt_index: number; region_index: number; prompt: string;
-  region_id: number; region_name: string; status: string; position: number | null;
-  url: string | null; error: string | null;
+  search_index: number;
+  prompt_index: number;
+  region_index: number;
+  prompt: string;
+  region_id: number;
+  region_name: string;
+  status: string;
+  position: number | null;
+  url: string | null;
+  error: string | null;
 };
 export type RunSnapshot = {
-  id: string; created_at: string; finished_at: string | null; status: RunStatus;
-  brand: string; domain: string; prompts: string[]; provider_ids: string[]; regions: number[];
-  models: RunModelRow[]; search: RunSearchRow[]; summary_rows: RunSummaryRow[];
+  id: string;
+  created_at: string;
+  finished_at: string | null;
+  status: RunStatus;
+  brand: string;
+  domain: string;
+  prompts: string[];
+  provider_ids: string[];
+  regions: number[];
+  models: RunModelRow[];
+  search: RunSearchRow[];
+  summary_rows: RunSummaryRow[];
 };
 
 /** Per-field origin of a resolved SEO setting: UI override, environment, or unset. */
@@ -143,12 +214,17 @@ export type SeoSettings = {
 };
 
 /** The availability probe: whether the model answered and whether it can call tools. */
-export type SeoSettingsTest = { ok: boolean; model: string | null; error: string | null; tools: boolean | null };
+export type SeoSettingsTest = {
+  ok: boolean;
+  model: string | null;
+  error: string | null;
+  tools: boolean | null;
+};
 
 export type SeoAnalysisStatus = 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled';
 export type SeoStageStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
 export type SeoRowStatus =
-  | 'pending' | 'submitting' | 'waiting' | 'found' | 'absent' | 'error' | 'interrupted' | 'cancelled';
+  'pending' | 'submitting' | 'waiting' | 'found' | 'absent' | 'error' | 'interrupted' | 'cancelled';
 export type SeoRowsKind = 'model' | 'search';
 
 export type SeoEstimate = {

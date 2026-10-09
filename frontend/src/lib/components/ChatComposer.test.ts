@@ -43,13 +43,17 @@ describe('ChatComposer', () => {
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: '   ' } });
     await fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     expect(onSend).not.toHaveBeenCalled();
-    expect((screen.getByRole('button', { name: 'Отправить' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Отправить' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it('disables the composer while an answer is pending', () => {
     render(ChatComposer, { props: { onSend: vi.fn(), busy: true } });
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Отправляем…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: 'Отправляем…' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it('disables the composer when the page says so', () => {

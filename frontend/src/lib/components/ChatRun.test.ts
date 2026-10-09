@@ -4,49 +4,88 @@ import { describe, expect, it, vi } from 'vitest';
 import ChatRun from './ChatRun.svelte';
 import type { SeoAnalysisSnapshot, SeoSearchRow, SeoStage, SeoTraceStep } from '$lib/types';
 
-function stage(stageNumber: number, status: SeoStage['status'], error: string | null = null): SeoStage {
+function stage(
+  stageNumber: number,
+  status: SeoStage['status'],
+  error: string | null = null,
+): SeoStage {
   return { stage: stageNumber, status, error, counters: {}, updated_at: '2026-10-07T10:00:00Z' };
 }
 
 /** The six pending rows the backend answers with for a pre-agent analysis. */
-const legacyAgents = ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report']
-  .map((agent) => ({ agent, status: 'pending' as const, error: null, updated_at: null }));
+const legacyAgents = ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report'].map(
+  (agent) => ({ agent, status: 'pending' as const, error: null, updated_at: null }),
+);
 
 function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
   return {
-    id: 'a-1', status: 'running', created_at: '2026-10-07T10:00:00Z', updated_at: '2026-10-07T10:00:00Z',
+    id: 'a-1',
+    status: 'running',
+    created_at: '2026-10-07T10:00:00Z',
+    updated_at: '2026-10-07T10:00:00Z',
     finished_at: null,
     input: {
-      url: 'https://example.ru', host: 'example.ru', sphere: 'Доставка цветов',
-      seeds: ['купить цветы', 'доставка букетов', 'заказать розы'], services: ['Сборка букетов'],
-      connection_ids: ['model-1']
+      url: 'https://example.ru',
+      host: 'example.ru',
+      sphere: 'Доставка цветов',
+      seeds: ['купить цветы', 'доставка букетов', 'заказать розы'],
+      services: ['Сборка букетов'],
+      connection_ids: ['model-1'],
     },
     estimate: { search_upper: 23, model_upper: 40, generated_limit: 20, connections: 1 },
-    company_name: 'Ромашка', services: ['Сборка букетов'], pages: [],
+    company_name: 'Ромашка',
+    services: ['Сборка букетов'],
+    pages: [],
     stages: [stage(1, 'done'), stage(2, 'running')],
     agents: legacyAgents,
-    candidates: [], queries: [],
+    candidates: [],
+    queries: [],
     counters: { queries: 12, search_rows: 4, model_rows: 6, search_errors: 1, model_errors: 2 },
     readiness: {
-      report_ready: false, summary_ready: false, queries_ready: true, has_submitted_search_rows: true,
-      has_unsubmitted_search_rows: true, has_unfinished_model_rows: true, search_rows: 12, model_rows: 24
+      report_ready: false,
+      summary_ready: false,
+      queries_ready: true,
+      has_submitted_search_rows: true,
+      has_unsubmitted_search_rows: true,
+      has_unfinished_model_rows: true,
+      search_rows: 12,
+      model_rows: 24,
     },
-    aggregates: { site: { search: {}, ai: {} }, competitors: [], categories: {}, services: {}, counts: {} },
-    ...overrides
+    aggregates: {
+      site: { search: {}, ai: {} },
+      competitors: [],
+      categories: {},
+      services: {},
+      counts: {},
+    },
+    ...overrides,
   } as unknown as SeoAnalysisSnapshot;
 }
 
 function searchRow(query: string): SeoSearchRow {
   return {
-    query_index: 1, query, category: null, service: null, status: 'found',
-    site_position: 3, site_url: 'https://example.ru/page', error: null
+    query_index: 1,
+    query,
+    category: null,
+    service: null,
+    status: 'found',
+    site_position: 3,
+    site_url: 'https://example.ru/page',
+    error: null,
   };
 }
 
 function traceStep(name: string): SeoTraceStep {
   return {
-    step_index: 1, agent: 'supervisor', kind: 'tool', name, arguments: { url: 'https://example.ru' },
-    result_summary: 'Готово', status: 'done', error: null, created_at: '2026-10-07T10:00:00Z'
+    step_index: 1,
+    agent: 'supervisor',
+    kind: 'tool',
+    name,
+    arguments: { url: 'https://example.ru' },
+    result_summary: 'Готово',
+    status: 'done',
+    error: null,
+    created_at: '2026-10-07T10:00:00Z',
   };
 }
 
@@ -58,7 +97,7 @@ function runProps(overrides: Record<string, unknown> = {}) {
     onMoreRows: vi.fn(),
     onMoreTrace: vi.fn(),
     onOpenReport: vi.fn(),
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -77,7 +116,9 @@ describe('ChatRun', () => {
   });
 
   it('hides the report again on a second click', async () => {
-    const { container } = render(ChatRun, { props: runProps({ snapshot: snapshot({ status: 'completed' }) }) });
+    const { container } = render(ChatRun, {
+      props: runProps({ snapshot: snapshot({ status: 'completed' }) }),
+    });
     const toggle = screen.getByRole('button', { name: /открыть отчёт/i });
     await fireEvent.click(toggle);
     expect(container.querySelector('[data-seo-report]')).not.toBeNull();
@@ -89,7 +130,9 @@ describe('ChatRun', () => {
 
   it('asks the parent for the report only when the report is opened', async () => {
     const onOpenReport = vi.fn();
-    render(ChatRun, { props: runProps({ snapshot: snapshot({ status: 'completed' }), onOpenReport }) });
+    render(ChatRun, {
+      props: runProps({ snapshot: snapshot({ status: 'completed' }), onOpenReport }),
+    });
     expect(onOpenReport).not.toHaveBeenCalled();
 
     await fireEvent.click(screen.getByRole('button', { name: /открыть отчёт/i }));
@@ -109,7 +152,9 @@ describe('ChatRun', () => {
 
   it('shows the trace of the run', async () => {
     const { container } = render(ChatRun, {
-      props: runProps({ traces: { steps: [traceStep('site_fetch')], cursor: null, loading: false, error: '' } })
+      props: runProps({
+        traces: { steps: [traceStep('site_fetch')], cursor: null, loading: false, error: '' },
+      }),
     });
     expect(container.querySelector('[data-trace-feed]')).not.toBeNull();
     await fireEvent.click(screen.getByRole('button', { name: /показать трассу/i }));
@@ -121,9 +166,14 @@ describe('ChatRun', () => {
     const { container } = render(ChatRun, {
       props: runProps({
         snapshot: snapshot({ status: 'completed' }),
-        traces: { steps: [traceStep('site_fetch')], cursor: 'trace-page-2', loading: false, error: '' },
-        onMoreTrace
-      })
+        traces: {
+          steps: [traceStep('site_fetch')],
+          cursor: 'trace-page-2',
+          loading: false,
+          error: '',
+        },
+        onMoreTrace,
+      }),
     });
 
     // The heavy block stays unmounted until the user asks for it.
@@ -145,7 +195,7 @@ describe('ChatRun', () => {
       ['completed', 'Завершён', /Анализ завершён/],
       ['failed', 'Ошибка', /ошибки этапа/],
       ['interrupted', 'Прерван', /прерван перезапуском/],
-      ['cancelled', 'Отменён', /Анализ отменён/]
+      ['cancelled', 'Отменён', /Анализ отменён/],
     ] as const) {
       const view = render(ChatRun, { props: runProps({ snapshot: snapshot({ status }) }) });
       expect(view.container.querySelector('[data-run-status]')?.textContent?.trim()).toBe(label);
@@ -168,8 +218,8 @@ describe('ChatRun', () => {
     render(ChatRun, {
       props: runProps({
         snapshot: snapshot({ status: 'completed' }),
-        rows: { model: [], search: [searchRow('купить цветы в Москве')] }
-      })
+        rows: { model: [], search: [searchRow('купить цветы в Москве')] },
+      }),
     });
     await fireEvent.click(screen.getByRole('button', { name: /открыть отчёт/i }));
     expect(screen.getByText('купить цветы в Москве')).toBeTruthy();

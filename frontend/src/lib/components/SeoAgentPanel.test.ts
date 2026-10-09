@@ -9,32 +9,63 @@ const agents: SeoAgent[] = [
   { agent: 'site', status: 'error', error: 'Сайт недоступен', updated_at: '2026-09-28T00:03:00Z' },
   { agent: 'competitors', status: 'waiting', error: null, updated_at: '2026-09-28T00:05:00Z' },
   { agent: 'queries', status: 'running', error: null, updated_at: '2026-09-28T00:06:00Z' },
-  { agent: 'checks', status: 'skipped', error: null, updated_at: '2026-09-28T00:07:00Z' }
+  { agent: 'checks', status: 'skipped', error: null, updated_at: '2026-09-28T00:07:00Z' },
 ];
 
 function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
   return {
-    id: 'seo-1', status: 'running', created_at: '2026-09-28T00:00:00Z', updated_at: '2026-09-28T00:10:00Z',
+    id: 'seo-1',
+    status: 'running',
+    created_at: '2026-09-28T00:00:00Z',
+    updated_at: '2026-09-28T00:10:00Z',
     finished_at: null,
-    input: { url: 'https://example.ru', host: 'example.ru', sphere: 'Цветы', seeds: ['а', 'б', 'в'], services: ['с'], connection_ids: ['model-1'] },
+    input: {
+      url: 'https://example.ru',
+      host: 'example.ru',
+      sphere: 'Цветы',
+      seeds: ['а', 'б', 'в'],
+      services: ['с'],
+      connection_ids: ['model-1'],
+    },
     estimate: { search_upper: 43, model_upper: 40, generated_limit: 40, connections: 1 },
-    company_name: 'Ромашка', services: ['с'], pages: [], stages: [],
+    company_name: 'Ромашка',
+    services: ['с'],
+    pages: [],
+    stages: [],
     agents,
     budget: {
-      pages: { used: 3, limit: 20 }, searches: { used: 5, limit: 43 },
-      model_answers: { used: 4, limit: 40 }, tool_calls: { used: 9, limit: 120 },
-      handoffs: { used: 5, limit: 15 }, seed_searches: 3, model_rows: 4, steps: 12,
-      agent_steps: { supervisor: 4, site: 3 }
+      pages: { used: 3, limit: 20 },
+      searches: { used: 5, limit: 43 },
+      model_answers: { used: 4, limit: 40 },
+      tool_calls: { used: 9, limit: 120 },
+      handoffs: { used: 5, limit: 15 },
+      seed_searches: 3,
+      model_rows: 4,
+      steps: 12,
+      agent_steps: { supervisor: 4, site: 3 },
     },
     budget_exhausted: false,
-    candidates: [], queries: [],
+    candidates: [],
+    queries: [],
     counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 0, model_errors: 0 },
     readiness: {
-      report_ready: false, summary_ready: false, queries_ready: true, has_submitted_search_rows: true,
-      has_unsubmitted_search_rows: false, has_unfinished_model_rows: false, search_rows: 4, model_rows: 4
+      report_ready: false,
+      summary_ready: false,
+      queries_ready: true,
+      has_submitted_search_rows: true,
+      has_unsubmitted_search_rows: false,
+      has_unfinished_model_rows: false,
+      search_rows: 4,
+      model_rows: 4,
     },
-    aggregates: { site: { search: {} as never, ai: {} }, competitors: [], categories: {}, services: {}, counts: {} as never },
-    ...overrides
+    aggregates: {
+      site: { search: {} as never, ai: {} },
+      competitors: [],
+      categories: {},
+      services: {},
+      counts: {} as never,
+    },
+    ...overrides,
   } as unknown as SeoAnalysisSnapshot;
 }
 
@@ -60,7 +91,7 @@ describe('SeoAgentPanel', () => {
       expect.stringContaining('Агент сайта'),
       expect.stringContaining('Агент конкурентов'),
       expect.stringContaining('Агент запросов'),
-      expect.stringContaining('Агент проверок')
+      expect.stringContaining('Агент проверок'),
     ]);
 
     expect(status('supervisor')).toBe('Готово');
@@ -72,7 +103,9 @@ describe('SeoAgentPanel', () => {
     expect(agent('supervisor').textContent).toContain('Шагов: 4');
     expect(agent('site').textContent).toContain('Шагов: 3');
     expect(agent('site').textContent).toContain('Сайт недоступен');
-    expect(agent('site').querySelector('[data-agent-error]')?.textContent).toContain('Сайт недоступен');
+    expect(agent('site').querySelector('[data-agent-error]')?.textContent).toContain(
+      'Сайт недоступен',
+    );
   });
 
   it('shows every missing agent as pending instead of dropping it', () => {

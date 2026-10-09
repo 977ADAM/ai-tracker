@@ -1,16 +1,33 @@
 <script lang="ts">
-  import { base } from '$app/paths';
+  import { base, resolve } from '$app/paths';
   import { onDestroy, onMount, untrack } from 'svelte';
   import ChatSidebar from '$lib/components/ChatSidebar.svelte';
   import ChatFeed from '$lib/components/ChatFeed.svelte';
   import ChatComposer from '$lib/components/ChatComposer.svelte';
   import type {
-    ChatCreated, ChatMessage, ChatMessages, ChatPage, ChatProposal, ChatProposalUpdated, ChatSummary,
-    PublicProvider, SeoAnalysisSnapshot, SeoModelRow, SeoRowsKind, SeoRowsPage, SeoSearchRow,
-    SeoTracePage, SeoTraceStep
+    ChatCreated,
+    ChatMessage,
+    ChatMessages,
+    ChatPage,
+    ChatProposal,
+    ChatProposalUpdated,
+    ChatSummary,
+    PublicProvider,
+    SeoAnalysisSnapshot,
+    SeoModelRow,
+    SeoRowsKind,
+    SeoRowsPage,
+    SeoSearchRow,
+    SeoTracePage,
+    SeoTraceStep,
   } from '$lib/types';
 
-  type TraceState = { steps: SeoTraceStep[]; cursor: string | null; loading: boolean; error: string };
+  type TraceState = {
+    steps: SeoTraceStep[];
+    cursor: string | null;
+    loading: boolean;
+    error: string;
+  };
   type RowsState = { model: SeoModelRow[]; search: SeoSearchRow[] };
   type CursorsState = { model: string | null; search: string | null };
 
@@ -58,12 +75,19 @@
   const tracePaged = new Set<string>();
 
   function detail(value: unknown, fallback: string): string {
-    return value !== null && typeof value === 'object' && 'detail' in value && typeof value.detail === 'string'
-      ? value.detail : fallback;
+    return value !== null &&
+      typeof value === 'object' &&
+      'detail' in value &&
+      typeof value.detail === 'string'
+      ? value.detail
+      : fallback;
   }
   async function payload(response: Response): Promise<unknown> {
-    try { return await response.json(); }
-    catch { return null; }
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
   }
 
   /** The analysis a run message points at; a malformed card owns no run. */
@@ -103,13 +127,22 @@
       return;
     }
     const timer = pollTimers.get(id);
-    if (timer !== undefined) { clearTimeout(timer); pollTimers.delete(id); }
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      pollTimers.delete(id);
+    }
   }
 
   /** The one interval of the screen: the same 30 seconds the old page used. */
   function schedulePoll(id: string): void {
     stopPolling(id);
-    pollTimers.set(id, setTimeout(() => { pollTimers.delete(id); void loadSnapshot(id); }, POLL_INTERVAL_MS));
+    pollTimers.set(
+      id,
+      setTimeout(() => {
+        pollTimers.delete(id);
+        void loadSnapshot(id);
+      }, POLL_INTERVAL_MS),
+    );
   }
 
   async function loadSnapshot(id: string): Promise<void> {
@@ -123,8 +156,13 @@
       snapshots = { ...snapshots, [id]: current };
       runError = '';
       // Only a live run is polled; a terminal one stops until the chat is reopened.
-      if (current.status === 'running') { void syncTrace(id); schedulePoll(id); }
-      else { stopPolling(id); markChatStopped(analysisChat.get(id) ?? null); }
+      if (current.status === 'running') {
+        void syncTrace(id);
+        schedulePoll(id);
+      } else {
+        stopPolling(id);
+        markChatStopped(analysisChat.get(id) ?? null);
+      }
     } catch (cause) {
       if (destroyed || analysisChat.get(id) !== activeId) return;
       runError = cause instanceof Error ? cause.message : 'Не удалось загрузить прогон';
@@ -145,7 +183,10 @@
       const known = snapshots[id];
       if (known === undefined) void loadSnapshot(id);
       else if (known.status === 'running') schedulePoll(id);
-      else { stopPolling(id); markChatStopped(chatId); }
+      else {
+        stopPolling(id);
+        markChatStopped(chatId);
+      }
     }
   }
 
@@ -162,11 +203,19 @@
     tracePaged.clear();
   }
 
-  async function loadRows(id: string, kind: SeoRowsKind, cursor: string | null, append: boolean): Promise<void> {
+  async function loadRows(
+    id: string,
+    kind: SeoRowsKind,
+    cursor: string | null,
+    append: boolean,
+  ): Promise<void> {
     loadingRows = { ...loadingRows, [id]: kind };
     try {
-      const query = cursor === null ? `kind=${kind}` : `kind=${kind}&cursor=${encodeURIComponent(cursor)}`;
-      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/rows?${query}`);
+      const query =
+        cursor === null ? `kind=${kind}` : `kind=${kind}&cursor=${encodeURIComponent(cursor)}`;
+      const response = await fetch(
+        `${base}/api/seo/analyses/${encodeURIComponent(id)}/rows?${query}`,
+      );
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить строки отчёта'));
       if (destroyed) return;
@@ -174,16 +223,28 @@
       const current = rows[id] ?? EMPTY_ROWS;
       if (kind === 'model') {
         const items = page.items as SeoModelRow[];
-        rows = { ...rows, [id]: { model: append ? [...current.model, ...items] : items, search: current.search } };
+        rows = {
+          ...rows,
+          [id]: { model: append ? [...current.model, ...items] : items, search: current.search },
+        };
       } else {
         const items = page.items as SeoSearchRow[];
-        rows = { ...rows, [id]: { model: current.model, search: append ? [...current.search, ...items] : items } };
+        rows = {
+          ...rows,
+          [id]: { model: current.model, search: append ? [...current.search, ...items] : items },
+        };
       }
-      cursors = { ...cursors, [id]: { ...(cursors[id] ?? EMPTY_CURSORS), [kind]: page.next_cursor } };
+      cursors = {
+        ...cursors,
+        [id]: { ...(cursors[id] ?? EMPTY_CURSORS), [kind]: page.next_cursor },
+      };
       rowErrors = { ...rowErrors, [id]: '' };
     } catch (cause) {
       if (destroyed) return;
-      rowErrors = { ...rowErrors, [id]: cause instanceof Error ? cause.message : 'Не удалось загрузить строки отчёта' };
+      rowErrors = {
+        ...rowErrors,
+        [id]: cause instanceof Error ? cause.message : 'Не удалось загрузить строки отчёта',
+      };
     } finally {
       if (!destroyed && loadingRows[id] === kind) loadingRows = { ...loadingRows, [id]: null };
     }
@@ -198,7 +259,9 @@
     traces = { ...traces, [id]: { ...(traces[id] ?? EMPTY_TRACE), loading: true, error: '' } };
     try {
       const query = cursor === null ? '' : `?cursor=${encodeURIComponent(cursor)}`;
-      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/trace${query}`);
+      const response = await fetch(
+        `${base}/api/seo/analyses/${encodeURIComponent(id)}/trace${query}`,
+      );
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить трассу агентов'));
       if (destroyed) return;
@@ -214,19 +277,28 @@
       }
       const page = value as SeoTracePage;
       const current = traces[id] ?? EMPTY_TRACE;
-      traces = { ...traces, [id]: {
-        steps: append ? [...current.steps, ...page.items] : page.items,
-        cursor: page.next_cursor, loading: false, error: ''
-      } };
+      traces = {
+        ...traces,
+        [id]: {
+          steps: append ? [...current.steps, ...page.items] : page.items,
+          cursor: page.next_cursor,
+          loading: false,
+          error: '',
+        },
+      };
       // The user asked for more than the first page; a later poll leaves it be.
       if (append) tracePaged.add(id);
     } catch (cause) {
       if (destroyed) return;
       const current = traces[id] ?? EMPTY_TRACE;
-      traces = { ...traces, [id]: {
-        ...current, loading: false,
-        error: cause instanceof Error ? cause.message : 'Не удалось загрузить трассу агентов'
-      } };
+      traces = {
+        ...traces,
+        [id]: {
+          ...current,
+          loading: false,
+          error: cause instanceof Error ? cause.message : 'Не удалось загрузить трассу агентов',
+        },
+      };
     }
   }
 
@@ -294,9 +366,12 @@
     loadingOlder = true;
     error = '';
     try {
-      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(id)}?before=${olderCursor}`);
+      const response = await fetch(
+        `${base}/api/seo/chats/${encodeURIComponent(id)}?before=${olderCursor}`,
+      );
       const value = await payload(response);
-      if (!response.ok) throw new Error(detail(value, 'Не удалось загрузить более ранние сообщения'));
+      if (!response.ok)
+        throw new Error(detail(value, 'Не удалось загрузить более ранние сообщения'));
       if (destroyed || activeId !== id) return;
       const page = value as ChatPage;
       messages = [...page.messages, ...messages];
@@ -304,7 +379,8 @@
       trackRuns(page.messages, id);
     } catch (cause) {
       if (destroyed || activeId !== id) return;
-      error = cause instanceof Error ? cause.message : 'Не удалось загрузить более ранние сообщения';
+      error =
+        cause instanceof Error ? cause.message : 'Не удалось загрузить более ранние сообщения';
     } finally {
       if (!destroyed) loadingOlder = false;
     }
@@ -312,7 +388,9 @@
 
   async function createChat(): Promise<ChatSummary> {
     const response = await fetch(`${base}/api/seo/chats`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
     });
     const value = await payload(response);
     if (!response.ok) throw new Error(detail(value, 'Не удалось создать чат'));
@@ -345,7 +423,9 @@
         applyChat(created);
       }
       const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(chatId)}/messages`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text })
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }),
       });
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось отправить сообщение'));
@@ -374,8 +454,9 @@
     error = '';
     try {
       const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(chatId)}/proposal`, {
-        method: 'PUT', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ connection_ids: [...selected] })
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ connection_ids: [...selected] }),
       });
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось изменить подключения'));
@@ -394,7 +475,9 @@
     cancellingId = id;
     runError = '';
     try {
-      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+      const response = await fetch(`${base}/api/seo/analyses/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+      });
       const value = await payload(response);
       if (!response.ok) throw new Error(detail(value, 'Не удалось отменить прогон'));
       if (destroyed) return;
@@ -413,7 +496,9 @@
   async function removeChat(id: string): Promise<void> {
     error = '';
     try {
-      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const response = await fetch(`${base}/api/seo/chats/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
       if (!response.ok) throw new Error(detail(await payload(response), 'Не удалось удалить чат'));
       if (destroyed) return;
       chats = chats.filter((item) => item.id !== id);
@@ -429,86 +514,113 @@
     const newest = chats[0];
     if (newest) void openChat(newest.id);
   });
-  onDestroy(() => { destroyed = true; stopPolling(); });
+  onDestroy(() => {
+    destroyed = true;
+    stopPolling();
+  });
 </script>
 
 <svelte:head><title>ИИ-трекинг · Чат SEO-анализа</title></svelte:head>
 
-<main class="mx-auto w-full max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
-    <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-4 text-xs font-medium text-muted">
-        <a href={base || '/'} class="hover:text-accent">Инструменты</a>
-        <span aria-hidden="true">/</span>
-        <span class="text-ink">SEO-анализ сайта</span>
-    </nav>
+<main class="mx-auto w-full max-w-[1600px] px-4 pb-8 sm:px-6 lg:px-8">
+  <nav
+    aria-label="Хлебные крошки"
+    class="flex items-center gap-2 py-2 text-xs font-medium text-muted"
+  >
+    <a href={resolve('/')} class="hover:text-accent">Инструменты</a>
+    <span aria-hidden="true">/</span>
+    <span class="text-ink">SEO-анализ сайта</span>
+  </nav>
 
-    {#if data.loadError}
-        <p role="alert" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            {data.loadError}
+  {#if data.loadError}
+    <p
+      role="alert"
+      class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[13px] text-rose-800"
+    >
+      {data.loadError}
+    </p>
+  {/if}
+
+  {#if chatsError}
+    <p
+      role="alert"
+      class="mt-2.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[13px] text-amber-900"
+    >
+      {chatsError}
+    </p>
+  {/if}
+
+  <div class="grid gap-2.5 lg:grid-cols-[minmax(0,264px)_minmax(0,1fr)] lg:items-start">
+    <ChatSidebar
+      {chats}
+      {activeId}
+      busy={sending}
+      onSelect={(id) => void openChat(id)}
+      onCreate={newChat}
+      onDelete={(id) => void removeChat(id)}
+    />
+
+    <section class="min-w-0" aria-labelledby="chat-dialogue-title">
+      <h2 id="chat-dialogue-title" class="text-base font-bold tracking-tight">Диалог</h2>
+
+      {#if error}
+        <p
+          role="alert"
+          class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[13px] text-rose-800"
+        >
+          {error}
         </p>
-    {/if}
+      {/if}
 
-    {#if chatsError}
-        <p role="alert" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            {chatsError}
+      {#if runError}
+        <p
+          role="alert"
+          class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[13px] text-rose-800"
+        >
+          {runError}
         </p>
-    {/if}
+      {/if}
 
-    <div class="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-start">
-        <ChatSidebar
-            {chats}
-            {activeId}
-            busy={sending}
-            onSelect={(id) => void openChat(id)}
-            onCreate={newChat}
-            onDelete={(id) => void removeChat(id)}
+      {#if activeId === null}
+        <p
+          class="mt-3 rounded-lg border border-dashed border-line bg-white px-3.5 py-1.5 text-[13px] leading-5 text-muted"
+          data-chat-empty
+        >
+          Опишите задачу в поле ниже: адрес сайта, сферу бизнеса, ключевые запросы и услуги. Чат
+          создаётся при отправке первого сообщения.
+        </p>
+      {/if}
+
+      <div class="mt-2.5">
+        <ChatFeed
+          {messages}
+          providers={data.providers}
+          {snapshots}
+          {traces}
+          {rows}
+          {cursors}
+          {loadingRows}
+          errors={rowErrors}
+          {cancellingId}
+          {olderCursor}
+          {loadingOlder}
+          onLoadOlder={() => void loadOlder()}
+          onOpenReport={openReport}
+          onToggleConnection={(messageId, connectionId) =>
+            void toggleConnection(messageId, connectionId)}
+          onCancel={(id) => void cancelRun(id)}
+          onLoadRows={(id, kind, cursor) => void loadRows(id, kind, cursor, true)}
+          onLoadTrace={(id, cursor) => void loadTrace(id, cursor, true)}
         />
+      </div>
 
-        <section class="min-w-0" aria-labelledby="chat-dialogue-title">
-            <h2 id="chat-dialogue-title" class="text-xl font-bold tracking-tight">Диалог</h2>
-
-            {#if error}
-                <p role="alert" class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                    {error}
-                </p>
-            {/if}
-
-            {#if runError}
-                <p role="alert" class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                    {runError}
-                </p>
-            {/if}
-
-            {#if activeId === null}
-                <p class="mt-3 rounded-2xl border border-dashed border-line bg-white px-5 py-4 text-sm leading-6 text-muted" data-chat-empty>
-                    Опишите задачу в поле ниже: адрес сайта, сферу бизнеса, ключевые запросы и услуги. Чат создаётся при отправке первого сообщения.
-                </p>
-            {/if}
-
-            <div class="mt-4">
-                <ChatFeed
-                    {messages}
-                    providers={data.providers}
-                    {snapshots}
-                    {traces}
-                    {rows}
-                    {cursors}
-                    {loadingRows}
-                    errors={rowErrors}
-                    {cancellingId}
-                    {olderCursor}
-                    {loadingOlder}
-                    onLoadOlder={() => void loadOlder()}
-                    onOpenReport={openReport}
-                    onToggleConnection={(messageId, connectionId) => void toggleConnection(messageId, connectionId)}
-                    onCancel={(id) => void cancelRun(id)}
-                    onLoadRows={(id, kind, cursor) => void loadRows(id, kind, cursor, true)}
-                    onLoadTrace={(id, cursor) => void loadTrace(id, cursor, true)}
-                />
-            </div>
-
-            <div bind:this={composerHost}>
-                <ChatComposer disabled={!!data.loadError} busy={sending} onSend={(text) => void send(text)} />
-            </div>
-        </section>
-    </div>
+      <div bind:this={composerHost}>
+        <ChatComposer
+          disabled={!!data.loadError}
+          busy={sending}
+          onSend={(text) => void send(text)}
+        />
+      </div>
+    </section>
+  </div>
 </main>

@@ -6,7 +6,10 @@ import ConfigPanel from './ConfigPanel.svelte';
 const CONFIG = '{\n  "providers": {\n    "groups": []\n  },\n  "search": null,\n  "seo": null\n}';
 
 function stubFetch(value: unknown, ok = true) {
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok, json: async () => value })));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok, json: async () => value })),
+  );
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -26,7 +29,10 @@ describe('ConfigPanel', () => {
   });
 
   it('requests the configuration document once the window opens', async () => {
-    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ directory: '/data', exists: true, content: CONFIG }) }));
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ directory: '/data', exists: true, content: CONFIG }),
+    }));
     vi.stubGlobal('fetch', fetch);
     render(ConfigPanel, { props: { open: true, onclose: () => {} } });
 
@@ -45,7 +51,9 @@ describe('ConfigPanel', () => {
     stubFetch({ detail: 'Не удалось прочитать конфигурацию' }, false);
     render(ConfigPanel, { props: { open: true, onclose: () => {} } });
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Не удалось прочитать конфигурацию');
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Не удалось прочитать конфигурацию',
+    );
   });
 
   it('does not request anything while the window is closed', () => {

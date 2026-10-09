@@ -1,4 +1,5 @@
 import type { RequestHandler } from './$types';
 import { proxyJson } from '$lib/server/python-api';
 
-export const DELETE: RequestHandler = ({ request }) => proxyJson(request, '/api/seo/settings/credentials', 'DELETE');
+export const DELETE: RequestHandler = ({ request }) =>
+  proxyJson(request, '/api/seo/settings/credentials', 'DELETE');

@@ -7,20 +7,37 @@ import Layout from '../../routes/+layout.svelte';
 vi.mock('$app/navigation', () => ({ invalidateAll: vi.fn().mockResolvedValue(undefined) }));
 
 const data = {
-  providers: [], settingsProviders: [], form: null, searchRegions: [], searchRegionError: '',
-  searchSettings: { enabled: true, folder_id: null, has_api_key: false, api_key_source: 'none' as const, folder_id_source: 'none' as const },
+  providers: [],
+  settingsProviders: [],
+  form: null,
+  searchRegions: [],
+  searchRegionError: '',
+  searchSettings: {
+    enabled: true,
+    folder_id: null,
+    has_api_key: false,
+    api_key_source: 'none' as const,
+    folder_id_source: 'none' as const,
+  },
   searchSettingsError: '',
   seoSettings: {
-    endpoint: null, model: null, has_api_key: false,
-    endpoint_source: 'none' as const, model_source: 'none' as const, api_key_source: 'none' as const
+    endpoint: null,
+    model: null,
+    has_api_key: false,
+    endpoint_source: 'none' as const,
+    model_source: 'none' as const,
+    api_key_source: 'none' as const,
   },
   seoSettingsError: '',
-  chats: [], chatsError: '',
-  loadError: ''
+  chats: [],
+  chatsError: '',
+  loadError: '',
 };
 
 function openSettings() {
-  render(Layout, { props: { data, children: createRawSnippet(() => ({ render: () => '<main>Page</main>' })) } });
+  render(Layout, {
+    props: { data, children: createRawSnippet(() => ({ render: () => '<main>Page</main>' })) },
+  });
   return fireEvent.click(screen.getByRole('button', { name: 'Настройки API' }));
 }
 
@@ -57,7 +74,11 @@ describe('settings dialog navigation', () => {
     const models = within(tabs).getByRole('tab', { name: 'Модели' });
     const search = within(tabs).getByRole('tab', { name: 'Поисковые системы' });
     const seo = within(tabs).getByRole('tab', { name: 'SEO-анализ' });
-    expect([models, search, seo].map((tab) => tab.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false']);
+    expect([models, search, seo].map((tab) => tab.getAttribute('aria-selected'))).toEqual([
+      'true',
+      'false',
+      'false',
+    ]);
     expect(models.getAttribute('tabindex')).toBe('0');
     for (const tab of [search, seo]) {
       expect(tab.getAttribute('tabindex')).toBe('-1');
@@ -88,7 +109,9 @@ describe('settings dialog navigation', () => {
 
   it('renders the service-LLM settings panel on the SEO tab without exposing a key field value', async () => {
     await openSettings();
-    const seo = within(screen.getByRole('tablist', { name: 'Разделы настроек' })).getByRole('tab', { name: 'SEO-анализ' });
+    const seo = within(screen.getByRole('tablist', { name: 'Разделы настроек' })).getByRole('tab', {
+      name: 'SEO-анализ',
+    });
     expect(screen.queryByRole('heading', { name: 'Служебная LLM' })).toBeNull();
     await fireEvent.click(seo);
     const panel = screen.getByRole('tabpanel', { name: 'SEO-анализ' });

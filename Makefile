@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install ruff backend frontend frontend-prod build check docker-build docker-up docker-down docker-logs
+.PHONY: help install ruff backend frontend frontend-prod build check types lint lint-fix format format-check docker-build docker-up docker-down docker-logs
 
 help:
 	@echo "install  Install Python and Node.js dependencies"
@@ -8,7 +8,12 @@ help:
 	@echo "frontend      Start the web interface for development"
 	@echo "frontend-prod Start the built web interface"
 	@echo "build         Build the web interface"
-	@echo "check         Check Svelte and TypeScript"
+	@echo "types         Check Svelte and TypeScript"
+	@echo "lint          Check the frontend with ESLint"
+	@echo "lint-fix      Apply the ESLint fixes"
+	@echo "format        Format the frontend with Prettier"
+	@echo "format-check  Check the Prettier formatting"
+	@echo "check         Types, formatting, and lint in one go"
 	@echo "docker-up     Build and start the whole app with docker compose"
 	@echo "docker-down   Stop the compose stack"
 	@echo "docker-logs   Follow the logs of the compose stack"
@@ -32,8 +37,22 @@ frontend-prod:
 build:
 	cd frontend && npm run build
 
-check:
+check: types format-check lint
+
+types:
 	cd frontend && npm run check
+
+lint:
+	cd frontend && npm run lint
+
+lint-fix:
+	cd frontend && npm run lint:fix
+
+format:
+	cd frontend && npm run format
+
+format-check:
+	cd frontend && npm run format:check
 
 docker-build:
 	docker compose build

@@ -1,15 +1,66 @@
 import type {
-  ApiPath, FormConfig, PublicProvider, SearchCreated, SearchRegion, SearchRow, SearchRowStatus,
-  SearchSnapshot, SettingsProvider, RunCreated, RunHistoryPage, RunSnapshot, RunSummaryRow,
-  RunModelRow, RunSearchRow, YandexSearchSettings,
-  ChatCreated, ChatList, ChatMessage, ChatMessageKind, ChatMessages, ChatPage, ChatPayload,
-  ChatProposal, ChatProposalStatus, ChatProposalUpdated, ChatSummary,
-  SeoAggregates, SeoAgent, SeoAgentStatus, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoAnalysisStatus,
-  SeoBudgetItem, SeoBudgetView, SeoCategoryAggregates, SeoCandidate, SeoCompetitorAggregates,
-  SeoCounts, SeoEstimate, SeoHistoryPage, SeoMetric, SeoModelRow, SeoQuery,
-  SeoQueryFlags, SeoReadiness, SeoRow, SeoRowsKind, SeoRowsPage, SeoRowStatus, SeoSearchMetrics,
-  SeoSearchRow, SeoSettings, SeoSettingsTest, SeoSiteAggregates, SeoSiteAiBlock, SeoSiteAiMetrics,
-  SeoSource, SeoStage, SeoStageStatus, SeoTracePage, SeoTraceStep
+  ApiPath,
+  FormConfig,
+  PublicProvider,
+  SearchCreated,
+  SearchRegion,
+  SearchRow,
+  SearchRowStatus,
+  SearchSnapshot,
+  SettingsProvider,
+  RunCreated,
+  RunHistoryPage,
+  RunSnapshot,
+  RunSummaryRow,
+  RunModelRow,
+  RunSearchRow,
+  YandexSearchSettings,
+  ChatCreated,
+  ChatList,
+  ChatMessage,
+  ChatMessageKind,
+  ChatMessages,
+  ChatPage,
+  ChatPayload,
+  ChatProposal,
+  ChatProposalStatus,
+  ChatProposalUpdated,
+  ChatSummary,
+  SeoAggregates,
+  SeoAgent,
+  SeoAgentStatus,
+  SeoAnalysisCreated,
+  SeoAnalysisSnapshot,
+  SeoAnalysisStatus,
+  SeoBudgetItem,
+  SeoBudgetView,
+  SeoCategoryAggregates,
+  SeoCandidate,
+  SeoCompetitorAggregates,
+  SeoCounts,
+  SeoEstimate,
+  SeoHistoryPage,
+  SeoMetric,
+  SeoModelRow,
+  SeoQuery,
+  SeoQueryFlags,
+  SeoReadiness,
+  SeoRow,
+  SeoRowsKind,
+  SeoRowsPage,
+  SeoRowStatus,
+  SeoSearchMetrics,
+  SeoSearchRow,
+  SeoSettings,
+  SeoSettingsTest,
+  SeoSiteAggregates,
+  SeoSiteAiBlock,
+  SeoSiteAiMetrics,
+  SeoSource,
+  SeoStage,
+  SeoStageStatus,
+  SeoTracePage,
+  SeoTraceStep,
 } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
@@ -23,11 +74,15 @@ export const SEO_SETTINGS_TEST_TIMEOUT_MS = 120_000;
 export const SEO_CHAT_MESSAGE_TIMEOUT_MS = 120_000;
 
 function json(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  });
 }
 
 function record(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid API response');
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Invalid API response');
   return value as Record<string, unknown>;
 }
 
@@ -52,7 +107,8 @@ function integers(value: unknown): number[] {
 }
 
 function requiredInteger(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value)) throw new Error('Invalid API response');
+  if (typeof value !== 'number' || !Number.isInteger(value))
+    throw new Error('Invalid API response');
   return value;
 }
 
@@ -68,7 +124,8 @@ function optionalInteger(value: unknown): number | null {
 }
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
-  if (typeof value !== 'string' || !allowed.includes(value as T)) throw new Error('Invalid API response');
+  if (typeof value !== 'string' || !allowed.includes(value as T))
+    throw new Error('Invalid API response');
   return value as T;
 }
 
@@ -95,7 +152,9 @@ function requiredNumber(value: unknown): number {
 
 function integerRecord(value: unknown): Record<string, number> {
   const item = record(value);
-  return Object.fromEntries(Object.entries(item).map(([key, entry]) => [key, requiredInteger(entry)]));
+  return Object.fromEntries(
+    Object.entries(item).map(([key, entry]) => [key, requiredInteger(entry)]),
+  );
 }
 
 /** Hosts the BFF may call without being told: the API of a local run. */
@@ -117,8 +176,15 @@ function apiHosts(): string[] {
 
 export function apiOrigin(): string {
   const url = new URL(process.env.AI_TRACKER_API_URL || DEFAULT_API_ORIGIN);
-  if (url.protocol !== 'http:' || !apiHosts().includes(url.hostname) ||
-      url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+  if (
+    url.protocol !== 'http:' ||
+    !apiHosts().includes(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
     throw new Error('Invalid Python API origin');
   }
   return url.origin;
@@ -213,7 +279,8 @@ export function seoChatPath(id: string): ApiPath {
 
 /** `before` asks for the page of messages older than that sequence number. */
 export function seoChatDetailPath(id: string, before: number | null): ApiPath {
-  if (before !== null && (!Number.isInteger(before) || before < 1)) throw new Error('Invalid chat cursor');
+  if (before !== null && (!Number.isInteger(before) || before < 1))
+    throw new Error('Invalid chat cursor');
   const suffix = before === null ? '' : `?before=${before}`;
   return `${seoChatPath(id)}${suffix}` as ApiPath;
 }
@@ -235,20 +302,34 @@ const SEO_CHAT_DETAIL_SUFFIX = /^([^/?]+)\?before=([1-9]\d{0,15})$/;
 function validPath(path: ApiPath): boolean {
   if (path === '/api/runs') return true;
   if (path.startsWith('/api/runs?cursor=')) {
-    try { return runListPath(path.slice('/api/runs?cursor='.length)) === path; }
-    catch { return false; }
+    try {
+      return runListPath(path.slice('/api/runs?cursor='.length)) === path;
+    } catch {
+      return false;
+    }
   }
   if (path.startsWith('/api/runs/')) {
     const suffix = path.slice('/api/runs/'.length);
     if (suffix.endsWith('/export.csv')) {
-      try { return runExportPath(suffix.slice(0, -'/export.csv'.length)) === path; }
-      catch { return false; }
+      try {
+        return runExportPath(suffix.slice(0, -'/export.csv'.length)) === path;
+      } catch {
+        return false;
+      }
     }
-    try { return runPath(suffix) === path; }
-    catch { return false; }
+    try {
+      return runPath(suffix) === path;
+    } catch {
+      return false;
+    }
   }
   // The static SEO settings paths come before the dynamic analysis route.
-  if (path === '/api/seo/settings' || path === '/api/seo/settings/credentials' || path === '/api/seo/settings/test') return true;
+  if (
+    path === '/api/seo/settings' ||
+    path === '/api/seo/settings/credentials' ||
+    path === '/api/seo/settings/test'
+  )
+    return true;
   // The chat collection is static; the dynamic chat routes come after it. The
   // action suffixes are matched with their leading slash, so the chat named
   // `messages` stays the bare ID `/api/seo/chats/messages` and never the feed.
@@ -257,67 +338,130 @@ function validPath(path: ApiPath): boolean {
     const suffix = path.slice('/api/seo/chats/'.length);
     const messages = SEO_CHAT_MESSAGES_SUFFIX.exec(suffix);
     if (messages) {
-      try { return seoChatMessagesPath(decodeURIComponent(messages[1])) === path; }
-      catch { return false; }
+      try {
+        return seoChatMessagesPath(decodeURIComponent(messages[1])) === path;
+      } catch {
+        return false;
+      }
     }
     const proposal = SEO_CHAT_PROPOSAL_SUFFIX.exec(suffix);
     if (proposal) {
-      try { return seoChatProposalPath(decodeURIComponent(proposal[1])) === path; }
-      catch { return false; }
+      try {
+        return seoChatProposalPath(decodeURIComponent(proposal[1])) === path;
+      } catch {
+        return false;
+      }
     }
     const detail = SEO_CHAT_DETAIL_SUFFIX.exec(suffix);
     if (detail) {
-      try { return seoChatDetailPath(decodeURIComponent(detail[1]), Number(detail[2])) === path; }
-      catch { return false; }
+      try {
+        return seoChatDetailPath(decodeURIComponent(detail[1]), Number(detail[2])) === path;
+      } catch {
+        return false;
+      }
     }
-    try { return seoChatPath(suffix) === path; }
-    catch { return false; }
+    try {
+      return seoChatPath(suffix) === path;
+    } catch {
+      return false;
+    }
   }
   if (path === '/api/seo/analyses') return true;
   if (path.startsWith('/api/seo/analyses?cursor=')) {
-    try { return seoAnalysisListPath(path.slice('/api/seo/analyses?cursor='.length)) === path; }
-    catch { return false; }
+    try {
+      return seoAnalysisListPath(path.slice('/api/seo/analyses?cursor='.length)) === path;
+    } catch {
+      return false;
+    }
   }
   if (path.startsWith('/api/seo/analyses/')) {
     const suffix = path.slice('/api/seo/analyses/'.length);
     if (suffix.endsWith('/cancel')) {
-      try { return seoAnalysisCancelPath(suffix.slice(0, -'/cancel'.length)) === path; }
-      catch { return false; }
+      try {
+        return seoAnalysisCancelPath(suffix.slice(0, -'/cancel'.length)) === path;
+      } catch {
+        return false;
+      }
     }
     const rows = SEO_ROWS_SUFFIX.exec(suffix);
     if (rows) {
-      try { return seoAnalysisRowsPath(decodeURIComponent(rows[1]), rows[2] as SeoRowsKind, rows[3] ?? null) === path; }
-      catch { return false; }
+      try {
+        return (
+          seoAnalysisRowsPath(
+            decodeURIComponent(rows[1]),
+            rows[2] as SeoRowsKind,
+            rows[3] ?? null,
+          ) === path
+        );
+      } catch {
+        return false;
+      }
     }
     const trace = SEO_TRACE_SUFFIX.exec(suffix);
     if (trace) {
-      try { return seoAnalysisTracePath(decodeURIComponent(trace[1]), trace[2] ?? null) === path; }
-      catch { return false; }
+      try {
+        return seoAnalysisTracePath(decodeURIComponent(trace[1]), trace[2] ?? null) === path;
+      } catch {
+        return false;
+      }
     }
-    try { return seoAnalysisPath(suffix) === path; }
-    catch { return false; }
+    try {
+      return seoAnalysisPath(suffix) === path;
+    } catch {
+      return false;
+    }
   }
   if (path === '/api/config') return true;
-  if (path === '/api/providers' || path === '/api/check' || path === '/api/form' || path === '/api/providers/settings') return true;
+  if (
+    path === '/api/providers' ||
+    path === '/api/check' ||
+    path === '/api/form' ||
+    path === '/api/providers/settings'
+  )
+    return true;
   // The static catalog comes before the dynamic job route, exactly as in Python.
-  if (path === '/api/search' || path === '/api/search/regions' || path === '/api/search/settings' ||
-      path === '/api/search/settings/credentials') return true;
+  if (
+    path === '/api/search' ||
+    path === '/api/search/regions' ||
+    path === '/api/search/settings' ||
+    path === '/api/search/settings/credentials'
+  )
+    return true;
   if (path.startsWith('/api/search/')) {
-    try { return searchPath(decodeURIComponent(path.slice('/api/search/'.length))) === path; }
-    catch { return false; }
+    try {
+      return searchPath(decodeURIComponent(path.slice('/api/search/'.length))) === path;
+    } catch {
+      return false;
+    }
   }
   if (path.startsWith('/api/providers/settings/')) {
-    try { return settingsProviderPath(decodeURIComponent(path.slice('/api/providers/settings/'.length))) === path; }
-    catch { return false; }
+    try {
+      return (
+        settingsProviderPath(decodeURIComponent(path.slice('/api/providers/settings/'.length))) ===
+        path
+      );
+    } catch {
+      return false;
+    }
   }
   if (!path.startsWith('/api/providers/')) return false;
-  try { return providerPath(decodeURIComponent(path.slice('/api/providers/'.length))) === path; }
-  catch { return false; }
+  try {
+    return providerPath(decodeURIComponent(path.slice('/api/providers/'.length))) === path;
+  } catch {
+    return false;
+  }
 }
 
 const RUN_STATUSES = ['pending', 'done', 'interrupted'] as const;
 const MODEL_RUN_STATUSES = ['pending', 'mentioned', 'absent', 'error', 'interrupted'] as const;
-const SEARCH_RUN_STATUSES = ['submitting', 'waiting', 'found', 'absent', 'error', 'interrupted'] as const;
+const SEARCH_RUN_STATUSES = [
+  'submitting',
+  'waiting',
+  'found',
+  'absent',
+  'error',
+  'interrupted',
+] as const;
 
 export function publicRunCreated(value: unknown): RunCreated {
   const item = record(value);
@@ -331,32 +475,45 @@ function runModelRow(value: unknown): RunModelRow {
   const mentioned = row.mentioned;
   if (mentioned !== null && typeof mentioned !== 'boolean') throw new Error('Invalid model row');
   return {
-    provider_id: requiredString(row.provider_id), prompt_index: requiredInteger(row.prompt_index),
-    provider_name: requiredString(row.provider_name), prompt: requiredString(row.prompt),
-    status: oneOf(row.status, MODEL_RUN_STATUSES), answer: optionalString(row.answer),
-    mentioned: mentioned as boolean | null, error: optionalString(row.error)
+    provider_id: requiredString(row.provider_id),
+    prompt_index: requiredInteger(row.prompt_index),
+    provider_name: requiredString(row.provider_name),
+    prompt: requiredString(row.prompt),
+    status: oneOf(row.status, MODEL_RUN_STATUSES),
+    answer: optionalString(row.answer),
+    mentioned: mentioned as boolean | null,
+    error: optionalString(row.error),
   };
 }
 
 function runSearchRow(value: unknown): RunSearchRow {
   const row = record(value);
   return {
-    search_index: requiredInteger(row.search_index), prompt_index: requiredInteger(row.prompt_index),
-    region_index: requiredInteger(row.region_index), prompt: requiredString(row.prompt),
-    region_id: requiredInteger(row.region_id), region_name: requiredString(row.region_name),
-    status: oneOf(row.status, SEARCH_RUN_STATUSES), position: optionalInteger(row.position),
-    url: optionalString(row.url), error: optionalString(row.error)
+    search_index: requiredInteger(row.search_index),
+    prompt_index: requiredInteger(row.prompt_index),
+    region_index: requiredInteger(row.region_index),
+    prompt: requiredString(row.prompt),
+    region_id: requiredInteger(row.region_id),
+    region_name: requiredString(row.region_name),
+    status: oneOf(row.status, SEARCH_RUN_STATUSES),
+    position: optionalInteger(row.position),
+    url: optionalString(row.url),
+    error: optionalString(row.error),
   };
 }
 
 function runSummaryRow(value: unknown): RunSummaryRow {
   const row = record(value);
   return {
-    prompt: stringValue(row.prompt), source: stringValue(row.source),
-    language: stringValue(row.language), region: stringValue(row.region),
-    ai_answer: stringValue(row.ai_answer), site_found: stringValue(row.site_found),
-    position: stringValue(row.position), brand_found: stringValue(row.brand_found),
-    status: stringValue(row.status)
+    prompt: stringValue(row.prompt),
+    source: stringValue(row.source),
+    language: stringValue(row.language),
+    region: stringValue(row.region),
+    ai_answer: stringValue(row.ai_answer),
+    site_found: stringValue(row.site_found),
+    position: stringValue(row.position),
+    brand_found: stringValue(row.brand_found),
+    status: stringValue(row.status),
   };
 }
 
@@ -364,14 +521,25 @@ export function publicRunSnapshot(value: unknown): RunSnapshot {
   const item = record(value);
   const id = requiredString(item.id);
   runPath(id);
-  if (!Array.isArray(item.models) || !Array.isArray(item.search) || !Array.isArray(item.summary_rows))
+  if (
+    !Array.isArray(item.models) ||
+    !Array.isArray(item.search) ||
+    !Array.isArray(item.summary_rows)
+  )
     throw new Error('Invalid run snapshot');
   return {
-    id, created_at: requiredString(item.created_at), finished_at: optionalString(item.finished_at),
-    status: oneOf(item.status, RUN_STATUSES), brand: stringValue(item.brand), domain: stringValue(item.domain),
-    prompts: strings(item.prompts), provider_ids: strings(item.provider_ids), regions: integers(item.regions),
-    models: item.models.map(runModelRow), search: item.search.map(runSearchRow),
-    summary_rows: item.summary_rows.map(runSummaryRow)
+    id,
+    created_at: requiredString(item.created_at),
+    finished_at: optionalString(item.finished_at),
+    status: oneOf(item.status, RUN_STATUSES),
+    brand: stringValue(item.brand),
+    domain: stringValue(item.domain),
+    prompts: strings(item.prompts),
+    provider_ids: strings(item.provider_ids),
+    regions: integers(item.regions),
+    models: item.models.map(runModelRow),
+    search: item.search.map(runSearchRow),
+    summary_rows: item.summary_rows.map(runSummaryRow),
   };
 }
 
@@ -380,13 +548,20 @@ export function publicRunList(value: unknown): RunHistoryPage {
   if (!Array.isArray(page.items)) throw new Error('Invalid run history');
   const next_cursor = optionalString(page.next_cursor);
   if (next_cursor !== null) runListPath(next_cursor);
-  return { items: page.items.map((raw) => {
-    const item = record(raw);
-    const id = requiredString(item.id);
-    runPath(id);
-    return { id, created_at: requiredString(item.created_at), status: oneOf(item.status, RUN_STATUSES),
-      prompts: strings(item.prompts) };
-  }), next_cursor };
+  return {
+    items: page.items.map((raw) => {
+      const item = record(raw);
+      const id = requiredString(item.id);
+      runPath(id);
+      return {
+        id,
+        created_at: requiredString(item.created_at),
+        status: oneOf(item.status, RUN_STATUSES),
+        prompts: strings(item.prompts),
+      };
+    }),
+    next_cursor,
+  };
 }
 
 /**
@@ -394,13 +569,18 @@ export function publicRunList(value: unknown): RunHistoryPage {
  * stored there, and the JSON text with the providers, the search settings, and
  * the SEO settings. A key is never part of it — the keyring holds those.
  */
-export function publicConfig(value: unknown): { directory: string; exists: boolean; content: string | null } {
+export function publicConfig(value: unknown): {
+  directory: string;
+  exists: boolean;
+  content: string | null;
+} {
   const item = record(value);
   const exists = item.exists;
   if (typeof exists !== 'boolean') throw new Error('Invalid configuration');
   const content = item.content;
   if (exists) {
-    if (typeof content !== 'string' || content.length === 0) throw new Error('Invalid configuration');
+    if (typeof content !== 'string' || content.length === 0)
+      throw new Error('Invalid configuration');
     return { directory: requiredString(item.directory), exists, content };
   }
   if (content !== null) throw new Error('Invalid configuration');
@@ -412,18 +592,39 @@ export function publicSettingsProvider(value: unknown): SettingsProvider {
   if (!Array.isArray(item.models)) throw new Error('Invalid settings provider');
   if (typeof item.configured !== 'boolean') throw new Error('Invalid settings provider');
   return {
-    id: requiredString(item.id), name: requiredString(item.name), kind: requiredString(item.kind),
-    endpoint: requiredString(item.endpoint), configured: item.configured,
+    id: requiredString(item.id),
+    name: requiredString(item.name),
+    kind: requiredString(item.kind),
+    endpoint: requiredString(item.endpoint),
+    configured: item.configured,
     models: item.models.map((raw) => {
       const model = record(raw);
-      return { id: requiredString(model.id), model: requiredString(model.model), name: requiredString(model.name) };
-    })
+      return {
+        id: requiredString(model.id),
+        model: requiredString(model.model),
+        name: requiredString(model.name),
+      };
+    }),
   };
 }
 
 export function publicProvider(value: unknown): Record<string, unknown> {
   const item = record(value);
-  const allowed = ['id', 'name', 'kind', 'endpoint', 'model', 'configured', 'editable_fields', 'can_reset', 'can_delete', 'status_label', 'delete_label', 'delete_prompt', 'delete_success'] as const;
+  const allowed = [
+    'id',
+    'name',
+    'kind',
+    'endpoint',
+    'model',
+    'configured',
+    'editable_fields',
+    'can_reset',
+    'can_delete',
+    'status_label',
+    'delete_label',
+    'delete_prompt',
+    'delete_success',
+  ] as const;
   return Object.fromEntries(allowed.filter((key) => key in item).map((key) => [key, item[key]]));
 }
 
@@ -433,14 +634,30 @@ export function publicCheck(value: unknown): Record<string, unknown> {
   const summary = record(item.summary);
   const publicResult = (raw: unknown) => {
     const result = record(raw);
-    return { prompt: result.prompt, answer: result.answer, mentioned: result.mentioned, error: result.error, status: result.status };
+    return {
+      prompt: result.prompt,
+      answer: result.answer,
+      mentioned: result.mentioned,
+      error: result.error,
+      status: result.status,
+    };
   };
   return {
     brand: item.brand,
     domain: item.domain,
-    summary: { successful: summary.successful, failed: summary.failed, mentioned: summary.mentioned, mention_percent: summary.mention_percent,
-      visibility_label: summary.visibility_label, mentions_label: summary.mentions_label, errors_label: summary.errors_label },
-    rows: item.rows.map((raw) => ({ ...publicResult(raw), provider_name: record(raw).provider_name })),
+    summary: {
+      successful: summary.successful,
+      failed: summary.failed,
+      mentioned: summary.mentioned,
+      mention_percent: summary.mention_percent,
+      visibility_label: summary.visibility_label,
+      mentions_label: summary.mentions_label,
+      errors_label: summary.errors_label,
+    },
+    rows: item.rows.map((raw) => ({
+      ...publicResult(raw),
+      provider_name: record(raw).provider_name,
+    })),
     checks: item.checks.map((raw) => {
       const group = record(raw);
       const summary = record(group.summary);
@@ -448,15 +665,25 @@ export function publicCheck(value: unknown): Record<string, unknown> {
       return {
         provider_id: group.provider_id,
         provider_name: group.provider_name,
-        summary: { successful: summary.successful, failed: summary.failed, mentioned: summary.mentioned },
-        results: group.results.map(publicResult)
+        summary: {
+          successful: summary.successful,
+          failed: summary.failed,
+          mentioned: summary.mentioned,
+        },
+        results: group.results.map(publicResult),
       };
-    })
+    }),
   };
 }
 
 const JOB_STATUSES = ['pending', 'done'] as const;
-const ROW_STATUSES: readonly SearchRowStatus[] = ['submitting', 'waiting', 'found', 'absent', 'error'];
+const ROW_STATUSES: readonly SearchRowStatus[] = [
+  'submitting',
+  'waiting',
+  'found',
+  'absent',
+  'error',
+];
 
 export function publicSearchRegions(value: unknown): SearchRegion[] {
   if (!Array.isArray(value)) throw new Error('Invalid search regions');
@@ -468,15 +695,21 @@ export function publicSearchRegions(value: unknown): SearchRegion[] {
 
 export function publicSearchSettings(value: unknown): { yandex: YandexSearchSettings } {
   const item = record(record(value).yandex);
-  if (typeof item.enabled !== 'boolean' || typeof item.has_api_key !== 'boolean' ||
-      (item.folder_id !== null && typeof item.folder_id !== 'string')) throw new Error('Invalid search settings');
-  return { yandex: {
-    enabled: item.enabled,
-    folder_id: item.folder_id,
-    has_api_key: item.has_api_key,
-    api_key_source: oneOf(item.api_key_source, ['ui', 'env', 'none'] as const),
-    folder_id_source: oneOf(item.folder_id_source, ['ui', 'env', 'none'] as const)
-  } };
+  if (
+    typeof item.enabled !== 'boolean' ||
+    typeof item.has_api_key !== 'boolean' ||
+    (item.folder_id !== null && typeof item.folder_id !== 'string')
+  )
+    throw new Error('Invalid search settings');
+  return {
+    yandex: {
+      enabled: item.enabled,
+      folder_id: item.folder_id,
+      has_api_key: item.has_api_key,
+      api_key_source: oneOf(item.api_key_source, ['ui', 'env', 'none'] as const),
+      folder_id_source: oneOf(item.folder_id_source, ['ui', 'env', 'none'] as const),
+    },
+  };
 }
 
 export function publicSearchCreated(value: unknown): SearchCreated {
@@ -495,13 +728,14 @@ function searchRow(value: unknown): SearchRow {
     status: oneOf(row.status, ROW_STATUSES),
     position: optionalInteger(row.position),
     url: optionalString(row.url),
-    error: optionalString(row.error)
+    error: optionalString(row.error),
   };
 }
 
 export function publicSearchSnapshot(value: unknown): SearchSnapshot {
   const item = record(value);
-  if (!Array.isArray(item.regions) || !Array.isArray(item.results)) throw new Error('Invalid search snapshot');
+  if (!Array.isArray(item.regions) || !Array.isArray(item.results))
+    throw new Error('Invalid search snapshot');
   const summary = record(item.summary);
   return {
     id: requiredString(item.id),
@@ -513,24 +747,53 @@ export function publicSearchSnapshot(value: unknown): SearchSnapshot {
     summary: {
       successful: requiredInteger(summary.successful),
       found: requiredInteger(summary.found),
-      failed: requiredInteger(summary.failed)
+      failed: requiredInteger(summary.failed),
     },
-    results: item.results.map(searchRow)
+    results: item.results.map(searchRow),
   };
 }
 
 const SEO_SOURCES: readonly SeoSource[] = ['ui', 'env', 'none'];
-const SEO_ANALYSIS_STATUSES: readonly SeoAnalysisStatus[] =
-  ['running', 'completed', 'failed', 'interrupted', 'cancelled'];
-const SEO_STAGE_STATUSES: readonly SeoStageStatus[] = ['pending', 'running', 'done', 'error', 'skipped'];
-const SEO_ROW_STATUSES: readonly SeoRowStatus[] =
-  ['pending', 'submitting', 'waiting', 'found', 'absent', 'error', 'interrupted', 'cancelled'];
-const SEO_AGENT_STATUSES: readonly SeoAgentStatus[] =
-  ['pending', 'running', 'waiting', 'done', 'error', 'skipped'];
+const SEO_ANALYSIS_STATUSES: readonly SeoAnalysisStatus[] = [
+  'running',
+  'completed',
+  'failed',
+  'interrupted',
+  'cancelled',
+];
+const SEO_STAGE_STATUSES: readonly SeoStageStatus[] = [
+  'pending',
+  'running',
+  'done',
+  'error',
+  'skipped',
+];
+const SEO_ROW_STATUSES: readonly SeoRowStatus[] = [
+  'pending',
+  'submitting',
+  'waiting',
+  'found',
+  'absent',
+  'error',
+  'interrupted',
+  'cancelled',
+];
+const SEO_AGENT_STATUSES: readonly SeoAgentStatus[] = [
+  'pending',
+  'running',
+  'waiting',
+  'done',
+  'error',
+  'skipped',
+];
 const SEO_TRACE_KINDS = ['model', 'tool', 'handoff', 'system'] as const;
 const SEO_TRACE_STATUSES = ['pending', 'running', 'done', 'error', 'rejected', 'skipped'] as const;
 const CHAT_MESSAGE_KINDS: readonly ChatMessageKind[] = ['text', 'proposal', 'run'];
-const CHAT_PROPOSAL_STATUSES: readonly ChatProposalStatus[] = ['pending', 'confirmed', 'superseded'];
+const CHAT_PROPOSAL_STATUSES: readonly ChatProposalStatus[] = [
+  'pending',
+  'confirmed',
+  'superseded',
+];
 
 /**
  * Project the public service-LLM settings.
@@ -546,7 +809,7 @@ export function publicSeoSettings(value: unknown): SeoSettings {
     has_api_key: requiredBoolean(item.has_api_key),
     endpoint_source: oneOf(item.endpoint_source, SEO_SOURCES),
     model_source: oneOf(item.model_source, SEO_SOURCES),
-    api_key_source: oneOf(item.api_key_source, SEO_SOURCES)
+    api_key_source: oneOf(item.api_key_source, SEO_SOURCES),
   };
 }
 
@@ -558,7 +821,7 @@ export function publicSeoSettingsTest(value: unknown): SeoSettingsTest {
     model: optionalString(item.model),
     error: optionalString(item.error),
     // Omitted when the probe failed or the model cannot call tools at all.
-    tools: optionalBoolean(item.tools)
+    tools: optionalBoolean(item.tools),
   };
 }
 
@@ -566,7 +829,11 @@ export function publicSeoAnalysisCreated(value: unknown): SeoAnalysisCreated {
   const item = record(value);
   const id = requiredString(item.id);
   seoAnalysisPath(id);
-  return { id, status: oneOf(item.status, ['running'] as const), estimate: seoEstimate(item.estimate) };
+  return {
+    id,
+    status: oneOf(item.status, ['running'] as const),
+    estimate: seoEstimate(item.estimate),
+  };
 }
 
 function seoEstimate(value: unknown): SeoEstimate {
@@ -575,7 +842,7 @@ function seoEstimate(value: unknown): SeoEstimate {
     search_upper: requiredInteger(item.search_upper),
     model_upper: requiredInteger(item.model_upper),
     generated_limit: requiredInteger(item.generated_limit),
-    connections: requiredInteger(item.connections)
+    connections: requiredInteger(item.connections),
   };
 }
 
@@ -586,7 +853,7 @@ function seoCounts(value: unknown): SeoCounts {
     search_rows: requiredInteger(item.search_rows),
     model_rows: requiredInteger(item.model_rows),
     search_errors: requiredInteger(item.search_errors),
-    model_errors: requiredInteger(item.model_errors)
+    model_errors: requiredInteger(item.model_errors),
   };
 }
 
@@ -596,18 +863,26 @@ function seoMetric(value: unknown): SeoMetric {
     denominator: requiredInteger(item.denominator),
     successes: requiredInteger(item.successes),
     share: optionalNumber(item.share),
-    average_position: optionalNumber(item.average_position)
+    average_position: optionalNumber(item.average_position),
   };
 }
 
 function seoSearchMetrics(value: unknown): SeoSearchMetrics {
   const item = record(value);
-  return { overall: seoMetric(item.overall), branded: seoMetric(item.branded), unbranded: seoMetric(item.unbranded) };
+  return {
+    overall: seoMetric(item.overall),
+    branded: seoMetric(item.branded),
+    unbranded: seoMetric(item.unbranded),
+  };
 }
 
 function seoSiteAiMetrics(value: unknown): SeoSiteAiMetrics {
   const item = record(value);
-  return { name: seoMetric(item.name), host: seoMetric(item.host), combined: seoMetric(item.combined) };
+  return {
+    name: seoMetric(item.name),
+    host: seoMetric(item.host),
+    combined: seoMetric(item.combined),
+  };
 }
 
 function seoSiteAiBlock(value: unknown): SeoSiteAiBlock {
@@ -615,16 +890,20 @@ function seoSiteAiBlock(value: unknown): SeoSiteAiBlock {
   return {
     ...seoSiteAiMetrics(item),
     branded: seoSiteAiMetrics(item.branded),
-    unbranded: seoSiteAiMetrics(item.unbranded)
+    unbranded: seoSiteAiMetrics(item.unbranded),
   };
 }
 
 function seoMetricRecord(value: unknown): Record<string, SeoMetric> {
-  return Object.fromEntries(Object.entries(record(value)).map(([key, entry]) => [key, seoMetric(entry)]));
+  return Object.fromEntries(
+    Object.entries(record(value)).map(([key, entry]) => [key, seoMetric(entry)]),
+  );
 }
 
 function seoNestedMetricRecord(value: unknown): Record<string, Record<string, SeoMetric>> {
-  return Object.fromEntries(Object.entries(record(value)).map(([key, entry]) => [key, seoMetricRecord(entry)]));
+  return Object.fromEntries(
+    Object.entries(record(value)).map(([key, entry]) => [key, seoMetricRecord(entry)]),
+  );
 }
 
 function seoAggregates(value: unknown): SeoAggregates {
@@ -633,7 +912,9 @@ function seoAggregates(value: unknown): SeoAggregates {
   const siteRaw = record(item.site);
   const site: SeoSiteAggregates = {
     search: seoSearchMetrics(siteRaw.search),
-    ai: Object.fromEntries(Object.entries(record(siteRaw.ai)).map(([key, entry]) => [key, seoSiteAiBlock(entry)]))
+    ai: Object.fromEntries(
+      Object.entries(record(siteRaw.ai)).map(([key, entry]) => [key, seoSiteAiBlock(entry)]),
+    ),
   };
   const competitors: SeoCompetitorAggregates[] = item.competitors.map((raw) => {
     const competitor = record(raw);
@@ -644,20 +925,22 @@ function seoAggregates(value: unknown): SeoAggregates {
       average_position: requiredNumber(competitor.average_position),
       seed_indexes: integers(competitor.seed_indexes),
       search: seoSearchMetrics(competitor.search),
-      ai: seoNestedMetricRecord(competitor.ai)
+      ai: seoNestedMetricRecord(competitor.ai),
     };
   });
   const groups = (raw: unknown): Record<string, SeoCategoryAggregates> =>
-    Object.fromEntries(Object.entries(record(raw)).map(([key, entry]) => {
-      const group = record(entry);
-      return [key, { search: seoMetric(group.search), ai: seoMetricRecord(group.ai) }];
-    }));
+    Object.fromEntries(
+      Object.entries(record(raw)).map(([key, entry]) => {
+        const group = record(entry);
+        return [key, { search: seoMetric(group.search), ai: seoMetricRecord(group.ai) }];
+      }),
+    );
   return {
     site,
     competitors,
     categories: groups(item.categories),
     services: groups(item.services),
-    counts: seoCounts(item.counts)
+    counts: seoCounts(item.counts),
   };
 }
 
@@ -668,7 +951,7 @@ function seoStage(value: unknown): SeoStage {
     status: oneOf(item.status, SEO_STAGE_STATUSES),
     error: optionalString(item.error),
     counters: integerRecord(item.counters),
-    updated_at: requiredString(item.updated_at)
+    updated_at: requiredString(item.updated_at),
   };
 }
 
@@ -680,7 +963,7 @@ function seoCandidate(value: unknown): SeoCandidate {
     occurrences: requiredInteger(item.occurrences),
     average_position: requiredNumber(item.average_position),
     seed_indexes: integers(item.seed_indexes),
-    recurring: requiredBoolean(item.recurring)
+    recurring: requiredBoolean(item.recurring),
   };
 }
 
@@ -690,7 +973,7 @@ function seoQueryFlags(value: unknown): SeoQueryFlags {
     mentions_company_name: requiredBoolean(item.mentions_company_name),
     mentions_company_host: requiredBoolean(item.mentions_company_host),
     mentions_candidate_host: requiredBoolean(item.mentions_candidate_host),
-    branded: requiredBoolean(item.branded)
+    branded: requiredBoolean(item.branded),
   };
 }
 
@@ -701,7 +984,7 @@ function seoQuery(value: unknown): SeoQuery {
     text: requiredString(item.text),
     category: requiredString(item.category),
     service: optionalString(item.service),
-    flags: seoQueryFlags(item.flags)
+    flags: seoQueryFlags(item.flags),
   };
 }
 
@@ -715,7 +998,7 @@ function seoReadiness(value: unknown): SeoReadiness {
     has_unsubmitted_search_rows: requiredBoolean(item.has_unsubmitted_search_rows),
     has_unfinished_model_rows: requiredBoolean(item.has_unfinished_model_rows),
     search_rows: requiredInteger(item.search_rows),
-    model_rows: requiredInteger(item.model_rows)
+    model_rows: requiredInteger(item.model_rows),
   };
 }
 
@@ -726,7 +1009,7 @@ function seoAgent(value: unknown): SeoAgent {
     agent: requiredString(item.agent),
     status: oneOf(item.status, SEO_AGENT_STATUSES),
     error: optionalString(item.error),
-    updated_at: optionalString(item.updated_at)
+    updated_at: optionalString(item.updated_at),
   };
 }
 
@@ -746,7 +1029,7 @@ function seoBudget(value: unknown): SeoBudgetView {
     seed_searches: requiredInteger(item.seed_searches),
     model_rows: requiredInteger(item.model_rows),
     steps: requiredInteger(item.steps),
-    agent_steps: integerRecord(item.agent_steps)
+    agent_steps: integerRecord(item.agent_steps),
   };
 }
 
@@ -762,7 +1045,7 @@ function seoTraceStep(value: unknown): SeoTraceStep {
     result_summary: optionalString(item.result_summary),
     status: oneOf(item.status, SEO_TRACE_STATUSES),
     error: optionalString(item.error),
-    created_at: requiredString(item.created_at)
+    created_at: requiredString(item.created_at),
   };
 }
 
@@ -772,8 +1055,14 @@ export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
   const id = requiredString(item.id);
   seoAnalysisPath(id);
   const input = record(item.input);
-  if (!Array.isArray(item.services) || !Array.isArray(item.pages) || !Array.isArray(item.stages) ||
-      !Array.isArray(item.agents) || !Array.isArray(item.candidates) || !Array.isArray(item.queries))
+  if (
+    !Array.isArray(item.services) ||
+    !Array.isArray(item.pages) ||
+    !Array.isArray(item.stages) ||
+    !Array.isArray(item.agents) ||
+    !Array.isArray(item.candidates) ||
+    !Array.isArray(item.queries)
+  )
     throw new Error('Invalid SEO snapshot');
   return {
     id,
@@ -787,7 +1076,7 @@ export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
       sphere: stringValue(input.sphere),
       seeds: strings(input.seeds),
       services: strings(input.services),
-      connection_ids: strings(input.connection_ids)
+      connection_ids: strings(input.connection_ids),
     },
     estimate: seoEstimate(item.estimate),
     company_name: stringValue(item.company_name),
@@ -804,7 +1093,7 @@ export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
     queries: item.queries.map(seoQuery),
     counters: seoCounts(item.counters),
     readiness: seoReadiness(item.readiness),
-    aggregates: seoAggregates(item.aggregates)
+    aggregates: seoAggregates(item.aggregates),
   };
 }
 
@@ -826,10 +1115,10 @@ export function publicSeoHistory(value: unknown): SeoHistoryPage {
         sphere: stringValue(item.sphere),
         host: requiredString(item.host),
         company_name: stringValue(item.company_name),
-        counters: seoCounts(item.counters)
+        counters: seoCounts(item.counters),
       };
     }),
-    next_cursor
+    next_cursor,
   };
 }
 
@@ -843,7 +1132,7 @@ function seoSearchRow(value: unknown): SeoSearchRow {
     status: oneOf(item.status, SEO_ROW_STATUSES),
     site_position: optionalInteger(item.site_position),
     site_url: optionalString(item.site_url),
-    error: optionalString(item.error)
+    error: optionalString(item.error),
   };
 }
 
@@ -860,7 +1149,7 @@ function seoModelRow(value: unknown): SeoModelRow {
     error: optionalString(item.error),
     query: optionalString(item.query),
     category: optionalString(item.category),
-    service: optionalString(item.service)
+    service: optionalString(item.service),
   };
 }
 
@@ -870,7 +1159,8 @@ export function publicSeoRows(value: unknown, kind: SeoRowsKind): SeoRowsPage {
   if (!Array.isArray(page.items)) throw new Error('Invalid SEO rows');
   const next_cursor = optionalString(page.next_cursor);
   if (next_cursor !== null) seoCursor(next_cursor);
-  const project = (raw: unknown): SeoRow => (kind === 'model' ? seoModelRow(raw) : seoSearchRow(raw));
+  const project = (raw: unknown): SeoRow =>
+    kind === 'model' ? seoModelRow(raw) : seoSearchRow(raw);
   return { items: page.items.map(project), next_cursor };
 }
 
@@ -896,10 +1186,14 @@ function chatPayload(kind: ChatMessageKind, value: unknown): ChatPayload | null 
   if (kind === 'proposal') {
     const proposal: ChatProposal = {
       status: oneOf(item.status, CHAT_PROPOSAL_STATUSES),
-      url: stringValue(item.url), sphere: stringValue(item.sphere),
-      seeds: strings(item.seeds), services: strings(item.services), connection_ids: strings(item.connection_ids),
-      search_upper: requiredInteger(item.search_upper), model_upper: requiredInteger(item.model_upper),
-      generated_limit: requiredInteger(item.generated_limit)
+      url: stringValue(item.url),
+      sphere: stringValue(item.sphere),
+      seeds: strings(item.seeds),
+      services: strings(item.services),
+      connection_ids: strings(item.connection_ids),
+      search_upper: requiredInteger(item.search_upper),
+      model_upper: requiredInteger(item.model_upper),
+      generated_limit: requiredInteger(item.generated_limit),
     };
     return proposal;
   }
@@ -917,7 +1211,7 @@ function publicChatMessage(value: unknown): ChatMessage {
     kind,
     text: optionalString(item.text),
     payload: chatPayload(kind, item.payload),
-    created_at: requiredString(item.created_at)
+    created_at: requiredString(item.created_at),
   };
 }
 
@@ -927,8 +1221,10 @@ export function publicChatSummary(value: unknown): ChatSummary {
   const id = requiredString(item.id);
   seoChatPath(id);
   return {
-    id, title: requiredString(item.title), updated_at: requiredString(item.updated_at),
-    running: requiredBoolean(item.running)
+    id,
+    title: requiredString(item.title),
+    updated_at: requiredString(item.updated_at),
+    running: requiredBoolean(item.running),
   };
 }
 
@@ -942,8 +1238,9 @@ export function publicChatPage(value: unknown): ChatPage {
   const item = record(value);
   if (!Array.isArray(item.messages)) throw new Error('Invalid chat page');
   return {
-    chat: publicChatSummary(item.chat), messages: item.messages.map(publicChatMessage),
-    next_cursor: optionalInteger(item.next_cursor)
+    chat: publicChatSummary(item.chat),
+    messages: item.messages.map(publicChatMessage),
+    next_cursor: optionalInteger(item.next_cursor),
   };
 }
 
@@ -962,12 +1259,22 @@ function publicChatProposalUpdated(value: unknown): ChatProposalUpdated {
   return { chat: publicChatSummary(item.chat), message: publicChatMessage(item.message) };
 }
 
-export function publicForm(value: unknown): Record<string, unknown> {  const item = record(value);
+export function publicForm(value: unknown): Record<string, unknown> {
+  const item = record(value);
   const limits = record(item.limits);
-  if (!Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids)) throw new Error('Invalid form');
-  return { limits: { max_prompts: limits.max_prompts, max_providers: limits.max_providers, max_prompt_length: limits.max_prompt_length,
-    max_brand_length: limits.max_brand_length, max_domain_length: limits.max_domain_length },
-    new_provider_fields: item.new_provider_fields, default_provider_ids: item.default_provider_ids };
+  if (!Array.isArray(item.new_provider_fields) || !Array.isArray(item.default_provider_ids))
+    throw new Error('Invalid form');
+  return {
+    limits: {
+      max_prompts: limits.max_prompts,
+      max_providers: limits.max_providers,
+      max_prompt_length: limits.max_prompt_length,
+      max_brand_length: limits.max_brand_length,
+      max_domain_length: limits.max_domain_length,
+    },
+    new_provider_fields: item.new_provider_fields,
+    default_provider_ids: item.default_provider_ids,
+  };
 }
 
 /**
@@ -981,7 +1288,10 @@ export function apiTimeoutMs(path: ApiPath): number | undefined {
   if (path === '/api/check') return undefined;
   if (path === '/api/seo/settings/test') return SEO_SETTINGS_TEST_TIMEOUT_MS;
   // Only the turn that calls the service LLM is long; every other chat read stays short.
-  if (path.startsWith('/api/seo/chats/') && SEO_CHAT_MESSAGES_SUFFIX.test(path.slice('/api/seo/chats/'.length)))
+  if (
+    path.startsWith('/api/seo/chats/') &&
+    SEO_CHAT_MESSAGES_SUFFIX.test(path.slice('/api/seo/chats/'.length))
+  )
     return SEO_CHAT_MESSAGE_TIMEOUT_MS;
   return DEFAULT_TIMEOUT_MS;
 }
@@ -993,7 +1303,20 @@ export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
 }
 
-export async function loadPageData(): Promise<{ providers: PublicProvider[]; settingsProviders: SettingsProvider[]; form: FormConfig | null; searchRegions: SearchRegion[]; searchRegionError: string; searchSettings: YandexSearchSettings | null; searchSettingsError: string; seoSettings: SeoSettings | null; seoSettingsError: string; chats: ChatSummary[]; chatsError: string; loadError: string }> {
+export async function loadPageData(): Promise<{
+  providers: PublicProvider[];
+  settingsProviders: SettingsProvider[];
+  form: FormConfig | null;
+  searchRegions: SearchRegion[];
+  searchRegionError: string;
+  searchSettings: YandexSearchSettings | null;
+  searchSettingsError: string;
+  seoSettings: SeoSettings | null;
+  seoSettingsError: string;
+  chats: ChatSummary[];
+  chatsError: string;
+  loadError: string;
+}> {
   // The region catalog is an independent request: a failure there must not stop
   // the model list, and vice versa.
   const { regions: searchRegions, error: searchRegionError } = await loadSearchRegions();
@@ -1005,24 +1328,63 @@ export async function loadPageData(): Promise<{ providers: PublicProvider[]; set
   // list must not take the model configuration down with it.
   const { chats, error: chatsError } = await loadChats();
   try {
-    const [providerResponse, formResponse, settingsResponse] = await Promise.all([pythonApi('/api/providers'), pythonApi('/api/form'), pythonApi('/api/providers/settings')]);
-    if (!providerResponse.ok || !formResponse.ok || !settingsResponse.ok ||
-        !/^application\/json(?:\s*;|$)/i.test(providerResponse.headers.get('content-type') || '') ||
-        !/^application\/json(?:\s*;|$)/i.test(formResponse.headers.get('content-type') || '') ||
-        !/^application\/json(?:\s*;|$)/i.test(settingsResponse.headers.get('content-type') || '')) throw new Error('Invalid API response');
+    const [providerResponse, formResponse, settingsResponse] = await Promise.all([
+      pythonApi('/api/providers'),
+      pythonApi('/api/form'),
+      pythonApi('/api/providers/settings'),
+    ]);
+    if (
+      !providerResponse.ok ||
+      !formResponse.ok ||
+      !settingsResponse.ok ||
+      !/^application\/json(?:\s*;|$)/i.test(providerResponse.headers.get('content-type') || '') ||
+      !/^application\/json(?:\s*;|$)/i.test(formResponse.headers.get('content-type') || '') ||
+      !/^application\/json(?:\s*;|$)/i.test(settingsResponse.headers.get('content-type') || '')
+    )
+      throw new Error('Invalid API response');
     const providers: unknown = await providerResponse.json();
     const settingsProviders: unknown = await settingsResponse.json();
-    if (!Array.isArray(providers) || !Array.isArray(settingsProviders)) throw new Error('Invalid providers');
-    return { providers: providers.map((item) => publicProvider(item) as PublicProvider), settingsProviders: settingsProviders.map(publicSettingsProvider), form: publicForm(await formResponse.json()) as FormConfig, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, chats, chatsError, loadError: '' };
+    if (!Array.isArray(providers) || !Array.isArray(settingsProviders))
+      throw new Error('Invalid providers');
+    return {
+      providers: providers.map((item) => publicProvider(item) as PublicProvider),
+      settingsProviders: settingsProviders.map(publicSettingsProvider),
+      form: publicForm(await formResponse.json()) as FormConfig,
+      searchRegions,
+      searchRegionError,
+      searchSettings,
+      searchSettingsError,
+      seoSettings,
+      seoSettingsError,
+      chats,
+      chatsError,
+      loadError: '',
+    };
   } catch {
-    return { providers: [], settingsProviders: [], form: null, searchRegions, searchRegionError, searchSettings, searchSettingsError, seoSettings, seoSettingsError, chats, chatsError, loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.' };
+    return {
+      providers: [],
+      settingsProviders: [],
+      form: null,
+      searchRegions,
+      searchRegionError,
+      searchSettings,
+      searchSettingsError,
+      seoSettings,
+      seoSettingsError,
+      chats,
+      chatsError,
+      loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.',
+    };
   }
 }
 
 async function loadChats(): Promise<{ chats: ChatSummary[]; error: string }> {
   try {
     const response = await pythonApi('/api/seo/chats');
-    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || ''))
+    if (
+      !response.ok ||
+      !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')
+    )
       throw new Error('Invalid chats');
     return { chats: publicChatList(await response.json()).items, error: '' };
   } catch {
@@ -1033,7 +1395,10 @@ async function loadChats(): Promise<{ chats: ChatSummary[]; error: string }> {
 async function loadSeoSettings(): Promise<{ settings: SeoSettings | null; error: string }> {
   try {
     const response = await pythonApi('/api/seo/settings');
-    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || ''))
+    if (
+      !response.ok ||
+      !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')
+    )
       throw new Error('Invalid SEO settings');
     return { settings: publicSeoSettings(await response.json()), error: '' };
   } catch {
@@ -1041,10 +1406,16 @@ async function loadSeoSettings(): Promise<{ settings: SeoSettings | null; error:
   }
 }
 
-async function loadSearchSettings(): Promise<{ settings: YandexSearchSettings | null; error: string }> {
+async function loadSearchSettings(): Promise<{
+  settings: YandexSearchSettings | null;
+  error: string;
+}> {
   try {
     const response = await pythonApi('/api/search/settings');
-    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || ''))
+    if (
+      !response.ok ||
+      !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')
+    )
       throw new Error('Invalid search settings');
     return { settings: publicSearchSettings(await response.json()).yandex, error: '' };
   } catch {
@@ -1055,99 +1426,163 @@ async function loadSearchSettings(): Promise<{ settings: YandexSearchSettings | 
 async function loadSearchRegions(): Promise<{ regions: SearchRegion[]; error: string }> {
   try {
     const response = await pythonApi('/api/search/regions');
-    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) throw new Error('Invalid search regions');
+    if (
+      !response.ok ||
+      !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')
+    )
+      throw new Error('Invalid search regions');
     return { regions: publicSearchRegions(await response.json()), error: '' };
   } catch {
     return { regions: [], error: 'Справочник регионов недоступен' };
   }
 }
 
-export async function proxyJson(request: Request, path: ApiPath, method: string): Promise<Response> {
+export async function proxyJson(
+  request: Request,
+  path: ApiPath,
+  method: string,
+): Promise<Response> {
   if (!validPath(path)) return json({ detail: 'Некорректное подключение' }, 400);
-  if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
-  const searchSettingsPath = path === '/api/search/settings' || path === '/api/search/settings/credentials';
-  if (searchSettingsPath && !(path === '/api/search/settings' ? ['GET', 'PUT'].includes(method) : method === 'DELETE'))
+  if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method))
     return json({ detail: 'Недопустимый метод' }, 405);
-  const seoSettingsPath = path === '/api/seo/settings' || path === '/api/seo/settings/credentials' ||
+  const searchSettingsPath =
+    path === '/api/search/settings' || path === '/api/search/settings/credentials';
+  if (
+    searchSettingsPath &&
+    !(path === '/api/search/settings' ? ['GET', 'PUT'].includes(method) : method === 'DELETE')
+  )
+    return json({ detail: 'Недопустимый метод' }, 405);
+  const seoSettingsPath =
+    path === '/api/seo/settings' ||
+    path === '/api/seo/settings/credentials' ||
     path === '/api/seo/settings/test';
   if (seoSettingsPath) {
-    const allowed = path === '/api/seo/settings' ? ['GET', 'PUT']
-      : path === '/api/seo/settings/credentials' ? ['DELETE'] : ['POST'];
+    const allowed =
+      path === '/api/seo/settings'
+        ? ['GET', 'PUT']
+        : path === '/api/seo/settings/credentials'
+          ? ['DELETE']
+          : ['POST'];
     if (!allowed.includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
   }
   // Each chat path has exactly the methods the screen uses: the collection is
   // read and created, a chat is read and deleted, and the two actions are one
   // write each. Anything else never reaches Python.
-  const chatMessagesPath = path.startsWith('/api/seo/chats/') &&
+  const chatMessagesPath =
+    path.startsWith('/api/seo/chats/') &&
     SEO_CHAT_MESSAGES_SUFFIX.test(path.slice('/api/seo/chats/'.length));
-  const chatProposalPath = path.startsWith('/api/seo/chats/') &&
+  const chatProposalPath =
+    path.startsWith('/api/seo/chats/') &&
     SEO_CHAT_PROPOSAL_SUFFIX.test(path.slice('/api/seo/chats/'.length));
-  if (path === '/api/seo/chats' && !['GET', 'POST'].includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
+  if (path === '/api/seo/chats' && !['GET', 'POST'].includes(method))
+    return json({ detail: 'Недопустимый метод' }, 405);
   if (chatMessagesPath && method !== 'POST') return json({ detail: 'Недопустимый метод' }, 405);
   if (chatProposalPath && method !== 'PUT') return json({ detail: 'Недопустимый метод' }, 405);
-  if (path.startsWith('/api/seo/chats/') && !chatMessagesPath && !chatProposalPath &&
-      !['GET', 'DELETE'].includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
+  if (
+    path.startsWith('/api/seo/chats/') &&
+    !chatMessagesPath &&
+    !chatProposalPath &&
+    !['GET', 'DELETE'].includes(method)
+  )
+    return json({ detail: 'Недопустимый метод' }, 405);
   // The connection probe and the cancel action are bodyless POSTs: neither
   // carries a payload, and the probe triggers one upstream chat call.
-  const bodylessPost = path === '/api/seo/settings/test' ||
+  const bodylessPost =
+    path === '/api/seo/settings/test' ||
     (path.startsWith('/api/seo/analyses/') && path.endsWith('/cancel'));
   let body: string | undefined;
   if (method !== 'GET') {
     if (!sameOriginRequest(request)) return json({ detail: 'Недопустимый источник запроса' }, 403);
     const declared = request.headers.get('content-length');
-    if (declared && Number(declared) > MAX_BODY_BYTES) return json({ detail: 'Запрос слишком большой' }, 413);
+    if (declared && Number(declared) > MAX_BODY_BYTES)
+      return json({ detail: 'Запрос слишком большой' }, 413);
     if (method === 'DELETE') {
       if (await request.text()) return json({ detail: 'Удаление не принимает тело запроса' }, 400);
     } else if (!bodylessPost) {
-      if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) return json({ detail: 'Ожидается JSON' }, 415);
+      if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || ''))
+        return json({ detail: 'Ожидается JSON' }, 415);
       body = await request.text();
-      if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) return json({ detail: 'Запрос слишком большой' }, 413);
-      try { JSON.parse(body); }
-      catch { return json({ detail: 'Некорректный JSON' }, 400); }
+      if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES)
+        return json({ detail: 'Запрос слишком большой' }, 413);
+      try {
+        JSON.parse(body);
+      } catch {
+        return json({ detail: 'Некорректный JSON' }, 400);
+      }
     }
   }
   let upstream: Response;
   try {
-    upstream = await pythonApi(path, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, body });
+    upstream = await pythonApi(path, {
+      method,
+      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      body,
+    });
   } catch {
     return json({ detail: 'Python API недоступен' }, 502);
   }
-  if (method === 'DELETE' && upstream.status === 204 && !searchSettingsPath && !seoSettingsPath) return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
-  if (!/^application\/json(?:\s*;|$)/i.test(upstream.headers.get('content-type') || '')) return json({ detail: 'Некорректный ответ Python API' }, 502);
+  if (method === 'DELETE' && upstream.status === 204 && !searchSettingsPath && !seoSettingsPath)
+    return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+  if (!/^application\/json(?:\s*;|$)/i.test(upstream.headers.get('content-type') || ''))
+    return json({ detail: 'Некорректный ответ Python API' }, 502);
   try {
     const value: unknown = await upstream.json();
     if (!upstream.ok) {
-      if (searchSettingsPath) return json({ detail: 'Ошибка настроек поисковой системы' }, upstream.status);
-      if (seoSettingsPath) return json({ detail: 'Ошибка настроек служебной LLM' }, upstream.status);
+      if (searchSettingsPath)
+        return json({ detail: 'Ошибка настроек поисковой системы' }, upstream.status);
+      if (seoSettingsPath)
+        return json({ detail: 'Ошибка настроек служебной LLM' }, upstream.status);
       const detail = record(value).detail;
-      return json({ detail: typeof detail === 'string' ? detail : 'Ошибка Python API' }, upstream.status);
+      return json(
+        { detail: typeof detail === 'string' ? detail : 'Ошибка Python API' },
+        upstream.status,
+      );
     }
-    if (path === '/api/runs' && method === 'POST') return json(publicRunCreated(value), upstream.status);
-    if ((path === '/api/runs' || path.startsWith('/api/runs?cursor=')) && method === 'GET') return json(publicRunList(value), upstream.status);
-    if (path.startsWith('/api/runs/') && method === 'GET') return json(publicRunSnapshot(value), upstream.status);
+    if (path === '/api/runs' && method === 'POST')
+      return json(publicRunCreated(value), upstream.status);
+    if ((path === '/api/runs' || path.startsWith('/api/runs?cursor=')) && method === 'GET')
+      return json(publicRunList(value), upstream.status);
+    if (path.startsWith('/api/runs/') && method === 'GET')
+      return json(publicRunSnapshot(value), upstream.status);
     if (path === '/api/seo/settings' || path === '/api/seo/settings/credentials')
       return json(publicSeoSettings(value), upstream.status);
-    if (path === '/api/seo/settings/test') return json(publicSeoSettingsTest(value), upstream.status);
+    if (path === '/api/seo/settings/test')
+      return json(publicSeoSettingsTest(value), upstream.status);
     // The chat responses are projected field by field: the draft, the open
     // proposal pointer and the active run of a chat stay in the server.
-    if (path === '/api/seo/chats' && method === 'GET') return json(publicChatList(value), upstream.status);
-    if (path === '/api/seo/chats' && method === 'POST') return json(publicChatCreated(value), upstream.status);
-    if (chatMessagesPath && method === 'POST') return json(publicChatMessages(value), upstream.status);
-    if (chatProposalPath && method === 'PUT') return json(publicChatProposalUpdated(value), upstream.status);
-    if (path.startsWith('/api/seo/chats/') && method === 'GET') return json(publicChatPage(value), upstream.status);
-    if (path === '/api/seo/analyses' && method === 'POST') return json(publicSeoAnalysisCreated(value), upstream.status);
-    if ((path === '/api/seo/analyses' || path.startsWith('/api/seo/analyses?cursor=')) && method === 'GET')
+    if (path === '/api/seo/chats' && method === 'GET')
+      return json(publicChatList(value), upstream.status);
+    if (path === '/api/seo/chats' && method === 'POST')
+      return json(publicChatCreated(value), upstream.status);
+    if (chatMessagesPath && method === 'POST')
+      return json(publicChatMessages(value), upstream.status);
+    if (chatProposalPath && method === 'PUT')
+      return json(publicChatProposalUpdated(value), upstream.status);
+    if (path.startsWith('/api/seo/chats/') && method === 'GET')
+      return json(publicChatPage(value), upstream.status);
+    if (path === '/api/seo/analyses' && method === 'POST')
+      return json(publicSeoAnalysisCreated(value), upstream.status);
+    if (
+      (path === '/api/seo/analyses' || path.startsWith('/api/seo/analyses?cursor=')) &&
+      method === 'GET'
+    )
       return json(publicSeoHistory(value), upstream.status);
     const seoRows = /^\/api\/seo\/analyses\/[^/]+\/rows\?kind=(model|search)/.exec(path);
-    if (seoRows && method === 'GET') return json(publicSeoRows(value, seoRows[1] as SeoRowsKind), upstream.status);
+    if (seoRows && method === 'GET')
+      return json(publicSeoRows(value, seoRows[1] as SeoRowsKind), upstream.status);
     if (/^\/api\/seo\/analyses\/[^/]+\/trace(?:\?|$)/.test(path) && method === 'GET')
       return json(publicSeoTracePage(value), upstream.status);
-    if (path.startsWith('/api/seo/analyses/') && method === 'GET') return json(publicSeoSnapshot(value), upstream.status);
-    if (path.endsWith('/cancel') && method === 'POST') return json(publicSeoSnapshot(value), upstream.status);
-    if (path === '/api/search' && method === 'POST') return json(publicSearchCreated(value), upstream.status);
-    if (path === '/api/search/regions' && method === 'GET') return json(publicSearchRegions(value), upstream.status);
+    if (path.startsWith('/api/seo/analyses/') && method === 'GET')
+      return json(publicSeoSnapshot(value), upstream.status);
+    if (path.endsWith('/cancel') && method === 'POST')
+      return json(publicSeoSnapshot(value), upstream.status);
+    if (path === '/api/search' && method === 'POST')
+      return json(publicSearchCreated(value), upstream.status);
+    if (path === '/api/search/regions' && method === 'GET')
+      return json(publicSearchRegions(value), upstream.status);
     if (searchSettingsPath) return json(publicSearchSettings(value), upstream.status);
-    if (path.startsWith('/api/search/') && method === 'GET') return json(publicSearchSnapshot(value), upstream.status);
+    if (path.startsWith('/api/search/') && method === 'GET')
+      return json(publicSearchSnapshot(value), upstream.status);
     if (path === '/api/providers' && method === 'GET') {
       if (!Array.isArray(value)) throw new Error('Invalid providers');
       return json(value.map(publicProvider), upstream.status);
@@ -1156,12 +1591,17 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
       if (!Array.isArray(value)) throw new Error('Invalid settings providers');
       return json(value.map(publicSettingsProvider), upstream.status);
     }
-    if (path === '/api/config' && method === 'GET') return json(publicConfig(value), upstream.status);
-    if (path.startsWith('/api/providers/settings/') && method === 'DELETE') return json({ deleted: record(value).deleted === true }, upstream.status);
-    if (path.startsWith('/api/providers/settings') && method !== 'DELETE') return json(publicSettingsProvider(value), upstream.status);
+    if (path === '/api/config' && method === 'GET')
+      return json(publicConfig(value), upstream.status);
+    if (path.startsWith('/api/providers/settings/') && method === 'DELETE')
+      return json({ deleted: record(value).deleted === true }, upstream.status);
+    if (path.startsWith('/api/providers/settings') && method !== 'DELETE')
+      return json(publicSettingsProvider(value), upstream.status);
     if (path === '/api/form' && method === 'GET') return json(publicForm(value), upstream.status);
-    if (path.startsWith('/api/providers/') && method === 'DELETE') return json({ deleted: record(value).deleted === true }, upstream.status);
-    if (path.startsWith('/api/providers') && method !== 'DELETE') return json(publicProvider(value), upstream.status);
+    if (path.startsWith('/api/providers/') && method === 'DELETE')
+      return json({ deleted: record(value).deleted === true }, upstream.status);
+    if (path.startsWith('/api/providers') && method !== 'DELETE')
+      return json(publicProvider(value), upstream.status);
     if (path === '/api/check') return json(publicCheck(value), upstream.status);
     throw new Error('Unknown response');
   } catch {
@@ -1170,30 +1610,45 @@ export async function proxyJson(request: Request, path: ApiPath, method: string)
 }
 
 export async function proxyCsv(request: Request, path: ApiPath): Promise<Response> {
-  if (!validPath(path) || !path.endsWith('/export.csv')) return json({ detail: 'Некорректный прогон' }, 400);
+  if (!validPath(path) || !path.endsWith('/export.csv'))
+    return json({ detail: 'Некорректный прогон' }, 400);
   if (request.method !== 'GET') return json({ detail: 'Недопустимый метод' }, 405);
   let upstream: Response;
-  try { upstream = await pythonApi(path); }
-  catch { return json({ detail: 'Python API недоступен' }, 502); }
+  try {
+    upstream = await pythonApi(path);
+  } catch {
+    return json({ detail: 'Python API недоступен' }, 502);
+  }
   if (!upstream.ok) {
     if (!/^application\/json(?:\s*;|$)/i.test(upstream.headers.get('content-type') || ''))
       return json({ detail: 'Некорректный ответ Python API' }, 502);
     try {
       const detail = record(await upstream.json()).detail;
-      return json({ detail: typeof detail === 'string' ? detail : 'Ошибка Python API' }, upstream.status);
-    } catch { return json({ detail: 'Некорректный ответ Python API' }, 502); }
+      return json(
+        { detail: typeof detail === 'string' ? detail : 'Ошибка Python API' },
+        upstream.status,
+      );
+    } catch {
+      return json({ detail: 'Некорректный ответ Python API' }, 502);
+    }
   }
   if (!/^text\/csv(?:\s*;|$)/i.test(upstream.headers.get('content-type') || ''))
     return json({ detail: 'Некорректный ответ Python API' }, 502);
   const declared = upstream.headers.get('content-length');
-  if (declared && Number(declared) > MAX_CSV_BYTES) return json({ detail: 'Результат слишком большой' }, 502);
+  if (declared && Number(declared) > MAX_CSV_BYTES)
+    return json({ detail: 'Результат слишком большой' }, 502);
   const body = new Uint8Array(await upstream.arrayBuffer());
   if (body.byteLength > MAX_CSV_BYTES) return json({ detail: 'Результат слишком большой' }, 502);
   const rawFilename = upstream.headers.get('content-disposition') || '';
-  const date = /^attachment; filename="ai-serp-results-(\d{4}-\d{2}-\d{2})\.csv"$/.exec(rawFilename)?.[1]
-    || new Date().toISOString().slice(0, 10);
-  return new Response(body, { status: 200, headers: {
-    'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store',
-    'content-disposition': `attachment; filename="ai-serp-results-${date}.csv"`
-  } });
+  const date =
+    /^attachment; filename="ai-serp-results-(\d{4}-\d{2}-\d{2})\.csv"$/.exec(rawFilename)?.[1] ||
+    new Date().toISOString().slice(0, 10);
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-disposition': `attachment; filename="ai-serp-results-${date}.csv"`,
+    },
+  });
 }

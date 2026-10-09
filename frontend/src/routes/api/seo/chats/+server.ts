@@ -1,9 +1,11 @@
 import type { RequestHandler } from './$types';
 import { proxyJson } from '$lib/server/python-api';
 
-const invalid = () => new Response(JSON.stringify({ detail: 'Некорректный список чатов' }), {
-  status: 400, headers: { 'content-type': 'application/json' }
-});
+const invalid = () =>
+  new Response(JSON.stringify({ detail: 'Некорректный список чатов' }), {
+    status: 400,
+    headers: { 'content-type': 'application/json' },
+  });
 
 const hasQuery = (request: Request) => [...new URL(request.url).searchParams.keys()].length > 0;
 

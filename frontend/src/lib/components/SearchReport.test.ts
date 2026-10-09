@@ -13,12 +13,14 @@ function row(overrides: Partial<SearchRow>): SearchRow {
     position: null,
     url: null,
     error: null,
-    ...overrides
+    ...overrides,
   };
 }
 
 function snapshot(results: SearchRow[], overrides: Partial<SearchSnapshot> = {}): SearchSnapshot {
-  const completed = results.filter((item) => item.status === 'found' || item.status === 'absent' || item.status === 'error').length;
+  const completed = results.filter(
+    (item) => item.status === 'found' || item.status === 'absent' || item.status === 'error',
+  ).length;
   return {
     id: 'job-1',
     domain: 'example.ru',
@@ -27,12 +29,13 @@ function snapshot(results: SearchRow[], overrides: Partial<SearchSnapshot> = {})
     completed,
     status: completed === results.length ? 'done' : 'pending',
     summary: {
-      successful: results.filter((item) => item.status === 'found' || item.status === 'absent').length,
+      successful: results.filter((item) => item.status === 'found' || item.status === 'absent')
+        .length,
       found: results.filter((item) => item.status === 'found').length,
-      failed: results.filter((item) => item.status === 'error').length
+      failed: results.filter((item) => item.status === 'error').length,
     },
     results,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -47,9 +50,14 @@ describe('SearchReport', () => {
         snapshot: snapshot([
           row({ status: 'found', position: 2, url: 'https://shop.example.ru/page' }),
           row({ status: 'absent', region_id: 213, region_name: 'Москва' }),
-          row({ status: 'error', region_id: 65, region_name: 'Новосибирск', error: 'Не удалось получить выдачу Яндекса' })
-        ])
-      }
+          row({
+            status: 'error',
+            region_id: 65,
+            region_name: 'Новосибирск',
+            error: 'Не удалось получить выдачу Яндекса',
+          }),
+        ]),
+      },
     });
 
     expect(screen.getByText('Найдено в первой десятке')).toBeTruthy();
@@ -59,17 +67,27 @@ describe('SearchReport', () => {
   });
 
   it('shows the rank and the link of a found pair', () => {
-    render(SearchReport, { props: { snapshot: snapshot([row({ status: 'found', position: 2, url: 'https://shop.example.ru/page' })]) } });
+    render(SearchReport, {
+      props: {
+        snapshot: snapshot([
+          row({ status: 'found', position: 2, url: 'https://shop.example.ru/page' }),
+        ]),
+      },
+    });
 
     const found = rows()[0];
     expect(found.textContent).toContain('Сайт в первой десятке');
     expect(found.textContent).toContain('2');
-    expect(within(found).getByRole('link').getAttribute('href')).toBe('https://shop.example.ru/page');
+    expect(within(found).getByRole('link').getAttribute('href')).toBe(
+      'https://shop.example.ru/page',
+    );
   });
 
   it('never renders a failed pair as an absent site', () => {
     render(SearchReport, {
-      props: { snapshot: snapshot([row({ status: 'error', error: 'Не удалось получить выдачу Яндекса' })]) }
+      props: {
+        snapshot: snapshot([row({ status: 'error', error: 'Не удалось получить выдачу Яндекса' })]),
+      },
     });
 
     const failed = rows()[0];
@@ -81,7 +99,15 @@ describe('SearchReport', () => {
 
   it('distinguishes a pending pair from an absent one', () => {
     render(SearchReport, {
-      props: { snapshot: snapshot([row({ status: 'waiting' }), row({ status: 'absent', region_id: 213, region_name: 'Москва' })], { completed: 1, status: 'pending' }) }
+      props: {
+        snapshot: snapshot(
+          [
+            row({ status: 'waiting' }),
+            row({ status: 'absent', region_id: 213, region_name: 'Москва' }),
+          ],
+          { completed: 1, status: 'pending' },
+        ),
+      },
     });
 
     expect(rows()[0].textContent).toContain('Яндекс считает');

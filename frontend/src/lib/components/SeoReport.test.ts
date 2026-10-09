@@ -3,15 +3,20 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import SeoReport from './SeoReport.svelte';
 import type {
-  SeoAnalysisSnapshot, SeoCompetitorAggregates, SeoMetric, SeoModelRow, SeoSearchRow
+  SeoAnalysisSnapshot,
+  SeoCompetitorAggregates,
+  SeoMetric,
+  SeoModelRow,
+  SeoSearchRow,
 } from '$lib/types';
 
 /** One share: `share` is a fraction of the denominator, or null when it is empty. */
 function metric(denominator: number, successes: number, average: number | null = null): SeoMetric {
   return {
-    denominator, successes,
+    denominator,
+    successes,
     share: denominator > 0 ? Math.round((successes / denominator) * 10_000) / 10_000 : null,
-    average_position: average
+    average_position: average,
   };
 }
 
@@ -19,75 +24,116 @@ const empty = metric(0, 0);
 const search = {
   overall: metric(4, 2, 3.5),
   branded: metric(1, 1, 2),
-  unbranded: metric(3, 1, 5)
+  unbranded: metric(3, 1, 5),
 };
 
 const competitor: SeoCompetitorAggregates = {
-  host: 'flower-shop.example', title: 'Цветочный магазин — доставка', occurrences: 2,
-  average_position: 2.5, seed_indexes: [0, 1],
+  host: 'flower-shop.example',
+  title: 'Цветочный магазин — доставка',
+  occurrences: 2,
+  average_position: 2.5,
+  seed_indexes: [0, 1],
   search: { overall: metric(4, 1, 2), branded: empty, unbranded: metric(3, 1, 2) },
-  ai: { 'model-1': { host: metric(4, 1) } }
+  ai: { 'model-1': { host: metric(4, 1) } },
 };
 
 const modelRow: SeoModelRow = {
-  query_index: 0, connection_id: 'model-1', provider_name: 'Модель', status: 'found',
-  answer: 'Ромашка рекомендует доставку цветов', name_mentioned: true, host_mentioned: false,
-  error: null, query: 'купить цветы', category: 'commercial', service: 'Доставка цветов'
+  query_index: 0,
+  connection_id: 'model-1',
+  provider_name: 'Модель',
+  status: 'found',
+  answer: 'Ромашка рекомендует доставку цветов',
+  name_mentioned: true,
+  host_mentioned: false,
+  error: null,
+  query: 'купить цветы',
+  category: 'commercial',
+  service: 'Доставка цветов',
 };
 
 const searchRow: SeoSearchRow = {
-  query_index: 2, query: 'цветы или подарки', category: 'comparative', service: null,
-  status: 'error', site_position: null, site_url: null, error: 'Не удалось получить выдачу Яндекса'
+  query_index: 2,
+  query: 'цветы или подарки',
+  category: 'comparative',
+  service: null,
+  status: 'error',
+  site_position: null,
+  site_url: null,
+  error: 'Не удалось получить выдачу Яндекса',
 };
 
 function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
   return {
-    id: 'seo-1', status: 'completed', created_at: '2026-09-28T00:00:00Z', updated_at: '2026-09-28T01:00:00Z',
+    id: 'seo-1',
+    status: 'completed',
+    created_at: '2026-09-28T00:00:00Z',
+    updated_at: '2026-09-28T01:00:00Z',
     finished_at: '2026-09-28T01:00:00Z',
     input: {
-      url: 'https://example.ru', host: 'example.ru', sphere: 'Цветы',
+      url: 'https://example.ru',
+      host: 'example.ru',
+      sphere: 'Цветы',
       seeds: ['купить цветы', 'доставка букетов', 'цветы или подарки'],
-      services: ['Доставка цветов', 'Букеты'], connection_ids: ['model-1']
+      services: ['Доставка цветов', 'Букеты'],
+      connection_ids: ['model-1'],
     },
     estimate: { search_upper: 23, model_upper: 20, generated_limit: 20, connections: 1 },
-    company_name: 'Ромашка', services: ['Доставка цветов', 'Букеты'], pages: [],
-    stages: [], agents: [],
+    company_name: 'Ромашка',
+    services: ['Доставка цветов', 'Букеты'],
+    pages: [],
+    stages: [],
+    agents: [],
     budget: {
-      pages: { used: 1, limit: 20 }, searches: { used: 5, limit: 43 },
-      model_answers: { used: 4, limit: 40 }, tool_calls: { used: 9, limit: 120 },
-      handoffs: { used: 5, limit: 15 }, seed_searches: 3, model_rows: 4, steps: 12, agent_steps: {}
+      pages: { used: 1, limit: 20 },
+      searches: { used: 5, limit: 43 },
+      model_answers: { used: 4, limit: 40 },
+      tool_calls: { used: 9, limit: 120 },
+      handoffs: { used: 5, limit: 15 },
+      seed_searches: 3,
+      model_rows: 4,
+      steps: 12,
+      agent_steps: {},
     },
     budget_exhausted: false,
-    candidates: [], queries: [],
+    candidates: [],
+    queries: [],
     counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 1, model_errors: 0 },
     readiness: {
-      report_ready: true, summary_ready: true, queries_ready: true, has_submitted_search_rows: false,
-      has_unsubmitted_search_rows: false, has_unfinished_model_rows: false, search_rows: 4, model_rows: 4
+      report_ready: true,
+      summary_ready: true,
+      queries_ready: true,
+      has_submitted_search_rows: false,
+      has_unsubmitted_search_rows: false,
+      has_unfinished_model_rows: false,
+      search_rows: 4,
+      model_rows: 4,
     },
     aggregates: {
       site: {
         search,
         ai: {
           'model-1': {
-            name: metric(4, 2), host: metric(4, 1), combined: metric(4, 3),
+            name: metric(4, 2),
+            host: metric(4, 1),
+            combined: metric(4, 3),
             branded: { name: metric(1, 1), host: metric(1, 0), combined: metric(1, 1) },
-            unbranded: { name: metric(3, 1), host: metric(3, 1), combined: metric(3, 2) }
-          }
-        }
+            unbranded: { name: metric(3, 1), host: metric(3, 1), combined: metric(3, 2) },
+          },
+        },
       },
       competitors: [competitor],
       categories: {
         commercial: { search: metric(2, 2, 2), ai: { 'model-1': metric(2, 2) } },
         informational: { search: metric(1, 0), ai: { 'model-1': metric(1, 0) } },
-        comparative: { search: empty, ai: { 'model-1': empty } }
+        comparative: { search: empty, ai: { 'model-1': empty } },
       },
       services: {
         'Доставка цветов': { search: metric(2, 1, 4), ai: { 'model-1': metric(2, 1) } },
-        '': { search: metric(2, 1), ai: { 'model-1': metric(2, 1) } }
+        '': { search: metric(2, 1), ai: { 'model-1': metric(2, 1) } },
       },
-      counts: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 1, model_errors: 0 }
+      counts: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 1, model_errors: 0 },
     },
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -104,11 +150,17 @@ describe('SeoReport', () => {
     const table = screen.getByRole('table', { name: 'Сайт в Яндексе' });
     expect(table.textContent).toContain('2 из 4');
     expect(table.textContent).toContain('3,5');
-    expect(content('[data-report-counters]')).toContain('Запросов: 4');
+    // The report is numbers-only and compact: the parameters are one line, and
+    // there is no counters block or breakdown table any more.
+    expect(content('[data-report-params]')).toContain('example.ru');
+    expect(content('[data-report-params]')).toContain('Ромашка');
+    expect(document.querySelector('[data-report-counters]')).toBeNull();
   });
 
   it('renders the name, host and combined AI shares of every connection split by brand', () => {
-    render(SeoReport, { props: { snapshot: snapshot(), connectionNames: { 'model-1': 'DeepSeek' } } });
+    render(SeoReport, {
+      props: { snapshot: snapshot(), connectionNames: { 'model-1': 'DeepSeek' } },
+    });
     const table = screen.getByRole('table', { name: 'Упоминания: DeepSeek' });
     expect(table).toBeTruthy();
     expect(content('[data-metric="ai-model-1-all-name"]')).toBe('50 %');
@@ -130,41 +182,33 @@ describe('SeoReport', () => {
     expect(content('[data-metric="candidate-flower-shop.example-ai-model-1"]')).toBe('25 %');
   });
 
-  it('renders the category and service breakdowns', () => {
-    render(SeoReport, { props: { snapshot: snapshot() } });
-    expect(content('[data-metric="category-commercial"]')).toBe('100 %');
-    expect(content('[data-metric="category-informational"]')).toBe('0 %');
-    expect(content('[data-metric="category-comparative"]')).toBe('—');
-    const categories = screen.getByRole('table', { name: 'Разрезы по категориям' });
-    expect(categories.textContent).toContain('Коммерческие');
-    expect(categories.textContent).toContain('Сравнительные');
-
-    const services = screen.getByRole('table', { name: 'Разрезы по услугам' });
-    expect(services.textContent).toContain('Доставка цветов');
-    expect(services.textContent).toContain('Без услуги');
-    expect(content('[data-metric="service-Доставка цветов"]')).toBe('50 %');
-    expect(content('[data-metric="service-none"]')).toBe('50 %');
-  });
-
   it('renders «—» for empty denominators, never-found positions and a missing company name', () => {
-    render(SeoReport, { props: {
-      snapshot: snapshot({
-        company_name: '',
-        aggregates: {
-          ...snapshot().aggregates,
-          site: {
-            search: { overall: metric(2, 1, null), branded: empty, unbranded: metric(1, 1, null) },
-            ai: {
-              'model-1': {
-                name: metric(2, 0), host: metric(2, 1), combined: metric(2, 1),
-                branded: { name: empty, host: empty, combined: empty },
-                unbranded: { name: metric(2, 0), host: metric(2, 1), combined: metric(2, 1) }
-              }
-            }
-          }
-        }
-      })
-    } });
+    render(SeoReport, {
+      props: {
+        snapshot: snapshot({
+          company_name: '',
+          aggregates: {
+            ...snapshot().aggregates,
+            site: {
+              search: {
+                overall: metric(2, 1, null),
+                branded: empty,
+                unbranded: metric(1, 1, null),
+              },
+              ai: {
+                'model-1': {
+                  name: metric(2, 0),
+                  host: metric(2, 1),
+                  combined: metric(2, 1),
+                  branded: { name: empty, host: empty, combined: empty },
+                  unbranded: { name: metric(2, 0), host: metric(2, 1), combined: metric(2, 1) },
+                },
+              },
+            },
+          },
+        }),
+      },
+    });
     expect(content('[data-metric="site-overall"]')).toBe('50 %');
     // No found row, so the average position is unknown.
     expect(screen.getByRole('table', { name: 'Сайт в Яндексе' }).textContent).toContain('—');
@@ -175,21 +219,28 @@ describe('SeoReport', () => {
   });
 
   it('shows the saved model answers and the Yandex rows as they are', () => {
-    render(SeoReport, { props: {
-      snapshot: snapshot(),
-      rows: { model: [modelRow], search: [searchRow] }
-    } });
-    expect(screen.getByRole('table', { name: 'Ответы моделей' }).textContent).toContain('Ромашка рекомендует доставку цветов');
+    render(SeoReport, {
+      props: {
+        snapshot: snapshot(),
+        rows: { model: [modelRow], search: [searchRow] },
+      },
+    });
+    expect(screen.getByRole('table', { name: 'Ответы моделей' }).textContent).toContain(
+      'Ромашка рекомендует доставку цветов',
+    );
     const searchTable = screen.getByRole('table', { name: 'Проверки в Яндексе' });
     expect(searchTable.textContent).toContain('Не удалось получить выдачу Яндекса');
     expect(searchTable.textContent).toContain('Ошибка');
     // The failed row is not turned into an absent site.
-    expect(document.querySelector('[data-search-detail]')?.getAttribute('data-status')).toBe('error');
+    expect(document.querySelector('[data-search-detail]')?.getAttribute('data-status')).toBe(
+      'error',
+    );
   });
 
   it('keeps a long answer out of the table and opens it as Markdown on click', async () => {
-    const long = 'Первая строка ответа.\n\n### Что уточнить\n- **материалы** и сроки\n'
-      + 'Подробности ремонта. '.repeat(60);
+    const long =
+      'Первая строка ответа.\n\n### Что уточнить\n- **материалы** и сроки\n' +
+      'Подробности ремонта. '.repeat(60);
     const row: SeoModelRow = { ...modelRow, answer: long };
     render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
 
@@ -217,14 +268,18 @@ describe('SeoReport', () => {
     expect(document.querySelector('[data-answer-caption]')?.textContent).toContain('Модель');
     expect(document.querySelector('[data-answer-caption]')?.textContent).toContain('купить цветы');
     // The row still shows the preview, not the whole answer.
-    expect(document.querySelector('[data-model-answer-preview]')?.textContent?.endsWith('…')).toBe(true);
+    expect(document.querySelector('[data-model-answer-preview]')?.textContent?.endsWith('…')).toBe(
+      true,
+    );
   });
 
   it('sanitizes an answer before it is rendered as Markdown', async () => {
     const row: SeoModelRow = {
       ...modelRow,
-      answer: '**жирный** текст ответа.\n\n<script>alert(1)</script>\n\n'
-        + '<img src=x onerror=alert(2)> ' + 'хвост '.repeat(40)
+      answer:
+        '**жирный** текст ответа.\n\n<script>alert(1)</script>\n\n' +
+        '<img src=x onerror=alert(2)> ' +
+        'хвост '.repeat(40),
     };
     render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
 
@@ -258,46 +313,66 @@ describe('SeoReport', () => {
   it('offers no dialog for an answer that already fits its preview', () => {
     render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [modelRow], search: [] } } });
 
-    expect(document.querySelector('[data-model-answer-preview]')?.textContent).toBe(modelRow.answer);
+    expect(document.querySelector('[data-model-answer-preview]')?.textContent).toBe(
+      modelRow.answer,
+    );
     expect(screen.queryByRole('button', { name: 'Читать полностью' })).toBeNull();
   });
 
   it('paginates the detail rows through the cursor callbacks', async () => {
     const onMore = vi.fn();
-    const view = render(SeoReport, { props: {
-      snapshot: snapshot(), rows: { model: [modelRow], search: [searchRow] },
-      cursors: { model: 'cursor-1', search: null }, onMore
-    } });
+    const view = render(SeoReport, {
+      props: {
+        snapshot: snapshot(),
+        rows: { model: [modelRow], search: [searchRow] },
+        cursors: { model: 'cursor-1', search: null },
+        onMore,
+      },
+    });
     await fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));
     expect(onMore).toHaveBeenCalledWith('model');
 
     view.unmount();
-    const blocked = render(SeoReport, { props: {
-      snapshot: snapshot(), rows: { model: [modelRow], search: [searchRow] },
-      cursors: { model: 'cursor-1', search: null }, loadingRows: 'model', onMore
-    } });
+    const blocked = render(SeoReport, {
+      props: {
+        snapshot: snapshot(),
+        rows: { model: [modelRow], search: [searchRow] },
+        cursors: { model: 'cursor-1', search: null },
+        loadingRows: 'model',
+        onMore,
+      },
+    });
     const button = screen.getByRole('button', { name: 'Загружаем…' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     blocked.unmount();
 
-    render(SeoReport, { props: {
-      snapshot: snapshot(), rows: { model: [], search: [] },
-      cursors: { model: null, search: null }, onMore
-    } });
+    render(SeoReport, {
+      props: {
+        snapshot: snapshot(),
+        rows: { model: [], search: [] },
+        cursors: { model: null, search: null },
+        onMore,
+      },
+    });
     expect(screen.queryByRole('button', { name: 'Показать ещё' })).toBeNull();
     expect(screen.getByText('Сохранённых ответов моделей нет.')).toBeTruthy();
   });
 
   it('renders a failed analysis report with empty sections instead of crashing', () => {
-    render(SeoReport, { props: {
-      snapshot: snapshot({
-        status: 'failed', counters: undefined as unknown as SeoAnalysisSnapshot['counters'],
-        aggregates: undefined as unknown as SeoAnalysisSnapshot['aggregates']
-      })
-    } });
+    render(SeoReport, {
+      props: {
+        snapshot: snapshot({
+          status: 'failed',
+          counters: undefined as unknown as SeoAnalysisSnapshot['counters'],
+          aggregates: undefined as unknown as SeoAnalysisSnapshot['aggregates'],
+        }),
+      },
+    });
     expect(content('[data-report-status]')).toBe('Ошибка');
     expect(content('[data-metric="site-overall"]')).toBe('—');
-    expect(screen.getByText('Повторяющихся кандидатов нет: не хватило успешных ключевых выдач.')).toBeTruthy();
+    expect(
+      screen.getByText('Повторяющихся кандидатов нет: не хватило успешных ключевых выдач.'),
+    ).toBeTruthy();
     expect(screen.getByText('Ответы моделей не сохранены.')).toBeTruthy();
   });
 });

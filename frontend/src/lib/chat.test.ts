@@ -3,13 +3,25 @@ import { messageText, statusLabel } from './chat';
 import type { ChatMessage, ChatSummary } from './types';
 
 function chat(overrides: Partial<ChatSummary> = {}): ChatSummary {
-  return { id: '1', title: 'Цветы', updated_at: '2026-10-07T10:00:00Z', running: false, ...overrides };
+  return {
+    id: '1',
+    title: 'Цветы',
+    updated_at: '2026-10-07T10:00:00Z',
+    running: false,
+    ...overrides,
+  };
 }
 
 function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
-    id: 'm1', seq: 1, role: 'assistant', kind: 'text', text: 'привет',
-    payload: null, created_at: '2026-10-07T10:00:00Z', ...overrides
+    id: 'm1',
+    seq: 1,
+    role: 'assistant',
+    kind: 'text',
+    text: 'привет',
+    payload: null,
+    created_at: '2026-10-07T10:00:00Z',
+    ...overrides,
   };
 }
 

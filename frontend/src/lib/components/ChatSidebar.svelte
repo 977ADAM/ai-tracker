@@ -8,7 +8,7 @@
     onSelect,
     onCreate,
     onDelete,
-    busy = false
+    busy = false,
   }: {
     chats: ChatSummary[];
     activeId: string | null;
@@ -29,32 +29,36 @@
 
   function dateLabel(value: string): string {
     return new Date(value).toLocaleString('ru-RU', {
-      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-      timeZone: 'Europe/Moscow'
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Moscow',
     });
   }
 </script>
 
 <aside
-  class="rounded-3xl border border-line bg-white px-3 py-4 shadow-sm sm:px-5"
+  class="rounded-xl border border-line bg-white px-3 py-2.5 shadow-sm"
   aria-labelledby="chat-sidebar-title"
 >
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <h2 id="chat-sidebar-title" class="text-lg font-bold tracking-tight">Чаты</h2>
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 id="chat-sidebar-title" class="text-[13px] font-bold tracking-tight">Чаты</h2>
     <button
       type="button"
       onclick={onCreate}
       disabled={busy}
-      class="rounded-xl border border-line px-3 py-2 text-sm font-semibold hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+      class="rounded-xl border border-line px-2.5 py-1.5 text-[13px] font-semibold hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
     >
       Новый чат
     </button>
   </div>
 
   {#if chats.length === 0}
-    <p class="mt-5 text-sm text-muted">Чатов пока нет.</p>
+    <p class="mt-2.5 text-[13px] text-muted">Чатов пока нет.</p>
   {:else}
-    <ul class="mt-5 space-y-2" aria-label="Чаты">
+    <ul class="mt-2.5 space-y-2" aria-label="Чаты">
       {#each chats as chat (chat.id)}
         <li class="flex items-stretch gap-1">
           <button
@@ -63,20 +67,24 @@
             disabled={busy}
             aria-current={chat.id === activeId ? 'true' : undefined}
             aria-label={`Открыть чат ${chat.title}`}
-            class={`min-w-0 flex-1 rounded-2xl border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
-              chat.id === activeId ? 'border-accent bg-accent-soft' : 'border-line hover:border-accent/60'
+            class={`min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
+              chat.id === activeId
+                ? 'border-accent bg-accent-soft'
+                : 'border-line hover:border-accent/60'
             }`}
           >
             <span class="block truncate font-semibold text-ink">{chat.title}</span>
             <span class="mt-1 block text-xs text-muted">{dateLabel(chat.updated_at)}</span>
-            <span data-chat-status class="mt-1 block text-xs font-semibold text-muted">{statusLabel(chat)}</span>
+            <span data-chat-status class="mt-1 block text-xs font-semibold text-muted"
+              >{statusLabel(chat)}</span
+            >
           </button>
           <button
             type="button"
             onclick={() => confirmDelete(chat)}
             disabled={busy || !removable(chat)}
             aria-label={`Удалить чат ${chat.id}`}
-            class="rounded-2xl px-3 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+            class="rounded-lg px-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Удалить
           </button>

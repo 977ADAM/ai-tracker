@@ -10,7 +10,7 @@ function chat(overrides: Partial<ChatSummary> & { id: string }): ChatSummary {
 
 const chats: ChatSummary[] = [
   chat({ id: '1', title: 'Цветы' }),
-  chat({ id: '2', title: 'Доставка', running: true })
+  chat({ id: '2', title: 'Доставка', running: true }),
 ];
 
 function handlers() {
@@ -44,8 +44,12 @@ describe('ChatSidebar', () => {
 
   it('marks the active chat and its running state', () => {
     render(ChatSidebar, { props: { chats, activeId: '1', ...handlers() } });
-    expect(screen.getByRole('button', { name: 'Открыть чат Цветы' }).getAttribute('aria-current')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Открыть чат Доставка' }).getAttribute('aria-current')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Открыть чат Цветы' }).getAttribute('aria-current'),
+    ).toBe('true');
+    expect(
+      screen.getByRole('button', { name: 'Открыть чат Доставка' }).getAttribute('aria-current'),
+    ).toBeNull();
     expect(screen.getByText('Идёт прогон')).toBeTruthy();
     expect(screen.getByText('Готов')).toBeTruthy();
     expect(screen.getByRole('list', { name: 'Чаты' })).toBeTruthy();
@@ -58,7 +62,9 @@ describe('ChatSidebar', () => {
 
     const running = screen.getByRole('button', { name: 'Удалить чат 2' }) as HTMLButtonElement;
     expect(running.disabled).toBe(true);
-    expect(screen.getByRole('button', { name: 'Удалить чат 1' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Удалить чат 1' }).hasAttribute('disabled')).toBe(
+      false,
+    );
 
     await fireEvent.click(screen.getByRole('button', { name: 'Удалить чат 1' }));
     expect(confirm).toHaveBeenCalledTimes(1);

@@ -2,8 +2,13 @@
   import { tick } from 'svelte';
   import { markdownHtml, plainText } from '$lib/markdown';
   import type {
-    SeoAnalysisSnapshot, SeoCategoryAggregates, SeoCompetitorAggregates, SeoMetric, SeoModelRow,
-    SeoRowStatus, SeoRowsKind, SeoSearchRow
+    SeoAnalysisSnapshot,
+    SeoCompetitorAggregates,
+    SeoMetric,
+    SeoModelRow,
+    SeoRowStatus,
+    SeoRowsKind,
+    SeoSearchRow,
   } from '$lib/types';
 
   let {
@@ -13,7 +18,7 @@
     connectionNames = {},
     loadingRows = null,
     error = '',
-    onMore = (_kind: SeoRowsKind) => {}
+    onMore = () => {},
   }: {
     snapshot: SeoAnalysisSnapshot;
     rows?: { model: SeoModelRow[]; search: SeoSearchRow[] };
@@ -23,13 +28,6 @@
     error?: string;
     onMore?: (kind: SeoRowsKind) => void;
   } = $props();
-
-  /** The three report categories, in the order the backend evaluates them. */
-  const CATEGORY_LABELS: readonly { key: string; label: string }[] = [
-    { key: 'commercial', label: 'Коммерческие' },
-    { key: 'informational', label: 'Информационные' },
-    { key: 'comparative', label: 'Сравнительные' }
-  ];
 
   // A saved answer can be thousands of characters long. The table shows a short
   // preview, so one row never grows to the height of the whole answer; the full
@@ -55,7 +53,7 @@
     openAnswer = {
       query: row.query ?? 'Ответ модели',
       provider: row.provider_name || connectionLabel(row.connection_id),
-      text: row.answer ?? ''
+      text: row.answer ?? '',
     };
     answerButton = trigger;
     await tick();
@@ -76,7 +74,7 @@
     absent: 'Не найдено',
     error: 'Ошибка',
     interrupted: 'Прервано',
-    cancelled: 'Отменено'
+    cancelled: 'Отменено',
   };
 
   const ANALYSIS_STATUS_LABELS: Record<SeoAnalysisSnapshot['status'], string> = {
@@ -84,18 +82,21 @@
     completed: 'Завершён',
     failed: 'Ошибка',
     interrupted: 'Прерван',
-    cancelled: 'Отменён'
+    cancelled: 'Отменён',
   };
 
-  const th = 'px-4 py-3 text-xs font-bold tracking-wide text-muted uppercase';
-  const td = 'px-4 py-4 align-top';
+  // One compact vocabulary for every table of the report: a dense row keeps the
+  // whole report readable without a nested scroll area of its own.
+  const th = 'px-3 py-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase';
+  const td = 'px-3 py-1.5 align-top';
+  const rowHead = 'px-3 py-1.5 font-medium text-ink';
+  const section = 'mt-4';
+  const title = 'text-sm font-semibold text-ink';
+  const table = 'w-full border-collapse text-left text-[13px]';
 
   const siteSearch = $derived(snapshot.aggregates?.site?.search ?? null);
   const siteAi = $derived(snapshot.aggregates?.site?.ai ?? {});
   const competitors = $derived(snapshot.aggregates?.competitors ?? []);
-  const categories = $derived(snapshot.aggregates?.categories ?? {});
-  const services = $derived(snapshot.aggregates?.services ?? {});
-  const counters = $derived(snapshot.counters);
   const connections = $derived(Object.keys(siteAi));
 
   function connectionLabel(connectionId: string): string {
@@ -128,15 +129,9 @@
   }
 
   function position(value: number | null | undefined): string {
-    return value === null || value === undefined ? '—' : value.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-  }
-
-  function counter(value: number | null | undefined): string {
-    return typeof value === 'number' ? String(value) : '0';
-  }
-
-  function categoryGroup(key: string): SeoCategoryAggregates | null {
-    return categories[key] ?? null;
+    return value === null || value === undefined
+      ? '—'
+      : value.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
   }
 
   /** The candidate's seed queries as the user typed them; «№n» when the seed is gone. */
@@ -163,63 +158,53 @@
   function dateLabel(value: string | null): string {
     if (!value) return '—';
     return new Date(value).toLocaleString('ru-RU', {
-      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-      timeZone: 'Europe/Moscow'
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Moscow',
     });
   }
 </script>
 
-<section class="mt-8 rounded-3xl border border-line bg-white px-6 py-7 shadow-sm sm:px-8" aria-labelledby="seo-report-title" data-seo-report>
-  <div class="flex flex-wrap items-start justify-between gap-4">
-    <div>
-      <h2 id="seo-report-title" class="text-2xl font-bold tracking-tight">Отчёт SEO-анализа</h2>
-      <p class="mt-2 text-sm leading-6 text-muted">
-        Числа рассчитаны только по сохранённым строкам. Ошибка, прерывание и отмена не считаются
-        отсутствием сайта или упоминания: такие строки исключены из знаменателя.
-      </p>
-    </div>
-    <span class="rounded-full border border-line bg-canvas px-4 py-1.5 text-sm font-semibold text-ink" data-report-status>
+<section
+  class="mt-4 rounded-xl border border-line bg-white px-4 py-3.5 shadow-sm"
+  aria-labelledby="seo-report-title"
+  data-seo-report
+>
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 id="seo-report-title" class="text-base font-bold tracking-tight">Отчёт SEO-анализа</h2>
+    <span
+      class="rounded-full border border-line bg-canvas px-2.5 py-0.5 text-xs font-semibold text-ink"
+      data-report-status
+    >
       {ANALYSIS_STATUS_LABELS[snapshot.status]}
     </span>
   </div>
 
-  <dl class="mt-6 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4" aria-label="Параметры анализа">
-    <div class="rounded-xl border border-line bg-canvas/40 px-4 py-3">
-      <dt class="text-xs font-semibold text-muted">Сайт</dt>
-      <dd class="mt-1 break-all font-medium text-ink"><a class="hover:text-accent" href={snapshot.input.url}>{snapshot.input.host}</a></dd>
-    </div>
-    <div class="rounded-xl border border-line bg-canvas/40 px-4 py-3">
-      <dt class="text-xs font-semibold text-muted">Название компании</dt>
-      <dd class="mt-1 font-medium text-ink">{snapshot.company_name || '—'}</dd>
-    </div>
-    <div class="rounded-xl border border-line bg-canvas/40 px-4 py-3">
-      <dt class="text-xs font-semibold text-muted">Сфера бизнеса</dt>
-      <dd class="mt-1 font-medium text-ink">{snapshot.input.sphere || '—'}</dd>
-    </div>
-    <div class="rounded-xl border border-line bg-canvas/40 px-4 py-3">
-      <dt class="text-xs font-semibold text-muted">Создан</dt>
-      <dd class="mt-1 font-medium text-ink">{dateLabel(snapshot.created_at)}</dd>
-    </div>
-  </dl>
-
-  <div class="mt-4 rounded-xl border border-line bg-canvas/40 px-4 py-3 text-sm leading-6 text-ink" aria-label="Счётчики прогона">
-    <p class="font-semibold">Строки прогона</p>
-    <p class="mt-1 text-muted" data-report-counters>
-      Запросов: {counter(counters?.queries)} · Яндекса: {counter(counters?.search_rows)}
-      (ошибок {counter(counters?.search_errors)}) · моделей: {counter(counters?.model_rows)}
-      (ошибок {counter(counters?.model_errors)})
-    </p>
-  </div>
+  <p class="mt-1 text-xs leading-5 text-muted" aria-label="Параметры анализа" data-report-params>
+    <a class="break-all text-accent hover:underline" href={snapshot.input.url}
+      >{snapshot.input.host}</a
+    >
+    · {snapshot.company_name || '—'}
+    · {snapshot.input.sphere || '—'}
+    · {dateLabel(snapshot.created_at)}
+  </p>
 
   {#if error}
-    <p role="alert" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{error}</p>
+    <p
+      role="alert"
+      class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+    >
+      {error}
+    </p>
   {/if}
 
-  <section class="mt-8" aria-labelledby="seo-site-title">
-    <h3 id="seo-site-title" class="text-xl font-bold tracking-tight">Сайт в Яндексе</h3>
-    <p class="mt-1 text-sm text-muted">Доля сгенерированных запросов, где сайт попал в первую десятку, и средняя позиция среди находок.</p>
-    <div class="mt-4 overflow-x-auto rounded-2xl border border-line">
-      <table class="w-full min-w-160 border-collapse text-left text-sm" aria-label="Сайт в Яндексе">
+  <section class={section} aria-labelledby="seo-site-title">
+    <h3 id="seo-site-title" class={title}>Сайт в Яндексе</h3>
+    <div class="mt-2 overflow-x-auto rounded-lg border border-line">
+      <table class={`${table} min-w-160`} aria-label="Сайт в Яндексе">
         <thead class="bg-canvas">
           <tr>
             <th scope="col" class={th}>Срез</th>
@@ -231,8 +216,10 @@
         <tbody class="divide-y divide-line">
           {#each [['overall', 'Все запросы'], ['branded', 'С названием компании'], ['unbranded', 'Без названия компании']] as [key, label] (key)}
             <tr>
-              <th scope="row" class="px-4 py-4 font-medium text-ink">{label}</th>
-              <td class={td} data-metric={`site-${key}`}>{percent(siteSearch?.[key as 'overall'])}</td>
+              <th scope="row" class={rowHead}>{label}</th>
+              <td class={td} data-metric={`site-${key}`}
+                >{percent(siteSearch?.[key as 'overall'])}</td
+              >
               <td class={`${td} text-muted`}>{fraction(siteSearch?.[key as 'overall'])}</td>
               <td class={`${td} text-muted`}>{metricPosition(siteSearch?.[key as 'overall'])}</td>
             </tr>
@@ -242,18 +229,20 @@
     </div>
   </section>
 
-  <section class="mt-8" aria-labelledby="seo-ai-title">
-    <h3 id="seo-ai-title" class="text-xl font-bold tracking-tight">Упоминания в ответах ИИ</h3>
-    <p class="mt-1 text-sm text-muted">
-      Доля успешных ответов с буквальным упоминанием названия компании, её домена и хотя бы одного из них.
-    </p>
+  <section class={section} aria-labelledby="seo-ai-title">
+    <h3 id="seo-ai-title" class={title}>Упоминания в ответах ИИ</h3>
     {#if connections.length === 0}
-      <p class="mt-4 text-sm text-muted">Ответы моделей не сохранены.</p>
+      <p class="mt-2 text-xs text-muted">Ответы моделей не сохранены.</p>
     {:else}
       {#each connections as connectionId (connectionId)}
-        <div class="mt-4 overflow-x-auto rounded-2xl border border-line">
-          <table class="w-full min-w-160 border-collapse text-left text-sm" aria-label={`Упоминания: ${connectionLabel(connectionId)}`}>
-            <caption class="bg-canvas px-4 py-3 text-left text-sm font-semibold text-ink">{connectionLabel(connectionId)}</caption>
+        <div class="mt-2 overflow-x-auto rounded-lg border border-line">
+          <table
+            class={`${table} min-w-160`}
+            aria-label={`Упоминания: ${connectionLabel(connectionId)}`}
+          >
+            <caption class="bg-canvas px-3 py-1.5 text-left text-xs font-semibold text-ink"
+              >{connectionLabel(connectionId)}</caption
+            >
             <thead class="bg-canvas">
               <tr>
                 <th scope="col" class={th}>Срез</th>
@@ -264,12 +253,21 @@
             </thead>
             <tbody class="divide-y divide-line">
               {#each [['all', 'Все ответы'], ['branded', 'Брендовые запросы'], ['unbranded', 'Небрендовые запросы']] as [group, label] (group)}
-                {@const block = group === 'all' ? siteAi[connectionId] : siteAi[connectionId]?.[group as 'branded']}
+                {@const block =
+                  group === 'all'
+                    ? siteAi[connectionId]
+                    : siteAi[connectionId]?.[group as 'branded']}
                 <tr>
-                  <th scope="row" class="px-4 py-4 font-medium text-ink">{label}</th>
-                  <td class={td} data-metric={`ai-${connectionId}-${group}-name`}>{percent(block?.name, !snapshot.company_name)}</td>
-                  <td class={td} data-metric={`ai-${connectionId}-${group}-host`}>{percent(block?.host)}</td>
-                  <td class={td} data-metric={`ai-${connectionId}-${group}-combined`}>{percent(block?.combined, !snapshot.company_name)}</td>
+                  <th scope="row" class={rowHead}>{label}</th>
+                  <td class={td} data-metric={`ai-${connectionId}-${group}-name`}
+                    >{percent(block?.name, !snapshot.company_name)}</td
+                  >
+                  <td class={td} data-metric={`ai-${connectionId}-${group}-host`}
+                    >{percent(block?.host)}</td
+                  >
+                  <td class={td} data-metric={`ai-${connectionId}-${group}-combined`}
+                    >{percent(block?.combined, !snapshot.company_name)}</td
+                  >
                 </tr>
               {/each}
             </tbody>
@@ -279,162 +277,110 @@
     {/if}
   </section>
 
-  <section class="mt-8" aria-labelledby="seo-competitors-title">
-    <h3 id="seo-competitors-title" class="text-xl font-bold tracking-tight">Повторяющиеся кандидаты</h3>
-    <p class="mt-1 text-sm text-muted">
-      Это кандидаты в конкуренты: домены, встретившиеся минимум в двух успешных ключевых выдачах.
-      Заголовок из выдачи — только evidence, метрики считаются по домену.
+  <section class={section} aria-labelledby="seo-competitors-title">
+    <h3 id="seo-competitors-title" class={title}>Повторяющиеся кандидаты</h3>
+    <p class="mt-1 text-xs text-muted">
+      Домены минимум из двух успешных ключевых выдач; заголовок — только evidence.
     </p>
     {#if competitors.length === 0}
-      <p class="mt-4 text-sm text-muted">Повторяющихся кандидатов нет: не хватило успешных ключевых выдач.</p>
+      <p class="mt-2 text-xs text-muted">
+        Повторяющихся кандидатов нет: не хватило успешных ключевых выдач.
+      </p>
     {:else}
       {#each competitors as candidate (candidate.host)}
-        <article class="mt-4 rounded-2xl border border-line px-5 py-5" data-candidate={candidate.host} aria-labelledby={`seo-candidate-${candidate.host}`}>
-          <h4 id={`seo-candidate-${candidate.host}`} class="text-lg font-bold tracking-tight text-ink">{candidate.host}</h4>
-          <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-3">
-            <div>
-              <dt class="text-xs font-semibold text-muted">Появлений в ключевых выдачах</dt>
-              <dd class="mt-1 font-medium text-ink" data-candidate-occurrences>{candidate.occurrences}</dd>
-            </div>
-            <div>
-              <dt class="text-xs font-semibold text-muted">Средняя позиция в ключевых выдачах</dt>
-              <dd class="mt-1 font-medium text-ink">{position(candidate.average_position)}</dd>
-            </div>
-            <div>
-              <dt class="text-xs font-semibold text-muted">Исходные ключевые запросы</dt>
-              <dd class="mt-1 font-medium text-ink">{seedLabels(candidate)}</dd>
-            </div>
-          </dl>
-          <p class="mt-3 text-sm leading-6 text-muted">
-            <span class="font-semibold text-ink">Заголовок как evidence:</span>
+        <article
+          class="mt-2 rounded-lg border border-line px-3 py-2.5"
+          data-candidate={candidate.host}
+          aria-labelledby={`seo-candidate-${candidate.host}`}
+        >
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h4 id={`seo-candidate-${candidate.host}`} class="text-sm font-semibold text-ink">
+              {candidate.host}
+            </h4>
+            <p class="text-xs text-muted">
+              Появлений: <span class="font-medium text-ink" data-candidate-occurrences
+                >{candidate.occurrences}</span
+              >
+              · средняя позиция:
+              <span class="font-medium text-ink">{position(candidate.average_position)}</span>
+              · запросы: <span class="font-medium text-ink">{seedLabels(candidate)}</span>
+            </p>
+          </div>
+          <p class="mt-1 text-xs leading-5 text-muted">
+            <span class="font-medium text-ink">Заголовок как evidence:</span>
             {candidate.title || '—'}
           </p>
 
-          <div class="mt-4 overflow-x-auto rounded-xl border border-line">
-            <table class="w-full min-w-160 border-collapse text-left text-sm" aria-label={`Яндекс: ${candidate.host}`}>
-              <thead class="bg-canvas">
-                <tr>
-                  <th scope="col" class={th}>Срез Яндекса</th>
-                  <th scope="col" class={th}>Доля в топ-10</th>
-                  <th scope="col" class={th}>Найдено</th>
-                  <th scope="col" class={th}>Средняя позиция</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-line">
-                {#each [['overall', 'Все запросы'], ['branded', 'Запросы с доменом'], ['unbranded', 'Запросы без домена']] as [key, label] (key)}
+          <div class="mt-2 grid gap-2 lg:grid-cols-2">
+            <div class="overflow-x-auto rounded-lg border border-line">
+              <table class={table} aria-label={`Яндекс: ${candidate.host}`}>
+                <thead class="bg-canvas">
                   <tr>
-                    <th scope="row" class="px-4 py-4 font-medium text-ink">{label}</th>
-                    <td class={td} data-metric={`candidate-${candidate.host}-${key}`}>{percent(candidate.search?.[key as 'overall'])}</td>
-                    <td class={`${td} text-muted`}>{fraction(candidate.search?.[key as 'overall'])}</td>
-                    <td class={`${td} text-muted`}>{metricPosition(candidate.search?.[key as 'overall'])}</td>
+                    <th scope="col" class={th}>Срез Яндекса</th>
+                    <th scope="col" class={th}>Топ-10</th>
+                    <th scope="col" class={th}>Найдено</th>
+                    <th scope="col" class={th}>Средняя позиция</th>
                   </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-
-          <div class="mt-4 overflow-x-auto rounded-xl border border-line">
-            <table class="w-full min-w-160 border-collapse text-left text-sm" aria-label={`ИИ: ${candidate.host}`}>
-              <thead class="bg-canvas">
-                <tr>
-                  <th scope="col" class={th}>Подключение</th>
-                  <th scope="col" class={th}>Доля ответов с доменом</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-line">
-                {#if connections.length === 0}
-                  <tr><td class={td} colspan="2">—</td></tr>
-                {:else}
-                  {#each connections as connectionId (connectionId)}
+                </thead>
+                <tbody class="divide-y divide-line">
+                  {#each [['overall', 'Все запросы'], ['branded', 'С доменом'], ['unbranded', 'Без домена']] as [key, label] (key)}
                     <tr>
-                      <th scope="row" class="px-4 py-4 font-medium text-ink">{connectionLabel(connectionId)}</th>
-                      <td class={td} data-metric={`candidate-${candidate.host}-ai-${connectionId}`}>{aiHostShare(candidate, connectionId)}</td>
+                      <th scope="row" class={rowHead}>{label}</th>
+                      <td class={td} data-metric={`candidate-${candidate.host}-${key}`}
+                        >{percent(candidate.search?.[key as 'overall'])}</td
+                      >
+                      <td class={`${td} text-muted`}
+                        >{fraction(candidate.search?.[key as 'overall'])}</td
+                      >
+                      <td class={`${td} text-muted`}
+                        >{metricPosition(candidate.search?.[key as 'overall'])}</td
+                      >
                     </tr>
                   {/each}
-                {/if}
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border border-line">
+              <table class={table} aria-label={`ИИ: ${candidate.host}`}>
+                <thead class="bg-canvas">
+                  <tr>
+                    <th scope="col" class={th}>Подключение</th>
+                    <th scope="col" class={th}>Доля ответов с доменом</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-line">
+                  {#if connections.length === 0}
+                    <tr><td class={td} colspan="2">—</td></tr>
+                  {:else}
+                    {#each connections as connectionId (connectionId)}
+                      <tr>
+                        <th scope="row" class={rowHead}>{connectionLabel(connectionId)}</th>
+                        <td
+                          class={td}
+                          data-metric={`candidate-${candidate.host}-ai-${connectionId}`}
+                          >{aiHostShare(candidate, connectionId)}</td
+                        >
+                      </tr>
+                    {/each}
+                  {/if}
+                </tbody>
+              </table>
+            </div>
           </div>
         </article>
       {/each}
     {/if}
   </section>
 
-  {#if Object.keys(categories).length > 0}
-    <section class="mt-8" aria-labelledby="seo-categories-title">
-      <h3 id="seo-categories-title" class="text-xl font-bold tracking-tight">Разрезы по категориям</h3>
-      <div class="mt-4 overflow-x-auto rounded-2xl border border-line">
-        <table class="w-full min-w-160 border-collapse text-left text-sm" aria-label="Разрезы по категориям">
-          <thead class="bg-canvas">
-            <tr>
-              <th scope="col" class={th}>Категория</th>
-              <th scope="col" class={th}>Яндекс: доля в топ-10</th>
-              <th scope="col" class={th}>Средняя позиция</th>
-              {#each connections as connectionId (connectionId)}
-                <th scope="col" class={th}>ИИ: {connectionLabel(connectionId)}</th>
-              {/each}
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-line">
-            {#each CATEGORY_LABELS as group (group.key)}
-              {@const block = categoryGroup(group.key)}
-              <tr>
-                <th scope="row" class="px-4 py-4 font-medium text-ink">{group.label}</th>
-                <td class={td} data-metric={`category-${group.key}`}>{percent(block?.search)}</td>
-                <td class={`${td} text-muted`}>{metricPosition(block?.search)}</td>
-                {#each connections as connectionId (connectionId)}
-                  <td class={`${td} text-muted`}>{percent(block?.ai?.[connectionId], !snapshot.company_name)}</td>
-                {/each}
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  {/if}
+  <section class={section} aria-labelledby="seo-details-title">
+    <h3 id="seo-details-title" class={title}>Детализация</h3>
 
-  {#if Object.keys(services).length > 0}
-    <section class="mt-8" aria-labelledby="seo-services-title">
-      <h3 id="seo-services-title" class="text-xl font-bold tracking-tight">Разрезы по услугам</h3>
-      <div class="mt-4 overflow-x-auto rounded-2xl border border-line">
-        <table class="w-full min-w-160 border-collapse text-left text-sm" aria-label="Разрезы по услугам">
-          <thead class="bg-canvas">
-            <tr>
-              <th scope="col" class={th}>Услуга</th>
-              <th scope="col" class={th}>Яндекс: доля в топ-10</th>
-              <th scope="col" class={th}>Средняя позиция</th>
-              {#each connections as connectionId (connectionId)}
-                <th scope="col" class={th}>ИИ: {connectionLabel(connectionId)}</th>
-              {/each}
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-line">
-            {#each Object.entries(services) as [service, block] (service)}
-              <tr>
-                <th scope="row" class="px-4 py-4 font-medium text-ink">{service || 'Без услуги'}</th>
-                <td class={td} data-metric={`service-${service || 'none'}`}>{percent(block.search)}</td>
-                <td class={`${td} text-muted`}>{metricPosition(block.search)}</td>
-                {#each connections as connectionId (connectionId)}
-                  <td class={`${td} text-muted`}>{percent(block.ai?.[connectionId], !snapshot.company_name)}</td>
-                {/each}
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  {/if}
-
-  <section class="mt-8" aria-labelledby="seo-details-title">
-    <h3 id="seo-details-title" class="text-xl font-bold tracking-tight">Детализация</h3>
-    <p class="mt-1 text-sm text-muted">
-      Сохранённые строки прогона: ошибки, прерванные и отменённые строки показаны как есть
-      и не превращаются в «нет».
-    </p>
-
-    <div class="mt-4 overflow-x-auto rounded-2xl border border-line">
-      <table class="w-full min-w-200 border-collapse text-left text-sm" aria-label="Проверки в Яндексе">
-        <caption class="bg-canvas px-4 py-3 text-left text-sm font-semibold text-ink">Проверки в Яндексе</caption>
+    <div class="mt-2 overflow-x-auto rounded-lg border border-line">
+      <table class={`${table} min-w-200`} aria-label="Проверки в Яндексе">
+        <caption class="bg-canvas px-3 py-1.5 text-left text-xs font-semibold text-ink"
+          >Проверки в Яндексе</caption
+        >
         <thead class="bg-canvas">
           <tr>
             <th scope="col" class={th}>Запрос</th>
@@ -449,14 +395,19 @@
         <tbody class="divide-y divide-line">
           {#each rows.search as row (row.query_index)}
             <tr data-search-detail data-status={row.status}>
-              <th scope="row" class="max-w-80 px-4 py-4 font-medium text-ink">{row.query ?? '—'}</th>
+              <th scope="row" class={`${rowHead} max-w-80`}>{row.query ?? '—'}</th>
               <td class={`${td} text-muted`}>{row.category ?? '—'}</td>
               <td class={`${td} text-muted`}>{row.service ?? '—'}</td>
               <td class={td}>{rowStatus(row.status)}</td>
               <td class={`${td} text-muted`}>{row.site_position ?? '—'}</td>
               <td class={`${td} text-muted`}>
                 {#if row.site_url}
-                  <a class="break-all text-accent hover:underline" href={row.site_url} target="_blank" rel="noopener noreferrer">{row.site_url}</a>
+                  <a
+                    class="break-all text-accent hover:underline"
+                    href={row.site_url}
+                    target="_blank"
+                    rel="noopener noreferrer">{row.site_url}</a
+                  >
                 {:else}
                   —
                 {/if}
@@ -469,12 +420,12 @@
         </tbody>
       </table>
       {#if cursors.search}
-        <div class="border-t border-line px-4 py-3">
+        <div class="border-t border-line px-3 py-1.5">
           <button
             type="button"
             onclick={() => onMore('search')}
             disabled={loadingRows === 'search'}
-            class="rounded-xl border border-line px-4 py-2 text-sm font-semibold hover:border-accent disabled:opacity-50"
+            class="rounded-lg border border-line px-3 py-1 text-xs font-semibold hover:border-accent disabled:opacity-50"
           >
             {loadingRows === 'search' ? 'Загружаем…' : 'Показать ещё'}
           </button>
@@ -482,9 +433,11 @@
       {/if}
     </div>
 
-    <div class="mt-6 overflow-x-auto rounded-2xl border border-line">
-      <table class="w-full min-w-225 border-collapse text-left text-sm" aria-label="Ответы моделей">
-        <caption class="bg-canvas px-4 py-3 text-left text-sm font-semibold text-ink">Ответы моделей</caption>
+    <div class="mt-2 overflow-x-auto rounded-lg border border-line">
+      <table class={`${table} min-w-225`} aria-label="Ответы моделей">
+        <caption class="bg-canvas px-3 py-1.5 text-left text-xs font-semibold text-ink"
+          >Ответы моделей</caption
+        >
         <thead class="bg-canvas">
           <tr>
             <th scope="col" class={th}>Запрос</th>
@@ -499,19 +452,23 @@
         <tbody class="divide-y divide-line">
           {#each rows.model as row (`${row.connection_id}-${row.query_index}`)}
             <tr data-model-detail data-status={row.status}>
-              <th scope="row" class="max-w-80 px-4 py-4 font-medium text-ink">{row.query ?? '—'}</th>
-              <td class={`${td} text-muted`}>{row.provider_name || connectionLabel(row.connection_id)}</td>
+              <th scope="row" class={`${rowHead} max-w-80`}>{row.query ?? '—'}</th>
+              <td class={`${td} text-muted`}
+                >{row.provider_name || connectionLabel(row.connection_id)}</td
+              >
               <td class={td}>{rowStatus(row.status)}</td>
               <td class={`${td} text-muted`}>{mention(row.name_mentioned)}</td>
               <td class={`${td} text-muted`}>{mention(row.host_mentioned)}</td>
               <td class={`${td} max-w-96`}>
                 {#if row.answer}
-                  <p class="whitespace-pre-wrap break-words" data-model-answer-preview>{answerPreview(row.answer)}</p>
+                  <p class="break-words whitespace-pre-wrap" data-model-answer-preview>
+                    {answerPreview(row.answer)}
+                  </p>
                   {#if answerIsLong(row.answer)}
                     <button
                       type="button"
                       onclick={(event) => void showAnswer(row, event.currentTarget)}
-                      class="mt-2 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:border-accent"
+                      class="mt-1.5 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:border-accent"
                       data-answer-open
                     >
                       Читать полностью
@@ -529,12 +486,12 @@
         </tbody>
       </table>
       {#if cursors.model}
-        <div class="border-t border-line px-4 py-3">
+        <div class="border-t border-line px-3 py-1.5">
           <button
             type="button"
             onclick={() => onMore('model')}
             disabled={loadingRows === 'model'}
-            class="rounded-xl border border-line px-4 py-2 text-sm font-semibold hover:border-accent disabled:opacity-50"
+            class="rounded-lg border border-line px-3 py-1 text-xs font-semibold hover:border-accent disabled:opacity-50"
           >
             {loadingRows === 'model' ? 'Загружаем…' : 'Показать ещё'}
           </button>
@@ -545,9 +502,14 @@
 
   {#if openAnswer}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
-      <div class="absolute inset-0 bg-black/70" data-answer-backdrop onclick={() => void closeAnswer()} aria-hidden="true"></div>
       <div
-        class="relative flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl"
+        class="absolute inset-0 bg-black/70"
+        data-answer-backdrop
+        onclick={() => void closeAnswer()}
+        aria-hidden="true"
+      ></div>
+      <div
+        class="relative flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line bg-white shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="seo-answer-title"
@@ -560,10 +522,12 @@
           }
         }}
       >
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5"
+        >
           <div class="min-w-0">
-            <h3 id="seo-answer-title" class="text-base font-bold text-ink">Ответ модели</h3>
-            <p class="mt-1 text-xs leading-5 break-words text-muted" data-answer-caption>
+            <h3 id="seo-answer-title" class="text-sm font-bold text-ink">Ответ модели</h3>
+            <p class="mt-0.5 text-xs break-words text-muted" data-answer-caption>
               {openAnswer.provider}{openAnswer.query ? ` · ${openAnswer.query}` : ''}
             </p>
           </div>
@@ -571,16 +535,18 @@
             type="button"
             bind:this={answerClose}
             onclick={() => void closeAnswer()}
-            class="inline-flex min-h-10 shrink-0 items-center rounded-xl border border-line px-4 py-2 text-sm font-semibold text-ink hover:border-accent"
+            class="inline-flex shrink-0 items-center rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:border-accent"
             data-answer-close
           >
             Закрыть
           </button>
         </div>
         <div
-          class="prose prose-sm min-h-0 max-w-none flex-1 overflow-y-auto px-5 py-4 text-ink"
+          class="prose prose-sm min-h-0 max-w-none flex-1 overflow-y-auto px-4 py-3 text-ink"
           data-answer-full
-        >{@html markdownHtml(openAnswer.text)}</div>
+        >
+          {@html markdownHtml(openAnswer.text)}
+        </div>
       </div>
     </div>
   {/if}

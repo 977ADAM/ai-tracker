@@ -3,8 +3,15 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Page from './+page.svelte';
 import type {
-  ChatMessage, ChatPage, ChatProposal, ChatSummary, PublicProvider, SeoAnalysisSnapshot,
-  SeoSearchRow, SeoStage, SeoTraceStep
+  ChatMessage,
+  ChatPage,
+  ChatProposal,
+  ChatSummary,
+  PublicProvider,
+  SeoAnalysisSnapshot,
+  SeoSearchRow,
+  SeoStage,
+  SeoTraceStep,
 } from '$lib/types';
 
 const STAMP = '2026-10-07T10:00:00Z';
@@ -23,7 +30,7 @@ function provider(id: string): PublicProvider {
     status_label: 'Не настроено',
     delete_label: `Удалить ${id}`,
     delete_prompt: 'Удалить подключение?',
-    delete_success: 'Подключение удалено'
+    delete_success: 'Подключение удалено',
   };
 }
 
@@ -37,23 +44,39 @@ function textMessage(text: string, id = 'm1'): ChatMessage {
 
 function runMessage(analysisId: string, id = 'm-run'): ChatMessage {
   return {
-    id, seq: 2, role: 'assistant', kind: 'run', text: null,
-    payload: { analysis_id: analysisId }, created_at: STAMP
+    id,
+    seq: 2,
+    role: 'assistant',
+    kind: 'run',
+    text: null,
+    payload: { analysis_id: analysisId },
+    created_at: STAMP,
   };
 }
 
 function proposal(connectionIds: string[]): ChatProposal {
   return {
-    status: 'pending', url: 'https://example.ru', sphere: 'Доставка цветов',
-    seeds: ['купить цветы'], services: ['Сборка букетов'], connection_ids: connectionIds,
-    search_upper: 5, model_upper: 5, generated_limit: 2
+    status: 'pending',
+    url: 'https://example.ru',
+    sphere: 'Доставка цветов',
+    seeds: ['купить цветы'],
+    services: ['Сборка букетов'],
+    connection_ids: connectionIds,
+    search_upper: 5,
+    model_upper: 5,
+    generated_limit: 2,
   };
 }
 
 function proposalMessage(connectionIds: string[] = [], id = 'm-proposal'): ChatMessage {
   return {
-    id, seq: 2, role: 'assistant', kind: 'proposal', text: null,
-    payload: proposal(connectionIds), created_at: STAMP
+    id,
+    seq: 2,
+    role: 'assistant',
+    kind: 'proposal',
+    text: null,
+    payload: proposal(connectionIds),
+    created_at: STAMP,
   };
 }
 
@@ -63,38 +86,78 @@ function stage(number: number, status: SeoStage['status']): SeoStage {
 
 function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
   return {
-    id: 'a-1', status: 'running', created_at: STAMP, updated_at: STAMP, finished_at: null,
+    id: 'a-1',
+    status: 'running',
+    created_at: STAMP,
+    updated_at: STAMP,
+    finished_at: null,
     input: {
-      url: 'https://example.ru', host: 'example.ru', sphere: 'Доставка цветов',
-      seeds: ['купить цветы'], services: ['Сборка букетов'], connection_ids: ['model-1']
+      url: 'https://example.ru',
+      host: 'example.ru',
+      sphere: 'Доставка цветов',
+      seeds: ['купить цветы'],
+      services: ['Сборка букетов'],
+      connection_ids: ['model-1'],
     },
     estimate: { search_upper: 5, model_upper: 5, generated_limit: 2, connections: 1 },
-    company_name: 'Ромашка', services: ['Сборка букетов'], pages: [],
+    company_name: 'Ромашка',
+    services: ['Сборка букетов'],
+    pages: [],
     stages: [stage(1, 'running')],
-    agents: ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report']
-      .map((agent) => ({ agent, status: 'pending' as const, error: null, updated_at: null })),
-    candidates: [], queries: [],
+    agents: ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report'].map((agent) => ({
+      agent,
+      status: 'pending' as const,
+      error: null,
+      updated_at: null,
+    })),
+    candidates: [],
+    queries: [],
     counters: { queries: 1, search_rows: 1, model_rows: 1, search_errors: 0, model_errors: 0 },
     readiness: {
-      report_ready: false, summary_ready: false, queries_ready: true, has_submitted_search_rows: false,
-      has_unsubmitted_search_rows: false, has_unfinished_model_rows: false, search_rows: 1, model_rows: 1
+      report_ready: false,
+      summary_ready: false,
+      queries_ready: true,
+      has_submitted_search_rows: false,
+      has_unsubmitted_search_rows: false,
+      has_unfinished_model_rows: false,
+      search_rows: 1,
+      model_rows: 1,
     },
-    aggregates: { site: { search: {}, ai: {} }, competitors: [], categories: {}, services: {}, counts: {} },
-    ...overrides
+    aggregates: {
+      site: { search: {}, ai: {} },
+      competitors: [],
+      categories: {},
+      services: {},
+      counts: {},
+    },
+    ...overrides,
   } as unknown as SeoAnalysisSnapshot;
 }
 
 function searchRow(query: string): SeoSearchRow {
   return {
-    query_index: 1, query, category: null, service: null, status: 'found',
-    site_position: 3, site_url: 'https://example.ru/page', error: null
+    query_index: 1,
+    query,
+    category: null,
+    service: null,
+    status: 'found',
+    site_position: 3,
+    site_url: 'https://example.ru/page',
+    error: null,
   };
 }
 
 function traceStep(index: number, name: string): SeoTraceStep {
   return {
-    step_index: index, agent: 'site', kind: 'tool', name, arguments: {}, result_summary: 'Готово',
-    status: 'running', error: null, created_at: STAMP
+    step_index: index,
+    agent: 'site',
+    kind: 'tool',
+    name,
+    arguments: {},
+    result_summary: 'Готово',
+    status: 'running',
+    error: null,
+    created_at: STAMP,
   };
 }
 
@@ -108,13 +171,14 @@ function pageData(overrides: Record<string, unknown> = {}) {
     chats: [] as ChatSummary[],
     chatsError: '',
     loadError: '',
-    ...overrides
+    ...overrides,
   };
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
-    status, headers: { 'content-type': 'application/json' }
+    status,
+    headers: { 'content-type': 'application/json' },
   });
 }
 
@@ -123,7 +187,8 @@ type Handler = (url: string, init: RequestInit) => Response | Promise<Response>;
 /** A fetch stub routed by URL and method; every `Response` is built by the test. */
 function stubFetch(handler: Handler) {
   const mock = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-    Promise.resolve(handler(String(input), init ?? {})));
+    Promise.resolve(handler(String(input), init ?? {})),
+  );
   vi.stubGlobal('fetch', mock);
   return mock;
 }
@@ -164,7 +229,9 @@ describe('chat page', () => {
   });
 
   it('keeps the screen working when the chat list is unavailable', () => {
-    render(Page, { props: { data: pageData({ chats: [], chatsError: 'Список чатов недоступен' }) } });
+    render(Page, {
+      props: { data: pageData({ chats: [], chatsError: 'Список чатов недоступен' }) },
+    });
     expect(screen.getByText('Список чатов недоступен')).toBeTruthy();
     expect(screen.getByRole('textbox')).toBeTruthy();
   });
@@ -172,7 +239,9 @@ describe('chat page', () => {
   it('opens the freshest chat and loads its messages', async () => {
     const mock = stubFetch((url) => {
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({ chat: chat({ id: 'c1' }), messages: [textMessage('привет')] }));
+        return jsonResponse(
+          chatPage({ chat: chat({ id: 'c1' }), messages: [textMessage('привет')] }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -221,12 +290,17 @@ describe('chat page', () => {
 
   it('restores a running analysis when a chat is opened', async () => {
     const mock = stubFetch((url) => {
-      if (url.includes('/api/seo/analyses/a-1/trace')) return jsonResponse({ items: [], next_cursor: null });
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/analyses/a-1/trace'))
+        return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'running' }));
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -240,11 +314,15 @@ describe('chat page', () => {
   it('does not poll a run that is already finished', async () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     const mock = stubFetch((url) => {
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'completed' }));
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'completed' }));
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -260,12 +338,16 @@ describe('chat page', () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     let analysis = snapshot({ status: 'running' });
     const mock = stubFetch((url) => {
-      if (url.includes('/api/seo/analyses/a-1/trace')) return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1/trace'))
+        return jsonResponse({ items: [], next_cursor: null });
       if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(analysis);
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -287,7 +369,9 @@ describe('chat page', () => {
   it('ignores a snapshot that arrives after the chat was left', async () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     let release: (value: Response) => void = () => {};
-    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
     const mock = stubFetch((url) => {
       if (url.includes('/api/seo/analyses/a-1')) return pending;
       if (url.includes('/api/seo/chats/')) {
@@ -309,10 +393,15 @@ describe('chat page', () => {
   it('loads the first pages of the rows and the trace when the report is opened', async () => {
     const mock = stubFetch((url) => {
       if (url.includes('/api/seo/analyses/a-1/rows')) {
-      return jsonResponse({ items: url.includes('kind=search') ? [searchRow('купить цветы')] : [], next_cursor: null });
-    }
-      if (url.includes('/api/seo/analyses/a-1/trace')) return jsonResponse({ items: [], next_cursor: null });
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'completed' }));
+        return jsonResponse({
+          items: url.includes('kind=search') ? [searchRow('купить цветы')] : [],
+          next_cursor: null,
+        });
+      }
+      if (url.includes('/api/seo/analyses/a-1/trace'))
+        return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'completed' }));
       if (url.includes('/api/seo/chats/')) {
         return jsonResponse(chatPage({ messages: [runMessage('a-1')] }));
       }
@@ -332,11 +421,13 @@ describe('chat page', () => {
 
   it('still loads the first trace page when an unpaged finished report is opened', async () => {
     const mock = stubFetch((url) => {
-      if (url.includes('/api/seo/analyses/a-1/rows')) return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1/rows'))
+        return jsonResponse({ items: [], next_cursor: null });
       if (url.includes('/api/seo/analyses/a-1/trace')) {
         return jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' });
       }
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'completed' }));
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'completed' }));
       if (url.includes('/api/seo/chats/')) {
         return jsonResponse(chatPage({ messages: [runMessage('a-1')] }));
       }
@@ -351,14 +442,17 @@ describe('chat page', () => {
     // The first page is on screen and its "load more" control is usable.
     await fireEvent.click(await screen.findByRole('button', { name: 'Показать трассу' }));
     expect(screen.getByText('first_step')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Показать ещё' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole('button', { name: 'Показать ещё' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it('never strands the trace loading flag when a paged report is opened', async () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     let analysis = snapshot({ status: 'running' });
     const mock = stubFetch((url) => {
-      if (url.includes('/api/seo/analyses/a-1/rows')) return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1/rows'))
+        return jsonResponse({ items: [], next_cursor: null });
       if (url.includes('/api/seo/analyses/a-1/trace')) {
         return url.includes('cursor=p1')
           ? jsonResponse({ items: [traceStep(2, 'deep_step')], next_cursor: 'p2' })
@@ -366,9 +460,12 @@ describe('chat page', () => {
       }
       if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(analysis);
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -396,7 +493,9 @@ describe('chat page', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Показать трассу' }));
     expect(screen.getByText('first_step')).toBeTruthy();
     expect(screen.getByText('deep_step')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Показать ещё' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole('button', { name: 'Показать ещё' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
     expect(screen.queryByRole('button', { name: 'Загружаем…' })).toBeNull();
     expect(calls(mock, '/trace')).toHaveLength(2);
   });
@@ -407,11 +506,15 @@ describe('chat page', () => {
       if (url.includes('/api/seo/analyses/a-1/trace')) {
         return jsonResponse({ items: [traceStep(1, 'site_crawl')], next_cursor: null });
       }
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'running' }));
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -445,11 +548,15 @@ describe('chat page', () => {
           ? jsonResponse({ items: [traceStep(2, 'deep_step')], next_cursor: null })
           : jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' });
       }
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'running' }));
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -477,8 +584,12 @@ describe('chat page', () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     let releaseAppend: (value: Response) => void = () => {};
     let releaseRefresh: (value: Response) => void = () => {};
-    const appendPending = new Promise<Response>((resolve) => { releaseAppend = resolve; });
-    const refreshPending = new Promise<Response>((resolve) => { releaseRefresh = resolve; });
+    const appendPending = new Promise<Response>((resolve) => {
+      releaseAppend = resolve;
+    });
+    const refreshPending = new Promise<Response>((resolve) => {
+      releaseRefresh = resolve;
+    });
     let firstPageCalls = 0;
     const mock = stubFetch((url) => {
       if (url.includes('/api/seo/analyses/a-1/trace')) {
@@ -488,11 +599,15 @@ describe('chat page', () => {
           ? jsonResponse({ items: [traceStep(1, 'first_step')], next_cursor: 'p1' })
           : refreshPending;
       }
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'running' }));
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -522,12 +637,17 @@ describe('chat page', () => {
   it('cancels the run through the existing endpoint', async () => {
     const mock = stubFetch((url) => {
       if (url.endsWith('/cancel')) return jsonResponse(snapshot({ status: 'cancelled' }));
-      if (url.includes('/api/seo/analyses/a-1/trace')) return jsonResponse({ items: [], next_cursor: null });
-      if (url.includes('/api/seo/analyses/a-1')) return jsonResponse(snapshot({ status: 'running' }));
+      if (url.includes('/api/seo/analyses/a-1/trace'))
+        return jsonResponse({ items: [], next_cursor: null });
+      if (url.includes('/api/seo/analyses/a-1'))
+        return jsonResponse(snapshot({ status: 'running' }));
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1', running: true }), messages: [runMessage('a-1')]
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1', running: true }),
+            messages: [runMessage('a-1')],
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -543,12 +663,18 @@ describe('chat page', () => {
   it('loads earlier messages with the cursor the server returned', async () => {
     const mock = stubFetch((url) => {
       if (url.includes('before=5')) {
-        return jsonResponse(chatPage({ messages: [textMessage('первое', 'm1')], next_cursor: null }));
+        return jsonResponse(
+          chatPage({ messages: [textMessage('первое', 'm1')], next_cursor: null }),
+        );
       }
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({
-          chat: chat({ id: 'c1' }), messages: [textMessage('второе', 'm2')], next_cursor: 5
-        }));
+        return jsonResponse(
+          chatPage({
+            chat: chat({ id: 'c1' }),
+            messages: [textMessage('второе', 'm2')],
+            next_cursor: 5,
+          }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -565,7 +691,8 @@ describe('chat page', () => {
     const mock = stubFetch((url, init) => {
       if (init.method === 'PUT') {
         return jsonResponse({
-          chat: chat(), message: proposalMessage(['a'])
+          chat: chat(),
+          message: proposalMessage(['a']),
         });
       }
       if (url.includes('/api/seo/chats/')) {
@@ -575,7 +702,7 @@ describe('chat page', () => {
     });
     render(Page, { props: { data: pageData({ chats: [chat({ id: 'c1' })] }) } });
 
-    const chip = await screen.findByRole('checkbox', { name: /Провайдер a/ }) as HTMLInputElement;
+    const chip = (await screen.findByRole('checkbox', { name: /Провайдер a/ })) as HTMLInputElement;
     expect(chip.checked).toBe(false);
     await fireEvent.click(chip);
 
@@ -591,7 +718,9 @@ describe('chat page', () => {
     const mock = stubFetch((url, init) => {
       if (init.method === 'DELETE') return new Response(null, { status: 204 });
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({ chat: chat({ id: 'c1' }), messages: [textMessage('привет')] }));
+        return jsonResponse(
+          chatPage({ chat: chat({ id: 'c1' }), messages: [textMessage('привет')] }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -610,7 +739,9 @@ describe('chat page', () => {
   it('starts a new empty dialogue from the sidebar without creating a chat', async () => {
     const mock = stubFetch((url) => {
       if (url.includes('/api/seo/chats/')) {
-        return jsonResponse(chatPage({ chat: chat({ id: 'c1' }), messages: [textMessage('привет')] }));
+        return jsonResponse(
+          chatPage({ chat: chat({ id: 'c1' }), messages: [textMessage('привет')] }),
+        );
       }
       return jsonResponse({ detail: 'Нет маршрута' }, 404);
     });
@@ -620,7 +751,7 @@ describe('chat page', () => {
     await fireEvent.click(screen.getByRole('button', { name: /новый чат/i }));
     await waitFor(() => expect(screen.queryByText('привет')).toBeNull());
     const creates = mock.mock.calls.filter(
-      ([url, init]) => String(url).endsWith('/api/seo/chats') && init?.method === 'POST'
+      ([url, init]) => String(url).endsWith('/api/seo/chats') && init?.method === 'POST',
     );
     expect(creates).toHaveLength(0);
     expect(screen.getByText(/чат созда[её]тся при отправке первого сообщения/i)).toBeTruthy();

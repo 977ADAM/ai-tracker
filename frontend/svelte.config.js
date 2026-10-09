@@ -5,6 +5,6 @@ export default {
   preprocess: vitePreprocess(),
   kit: {
     adapter: adapter(),
-    paths: { base: process.env.AI_TRACKER_BASE_PATH || '' }
-  }
+    paths: { base: process.env.AI_TRACKER_BASE_PATH || '' },
+  },
 };

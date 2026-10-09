@@ -5,21 +5,39 @@ import SeoTraceFeed from './SeoTraceFeed.svelte';
 import type { SeoTraceStep } from '$lib/types';
 
 const handoff: SeoTraceStep = {
-  step_index: 1, agent: 'supervisor', kind: 'handoff', name: 'handoff_to',
-  arguments: { agent: 'site' }, result_summary: '{"status":"accepted"}', status: 'done',
-  error: null, created_at: '2026-09-28T10:01:00Z'
+  step_index: 1,
+  agent: 'supervisor',
+  kind: 'handoff',
+  name: 'handoff_to',
+  arguments: { agent: 'site' },
+  result_summary: '{"status":"accepted"}',
+  status: 'done',
+  error: null,
+  created_at: '2026-09-28T10:01:00Z',
 };
 
 const fetchStep: SeoTraceStep = {
-  step_index: 2, agent: 'site', kind: 'tool', name: 'fetch_site',
-  arguments: { max_pages: 2 }, result_summary: null, status: 'rejected',
-  error: 'Лимит прогона исчерпан', created_at: '2026-09-28T10:02:00Z'
+  step_index: 2,
+  agent: 'site',
+  kind: 'tool',
+  name: 'fetch_site',
+  arguments: { max_pages: 2 },
+  result_summary: null,
+  status: 'rejected',
+  error: 'Лимит прогона исчерпан',
+  created_at: '2026-09-28T10:02:00Z',
 };
 
 const modelStep: SeoTraceStep = {
-  step_index: 3, agent: 'checks', kind: 'model', name: 'checks',
-  arguments: {}, result_summary: '{"status":"done"}', status: 'running',
-  error: null, created_at: '2026-09-28T10:03:00Z'
+  step_index: 3,
+  agent: 'checks',
+  kind: 'model',
+  name: 'checks',
+  arguments: {},
+  result_summary: '{"status":"done"}',
+  status: 'running',
+  error: null,
+  created_at: '2026-09-28T10:03:00Z',
 };
 
 function step(index: number): HTMLElement {
@@ -54,7 +72,9 @@ describe('SeoTraceFeed', () => {
     expect(step(2).textContent).toContain('Инструмент');
     expect(step(2).textContent).toContain('Отклонён');
     expect(step(2).querySelector('[data-trace-result]')?.textContent?.trim()).toBe('—');
-    expect(step(2).querySelector('[data-trace-step-error]')?.textContent).toContain('Лимит прогона исчерпан');
+    expect(step(2).querySelector('[data-trace-step-error]')?.textContent).toContain(
+      'Лимит прогона исчерпан',
+    );
 
     expect(step(3).querySelector('[data-trace-arguments]')?.textContent?.trim()).toBe('—');
     expect(step(3).textContent).toContain('Модель');
@@ -77,7 +97,9 @@ describe('SeoTraceFeed', () => {
     expect(onMore).toHaveBeenCalledTimes(1);
     view.unmount();
 
-    render(SeoTraceFeed, { props: { steps: [handoff], nextCursor: 'cur_1', loading: true, onMore } });
+    render(SeoTraceFeed, {
+      props: { steps: [handoff], nextCursor: 'cur_1', loading: true, onMore },
+    });
     await open();
     const button = screen.getByRole('button', { name: 'Загружаем…' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);

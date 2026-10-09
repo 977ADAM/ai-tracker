@@ -150,8 +150,8 @@ def test_the_chat_report_pages_rows_and_the_chat_deletes(page: Page, api) -> Non
 
     expect(chat.report()).to_be_visible()
     assert chat.metric_text("site-overall") == "50 %"
-    # The only comparative row is missing, so the denominator is empty and the report shows «—».
-    assert chat.metric_text("category-comparative") == "—"
+    # The candidate has no branded hit, so that share stays empty and the report shows «—».
+    assert chat.metric_text(f"candidate-{CANDIDATE_HOST}-branded") == "—"
     candidate = chat.candidate(CANDIDATE_HOST)
     expect(candidate).to_contain_text("Цветочный магазин — доставка")
     expect(candidate.locator("[data-candidate-occurrences]")).to_have_text("2")
