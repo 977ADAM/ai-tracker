@@ -8,6 +8,7 @@ from app.domain.runs import normalize_run_request, summary_rows
 
 def test_model_only_does_not_require_site():
     run = normalize_run_request({
+        "project_id": "p-1",
         "brand": "Ромашка", "domain": "", "prompts_text": "цветы",
         "provider_ids": ["p"], "regions": [],
     })
@@ -18,6 +19,7 @@ def test_model_only_does_not_require_site():
 
 def test_search_only_does_not_require_brand():
     run = normalize_run_request({
+        "project_id": "p-1",
         "brand": "", "domain": "https://Shop.Example.ru/path",
         "prompts_text": "цветы", "provider_ids": [], "regions": [1],
     })
@@ -26,9 +28,18 @@ def test_search_only_does_not_require_brand():
     assert run.regions == (1,)
 
 
+def test_a_run_without_a_project_is_refused():
+    with pytest.raises(ValidationError, match="Выберите проект"):
+        normalize_run_request({
+            "brand": "Ромашка", "domain": "example.ru",
+            "prompts_text": "цветы", "provider_ids": ["p"], "regions": [],
+        })
+
+
 def test_mixed_run_obeys_the_stricter_yandex_question_limit():
     with pytest.raises(ValidationError):
         normalize_run_request({
+            "project_id": "p-1",
             "brand": "Ромашка", "domain": "example.ru",
             "prompts_text": "x" * 401, "provider_ids": ["p"], "regions": [1],
         })
@@ -42,6 +53,7 @@ def test_mixed_run_obeys_the_stricter_yandex_question_limit():
 def test_invalid_selection_never_starts_a_run(selection):
     with pytest.raises(ValidationError):
         normalize_run_request({
+            "project_id": "p-1",
             "brand": "Ромашка", "domain": "example.ru",
             "prompts_text": "цветы", **selection,
         })
