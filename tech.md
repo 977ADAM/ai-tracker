@@ -42,7 +42,7 @@ mentions/sources, а полнотекстовые ответы и источни
 безопасный SiteFetcher и plain service LLM, ограничение 120 секунд; текст сайта
 передаётся как данные, результат валидируется правилами проекта.
 Описание до 500 символов, до 20 вариантов названия по 100 символов. Эти поля
-хранятся в JSON и снимках, поэтому дополнительной схемы SQLite не требуется.
+хранятся в JSON и снимках, поэтому дополнительной таблицы не требуется.
 Варианты учитываются при подсчёте упоминаний, позиции и оценке тональности;
 изменение описания/вариантов создаёт новую серию сравнения.
 
@@ -51,13 +51,14 @@ mentions/sources, а полнотекстовые ответы и источни
 Главная — карточки проектов. Создание спрашивает только бренд/сайт; проект может
 быть черновиком без запросов и моделей. Настройки и история доступны внутри
 проекта. Запуск ручной, проверяет все пары запрос × модель и оценивает тональность
-каждого ответа с названием бренда. Новые замеры не используют SEO-чат или граф агентов.
+каждого ответа с названием бренда.
 
 - `backend/app/domain/projects.py`: нормализация и подпись сравнения.
 - `backend/app/domain/measurement_report.py`: агрегаты, разрезы и динамика.
 - `backend/app/domain/sentiment.py`, `integrations/sentiment.py`: строгая оценка LLM.
-- `backend/app/db/project_storage.py`, `projects.py`, `measurements.py`: новые таблицы
-  в общем `runs.sqlite3`, аддитивная схема 7, снимки и защита терминальных записей.
+- `backend/app/db/project_storage.py`, `projects.py`, `measurements.py`: таблицы
+  `projects`, `project_measurements`, `project_model_rows`, `project_search_rows`
+  в PostgreSQL, снимки и защита терминальных записей.
 - `backend/app/service/projects.py`, `measurements.py`, `measurement_worker.py`:
   настройки, локальная проверка готовности и последовательная фоновая работа.
 - `/api/projects`, `/api/projects/{id}/measurements`, `/api/measurements/{id}`,
@@ -76,31 +77,25 @@ mentions/sources, а полнотекстовые ответы и источни
 Backend: `pytest`; frontend: `npx vitest run`, `npm run check`, `npm run lint`,
 `npm run build`; изолированный браузерный сценарий: `qa/tests/test_projects.py`.
 
-## Справка по сохранённым прежним сценариям
-
-Следующие разделы описывают прежние API и агентный SEO-процесс. Их данные и
-контракты сохранены, но чат больше не является главным интерфейсом.
-
 ## 1. Назначение
 
-Локальное приложение для SEO-анализа сайта и конкурентов: видимость в первой десятке выдачи
-Яндекса и упоминания компании в ответах подключённых ИИ-моделей.
+Узконаправленный локальный ИИ-трекер: повторяемые замеры видимости бренда в ответах
+подключённых ИИ-моделей и проверка упоминаний по фиксированному списку промптов.
+SEO-анализ сайта и конкурентов, чат и агентный граф из приложения удалены.
 
-- **Основной сценарий — чат SEO-анализа**: диалог собирает параметры прогона (адрес сайта, сфера,
-  три ключевых запроса, услуги), ассистент уточняет недостающее и показывает карточку предложения,
-  а прогон стартует после подтверждения словом «да» и остаётся в чате вместе с отчётом. Прогоном
-  управляет супервизор, работу выполняют четыре специалиста; агенты действуют только через
-  серверные инструменты.
-- **Прежние сценарии остаются в API**: проверка упоминаний бренда (`POST /api/check`), прямой
-  поиск в Яндексе (`/api/search`) и сохранённые прогоны (`/api/runs`, включая экспорт CSV).
+- **Основной сценарий — проект и его замеры**: проект описывает одну компанию (бренд, сайт,
+  промпты, конкуренты, выбранные модели), замер отправляет каждый промпт каждой модели,
+  оценивает упоминания бренда и домена, а по желанию — тональность служебной LLM.
+- **История и динамика** живут внутри проекта: сравнение серий, отчёт и детализация строк.
+- **Отдельные API остаются**: проверка упоминаний бренда (`POST /api/check`), прямой поиск
+  в Яндексе (`/api/search`) и сохранённые прогоны (`/api/runs`, включая экспорт CSV).
 
 ## 2. Стек
 
 | Часть | Технологии |
 | --- | --- |
 | Backend | Python ≥ 3.13, FastAPI, uvicorn, httpx, python-dotenv, keyring |
-| Агентный рантайм | LangGraph + langchain-openai, чекпойнты в SQLite (`langgraph-checkpoint-sqlite`) |
-| Хранилище | SQLite (`runs.sqlite3`), JSON-файлы метаданных, системный keyring |
+| Хранилище | PostgreSQL 18 (`psycopg` 3, миграции Alembic), JSON-файлы метаданных, системный keyring |
 | Frontend | SvelteKit 2 / Svelte 5, adapter-node, Tailwind 4, Vite 7, TypeScript 5 |
 | Frontend-библиотеки | `marked` и `dompurify` — разметка ответов моделей с очисткой |
 | Тесты | pytest и ruff в backend; Vitest и Testing Library в frontend; Playwright в QA |
@@ -112,53 +107,44 @@ Backend: `pytest`; frontend: `npx vitest run`, `npm run check`, `npm run lint`,
 | Слой | Каталог | Ответственность |
 | --- | --- | --- |
 | API | `backend/app/api` | Роутеры FastAPI, pydantic-схемы, DI-контейнер, обработчики ошибок |
-| Сервисы | `backend/app/service` | Сценарии: диалог чата, SEO-прогон и агенты, проверки, поиск, настройки, экспорт |
-| Домен | `backend/app/domain` | Чистые правила и модели без I/O: валидация входа, диалог чата и его промпты, бюджеты, инструменты, отчёт |
-| Инфраструктура | `backend/app/db`, `backend/app/integrations` | SQLite, JSON-настройки, keyring; адаптеры Яндекса, моделей и обхода сайта |
+| Сервисы | `backend/app/service` | Сценарии: проверки, поиск, сохранённые прогоны, замеры проектов, генерация, настройки служебной LLM |
+| Домен | `backend/app/domain` | Чистые правила и модели без I/O: валидация входа, проекты, метрики ответов, матчинг, промпты |
+| Инфраструктура | `backend/app/db`, `backend/app/integrations` | PostgreSQL (подключение в `backend/app/core/database.py`), JSON-настройки, keyring; адаптеры Яндекса, моделей и обхода сайта |
 
 - Точка входа — [main.py](backend/app/main.py): приложение и контейнер собираются на импорте,
   `Settings.from_env()` читает окружение и корневой `.env`. Тесты подменяют `get_container`.
-- Домен не знает про сеть и фреймворки: внешние действия выполняются инструментами
-  ([seo_tools.py](backend/app/domain/seo_tools.py)), а адаптеры переводят любые сбои в
-  фиксированные русские сообщения — тело ответа, URL и ключи наружу не уходят.
+- Домен не знает про сеть и фреймворки: метрики считаются из сохранённых строк
+  ([measurement_report.py](backend/app/domain/measurement_report.py)), а адаптеры переводят
+  любые сбои в фиксированные русские сообщения — тело ответа, URL и ключи наружу не уходят.
 - Frontend работает как BFF: серверные роуты `frontend/src/routes/api/**/+server.ts` проксируют
   запросы в Python API через [python-api.ts](frontend/src/lib/server/python-api.ts), поэтому
   браузер обращается только к интерфейсу и CORS не нужен.
 
 ## 4. Ключевые потоки
 
+- **Мастер проекта**: шесть шагов собирают бренд и сайт, описание, промпты, конкурентов,
+  модели и запуск; черновик можно сохранить и продолжить позже. Генерация описания, промптов
+  и конкурентов использует служебную LLM и безопасный обход до пяти публичных страниц сайта.
+- **Замер** (`POST /api/projects/{id}/measurements`): проект читается из хранилища, каждая пара
+  «промпт × подключение» отправляется последовательным исполнителем, результат пишется отдельной
+  строкой, а тональность при включённой оценке считает служебная LLM. На проект допускается один
+  активный замер; отмена сохраняет готовые строки.
 - **Проверка упоминаний** (`POST /api/check`): выбранные подключения опрашиваются одними и теми
   же запросами; сбой одного подключения не стирает результаты остальных.
-- **Чат-анализ** (`POST /api/seo/chats/{id}/messages`): одно сообщение — ровно один платный вызов
-  служебной LLM; модель называет намерение и извлекает поля, а решение о запуске принимает
-  сервер. Прогон стартует только из открытой карточки, параметры которой совпадают с черновиком,
-  и после подтверждения словом «да».
-- **SEO-прогон** (`POST /api/seo/analyses`, из чата или напрямую по API): пять агентов —
-  супервизор, сайт, конкуренты, запросы, проверки (`AGENTS` в
-  [seo.py](backend/app/domain/seo.py)); отчёта как отдельного шага нет, числа считает сервер.
-  Супервизор передаёт
-  управление специалистам; каждый внешний шаг проходит через инструмент, который проверяет
-  аргументы, бюджет и зависимости данных, сохраняет результат и пишет шаг в трассу.
-- **Отложенный поиск Яндекса**: задача только ставится (`submit`), результат опрашивается позже.
-  Прогон идемпотентен: повторный вызов по тому же запросу возвращает сохранённый результат.
-- **Отмена и возобновление**: отмена останавливает граф до следующего шага; состояние графа
-  чекпойнтится в `seo-agents.sqlite3`, после перезапуска прогон продолжается из чекпойнта.
+- **Отложенный поиск Яндекса**: задача только ставится (`submit`), результат опрашивается позже;
+  сохранённые прогоны формы идут через `/api/runs` и лежат в PostgreSQL.
+- **Отчёт и динамика**: сервер считает агрегаты из сохранённых строк — цитирование домена,
+  позиция первого упоминания бренда, доля упоминаний и сравнение с предыдущим завершённым
+  замером той же серии.
 
-Бюджеты одного прогона ([site_fetch.py](backend/app/domain/site_fetch.py),
-[seo_tools.py](backend/app/domain/seo_tools.py)):
+Бюджеты одного замера ([measurement_report.py](backend/app/domain/measurement_report.py)):
 
 | Ресурс | Предел |
 | --- | --- |
-| Прочитанные страницы | 5 |
-| Поисковые запросы Яндекса | 10: три ключевых и до семи сгенерированных |
-| Ответы моделей | 10 на прогон, независимо от числа подключений |
-| Передачи управления супервизора | 15 |
-| Ходы модели на одного специалиста | 20 |
-| Вызовы инструментов | 120 |
+| Промптов на замер | 20 |
+| Подключений моделей | 5 |
+| Конкурентов | 10 |
 | Один вызов служебной LLM | 120 секунд |
-
-Исчерпание бюджета завершает прогон с признаком «остановлен по лимиту»: готовые строки и отчёт
-остаются доступными, новые платные вызовы не выполняются.
 
 ## 5. API
 
@@ -186,47 +172,40 @@ Backend: `pytest`; frontend: `npx vitest run`, `npm run check`, `npm run lint`,
 | `GET /api/runs/{run_id}` | Снимок прогона |
 | `DELETE /api/runs/{run_id}` | Удалить завершённый прогон |
 | `GET /api/runs/{run_id}/export.csv` | Экспорт прогона в CSV |
-| `POST /api/seo/analyses` | Запустить SEO-анализ (202) |
-| `GET /api/seo/analyses` | Прежние SEO-прогоны постранично (только API) |
-| `GET /api/seo/analyses/{id}` | Снимок анализа, агенты и бюджет |
-| `GET /api/seo/analyses/{id}/rows` | Детализация строк по курсору |
-| `GET /api/seo/analyses/{id}/trace` | Трасса шагов агентов |
-| `POST /api/seo/analyses/{id}/cancel` | Отменить прогон |
-| `DELETE /api/seo/analyses/{id}` | Удалить завершённый анализ |
-| `GET /api/seo/chats` | Список чатов, новые сверху, с признаком идущего прогона |
-| `POST /api/seo/chats` | Создать пустой чат (201) |
-| `GET /api/seo/chats/{id}` | Чат и страница ленты; курсор `before` читает более ранние сообщения |
-| `DELETE /api/seo/chats/{id}` | Удалить чат и запущенные из него прогоны (204) |
-| `POST /api/seo/chats/{id}/messages` | Отправить сообщение: вопрос, карточка предложения или платный прогон |
-| `PUT /api/seo/chats/{id}/proposal` | Заменить подключения открытой карточки предложения |
 | `GET`, `PUT /api/seo/settings` | Настройки служебной LLM |
 | `DELETE /api/seo/settings/credentials` | Сбросить ключ служебной LLM |
 | `POST /api/seo/settings/test` | Проверить LLM и поддержку вызова инструментов |
 
-Снимок SEO-анализа (`GET /api/seo/analyses/{id}`) отдаёт агрегаты: `site.ai[<connection_id>].citation` —
-доля ответов подключения, где модель сослалась на домен сайта; `.position` — доли
-`first/early/late/absent` по абзацу первого упоминания бренда (`absent` — ответ без упоминания,
-он входит в знаменатель вместе с `found`) и `ahead` — бренд раньше всех упомянутых кандидатов.
-На верхнем уровне `sources: [{domain, answers, citations}]` — домены, которые цитируют модели,
-без домена сайта и его поддоменов; данные есть только у подключений с веб-поиском.
+Замер (`GET /api/measurements/{id}`) отдаёт агрегаты: доля ответов подключения, где модель
+сослалась на домен сайта; доли `first/early/late/absent` по абзацу первого упоминания бренда
+(`absent` — ответ без упоминания, он входит в знаменатель вместе с `found`) и `ahead` — бренд
+раньше всех упомянутых конкурентов. На верхнем уровне `sources: [{domain, answers, citations}]` —
+домены, которые цитируют модели, без домена сайта и его поддоменов; данные есть только
+у подключений с веб-поиском.
 
 ## 6. Данные и секреты
 
+Все постоянные строки лежат в PostgreSQL: адрес задаёт `AI_TRACKER_DATABASE_URL`
+(по умолчанию локальный Postgres.app `postgresql://adam977@localhost:5432/ai-tracker`;
+в Docker — служба `postgres` с образом `postgres:18-bookworm`). Схему создают и меняют
+только миграции Alembic из `backend/migrations` — приложение их не запускает и падает
+безопасной ошибкой хранилища, если база не на head.
+
+`projects` — корневая таблица, и каждая компания ведётся отдельным проектом:
+`project_measurements` и `runs` ссылаются на неё через
+`project_id NOT NULL ... ON DELETE CASCADE`.
+
 Каталог данных — `AI_TRACKER_CONFIG_DIR`, по умолчанию `~/.config/ai-tracker`
 ([config.py](backend/app/core/config.py)); в Docker это том `ai-tracker-data`, каталог `/data`.
+Здесь остаются только JSON-настройки и файл ключей.
 
 | Файл | Содержимое |
 | --- | --- |
 | `providers.json` | Метаданные подключений: имя, адрес, модель; ключей нет |
-| `runs.sqlite3` | Прогоны проверок (`user_version = 2`), SEO-таблицы (`user_version = 4`): анализы, страницы, кандидаты, запросы, строки поиска и моделей, агенты, шаги трассы; таблицы чата (`user_version = 5`): `seo_chats` и `seo_chat_messages` |
-| `seo-agents.sqlite3` | Чекпойнты графа LangGraph: один файл, поток на ID анализа |
 | `search-settings.json` | Настройки Яндекса: ID каталога и признак включения |
 | `seo-settings.json` | Адрес и модель служебной LLM |
 | Системный keyring | Ключи моделей (учётная запись — ID подключения), `yandex-search`, `seo-llm` |
 
-- Таблицы чата создаёт [db/chat.py](backend/app/db/chat.py) — последний владелец общего файла: он
-  заводит `seo_chats` и `seo_chat_messages` и поднимает `user_version` до 5, а файл более новой
-  версии не трогает. Черновик диалога и payload сообщений лежат в этих таблицах как JSON.
 - Ключи не попадают ни в `providers.json`, ни в ответы API, ни в текст ошибок: публичный ответ
   содержит только признак «ключ задан». В контейнере системного хранилища нет, поэтому образ
   backend ставит файловый бэкенд `keyrings.alt` и держит ключи в томе.
@@ -241,6 +220,9 @@ Backend: `pytest`; frontend: `npx vitest run`, `npm run check`, `npm run lint`,
 | Команда | Что делает |
 | --- | --- |
 | `make install` | `uv sync` в backend и `npm ci` в frontend |
+| `make migrate` | `alembic upgrade head`: схема PostgreSQL на head |
+| `make migration name=...` | Новая пустая ревизия Alembic в `backend/migrations` |
+| `make migrate-down` | `alembic downgrade -1` |
 | `make backend` | Python API на `127.0.0.1:8000` |
 | `make frontend` | SvelteKit dev-сервер на `127.0.0.1:5173` |
 | `make check` | Типы, форматирование и линт интерфейса: `types`, `format-check`, `lint` |
@@ -251,9 +233,11 @@ Backend: `pytest`; frontend: `npx vitest run`, `npm run check`, `npm run lint`,
 | `make ruff` | `ruff check --fix` в backend |
 | `make docker-up`, `make docker-down`, `make docker-logs` | Стек в Docker Compose |
 
-- Docker: две службы — backend на `127.0.0.1:8000` и интерфейс на `127.0.0.1:3001` с base path
-  `/clustering/tracker` ([docker-compose.yml](docker-compose.yml),
-  [svelte.config.js](frontend/svelte.config.js)); публичный origin задаётся `AI_TRACKER_ORIGIN`.
+- Docker: три службы — backend на `127.0.0.1:8000`, интерфейс на `127.0.0.1:3001` с base path
+  `/clustering/tracker` и PostgreSQL (`postgres:18-bookworm`, публикуется на `127.0.0.1:5433`)
+  ([docker-compose.yml](docker-compose.yml), [svelte.config.js](frontend/svelte.config.js));
+  публичный origin задаётся `AI_TRACKER_ORIGIN`. Миграции контейнер backend применяет сам —
+  `alembic upgrade head` перед `uvicorn`.
 - Backend-тесты: `cd backend && uv run pytest` — модули в [backend/tests](backend/tests) по слоям
   (api, db, domain, integrations, service) на фейках, без внешних вызовов.
 - Frontend-тесты: `cd frontend && npx vitest run` — тесты лежат рядом с кодом (`*.test.ts`);
@@ -268,19 +252,16 @@ Backend: `pytest`; frontend: `npx vitest run`, `npm run check`, `npm run lint`,
 | Путь | Что там |
 | --- | --- |
 | [backend/app/api](backend/app/api) | Роутеры, схемы, DI, обработчики ошибок, OpenAPI |
-| [backend/app/api/routers/seo_chats.py](backend/app/api/routers/seo_chats.py) | Шесть маршрутов чатов: список, создание, чтение с курсором, удаление, сообщение, карточка предложения |
-| [backend/app/service](backend/app/service) | Сценарии: диалог чата, SEO-прогон и агенты, проверки, поиск, настройки, экспорт |
-| [backend/app/service/chat.py](backend/app/service/chat.py) | Один ход диалога: один платный вызов и серверное решение о запуске |
-| [backend/app/domain](backend/app/domain) | Правила и модели: валидация, лимиты, инструменты, отчёт, промпты |
-| [backend/app/domain/chat.py](backend/app/domain/chat.py) | Правила диалога: черновик, недостающие поля, предложение, право на запуск |
-| [backend/app/domain/chat_prompts.py](backend/app/domain/chat_prompts.py) | Промпт чата, разметка недоверенного ввода, фиксированные фразы |
-| [backend/app/db](backend/app/db) | Репозитории SQLite, JSON-настройки, keyring |
-| [backend/app/db/chat.py](backend/app/db/chat.py) | Таблицы `seo_chats` и `seo_chat_messages`, миграция `user_version = 5` |
-| [backend/app/integrations](backend/app/integrations) | Адаптеры: OpenAI-совместимый чат, служебная LLM, Яндекс, обход сайта |
+| [backend/app/service](backend/app/service) | Сценарии: проверки, поиск, сохранённые прогоны, замеры проектов, генерация, настройки |
+| [backend/app/domain](backend/app/domain) | Правила и модели: валидация, проекты, метрики ответов, матчинг, промпты |
+| [backend/app/core/database.py](backend/app/core/database.py) | Подключение к PostgreSQL: строки `Row`, транзакции, ошибки драйвера |
+| [backend/migrations](backend/migrations) | Миграции Alembic: вся схема PostgreSQL, `projects` — корневая таблица |
+| [backend/app/db](backend/app/db) | Репозитории PostgreSQL, JSON-настройки, keyring |
+| [backend/app/integrations](backend/app/integrations) | Адаптеры: OpenAI-совместимый чат моделей, служебная LLM, Яндекс, обход сайта |
 | [backend/tests](backend/tests) | Модульные и API-тесты pytest |
 | [frontend/src/routes](frontend/src/routes) | Страницы и BFF-роуты `api/**/+server.ts` |
 | [frontend/src/lib](frontend/src/lib) | Компоненты Svelte, типы, клиентская валидация, серверный прокси |
-| [frontend/src/lib/components](frontend/src/lib/components) | Компоненты чата: `ChatSidebar`, `ChatFeed`, `ChatMessage`, `ChatProposal`, `ChatRun`, `ChatComposer` |
+| [frontend/src/lib/components](frontend/src/lib/components) | Компоненты интерфейса: карточки проектов, мастер, отчёт замера, настройки |
 | [qa](qa) | Сквозные проверки Playwright и page objects |
-| [docs/superpowers](docs/superpowers) | Спеки и планы прошлых итераций |
+| [docs/superpowers](docs/superpowers) | Спеки и планы прошлых итераций (в том числе удалённых SEO-сценариев) |
 | [README.md](README.md) | Пользовательское описание, правила и переменные окружения |
