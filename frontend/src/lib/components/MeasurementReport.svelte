@@ -5,6 +5,7 @@
   import AnswerDialog from './AnswerDialog.svelte';
   let {
     snapshot,
+    view = 'mentions',
     modelRows = [],
     searchRows = [],
     modelCursor = null,
@@ -13,6 +14,7 @@
     onMore = () => {},
   }: {
     snapshot: Measurement;
+    view?: 'mentions' | 'sources';
     modelRows?: ModelRow[];
     searchRows?: SearchRow[];
     modelCursor?: string | null;
@@ -22,6 +24,9 @@
   } = $props();
   let a = $derived(snapshot.aggregates);
   let open = $state<ModelRow | null>(null);
+  let visibleRows = $derived(
+    view === 'sources' ? modelRows.filter((r) => r.answer_mode === 'deepseek_web') : modelRows,
+  );
   const posLabels: Record<string, string> = {
     first: 'Первый абзац',
     early: '2–3 абзацы',
@@ -34,120 +39,169 @@
 </script>
 
 <div class="space-y-6" data-measurement-report>
-  <div class="grid gap-3 sm:grid-cols-4">
-    <div class="rounded-xl border border-line bg-white p-4">
-      <p class="text-xs text-muted">Видимость в ИИ</p>
-      <strong class="mt-2 block text-2xl">{percent(a.visibility)}</strong
-      >{#if snapshot.comparison.visibility_delta != null}<p class="mt-1 text-xs text-muted">
-          {snapshot.comparison.visibility_delta > 0 ? '+' : ''}{snapshot.comparison
-            .visibility_delta} п.п.
+  {#if view === 'mentions'}
+    <div class="grid gap-3 sm:grid-cols-4">
+      <div class="rounded-xl border border-line bg-white p-4">
+        <p class="text-xs text-muted">Видимость в ИИ</p>
+        <strong class="mt-2 block text-2xl">{percent(a.visibility)}</strong
+        >{#if snapshot.comparison.visibility_delta != null}<p class="mt-1 text-xs text-muted">
+            {snapshot.comparison.visibility_delta > 0 ? '+' : ''}{snapshot.comparison
+              .visibility_delta} п.п.
+          </p>{/if}
+      </div>
+      {#each ['positive', 'neutral', 'negative'] as key (key)}<div
+          class="rounded-xl border border-line bg-white p-4"
+        >
+          <p class="text-xs text-muted">{sentimentLabels[key]} тональность</p>
+          <strong class="mt-2 block text-2xl"
+            >{a.sentiment[key as 'positive' | 'neutral' | 'negative']}</strong
+          >
+        </div>{/each}
+    </div>
+    <div class="rounded-xl bg-accent-soft p-4 text-sm">
+      <p>
+        Бренд упомянут в <strong>{a.mentioned} из {a.successful}</strong> успешных ответов. Получено {a.successful}
+        из {a.planned} запланированных.
+      </p>
+      {#if a.model_errors}<p class="mt-1">
+          Ошибок или прерванных ответов: {a.model_errors}.
+        </p>{/if}{#if a.sentiment.unknown}<p class="mt-1">
+          Тональность не определена для {a.sentiment.unknown} упоминаний.
+        </p>{/if}{#if snapshot.comparison.reason}<p class="mt-2 text-xs text-muted">
+          {snapshot.comparison.reason}
         </p>{/if}
     </div>
-    {#each ['positive', 'neutral', 'negative'] as key (key)}<div
-        class="rounded-xl border border-line bg-white p-4"
-      >
-        <p class="text-xs text-muted">{sentimentLabels[key]} тональность</p>
-        <strong class="mt-2 block text-2xl"
-          >{a.sentiment[key as 'positive' | 'neutral' | 'negative']}</strong
-        >
-      </div>{/each}
-  </div>
-  <div class="rounded-xl bg-accent-soft p-4 text-sm">
-    <p>
-      Бренд упомянут в <strong>{a.mentioned} из {a.successful}</strong> успешных ответов. Получено {a.successful}
-      из {a.planned} запланированных.
-    </p>
-    {#if a.model_errors}<p class="mt-1">
-        Ошибок или прерванных ответов: {a.model_errors}.
-      </p>{/if}{#if a.sentiment.unknown}<p class="mt-1">
-        Тональность не определена для {a.sentiment.unknown} упоминаний.
-      </p>{/if}{#if snapshot.comparison.reason}<p class="mt-2 text-xs text-muted">
-        {snapshot.comparison.reason}
-      </p>{/if}
-  </div>
-  <section class="overflow-hidden rounded-xl border border-line bg-white">
-    <h2 class="px-4 pt-4 font-semibold">Модели и позиция бренда</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead
-          ><tr
-            ><th class={th}>Модель</th><th class={th}>Упоминания</th><th class={th}>В источниках</th
-            >{#each Object.values(posLabels) as label (label)}<th class={th}>{label}</th>{/each}</tr
-          ></thead
-        ><tbody
-          >{#each a.models as m (m)}<tr
-              ><td class={td}>{m.name}</td><td class={td}
-                >{percent(m.visibility)}
-                <span class="text-xs text-muted">({m.mentioned}/{m.successful})</span></td
-              ><td class={td}
-                >{percent(m.citation.share)}{#if m.citation.average_position != null}<span
-                    class="block text-xs text-muted"
-                    >Порядок: {m.citation.average_position.toFixed(1)}</span
-                  >{/if}</td
-              >{#each Object.keys(posLabels) as k (k)}<td class={td}
-                  >{percent(m.position[k].share)}</td
+    <section class="overflow-hidden rounded-xl border border-line bg-white">
+      <h2 class="px-4 pt-4 font-semibold">Модели и позиция бренда</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead
+            ><tr
+              ><th class={th}>Модель</th><th class={th}>Упоминания</th><th class={th}
+                >В источниках</th
+              >{#each Object.values(posLabels) as label (label)}<th class={th}>{label}</th
                 >{/each}</tr
-            >{/each}</tbody
-        >
-      </table>
-    </div>
-  </section>
-  <section class="overflow-hidden rounded-xl border border-line bg-white">
-    <h2 class="px-4 pt-4 font-semibold">Запросы</h2>
-    <div class="overflow-x-auto">
+            ></thead
+          ><tbody
+            >{#each a.models as m (m)}<tr
+                ><td class={td}>{m.name}</td><td class={td}
+                  >{percent(m.visibility)}
+                  <span class="text-xs text-muted">({m.mentioned}/{m.successful})</span></td
+                ><td class={td}
+                  >{percent(m.citation.share)}{#if m.citation.average_position != null}<span
+                      class="block text-xs text-muted"
+                      >Порядок: {m.citation.average_position.toFixed(1)}</span
+                    >{/if}</td
+                >{#each Object.keys(posLabels) as k (k)}<td class={td}
+                    >{percent(m.position[k].share)}</td
+                  >{/each}</tr
+              >{/each}</tbody
+          >
+        </table>
+      </div>
+    </section>
+    <section class="overflow-hidden rounded-xl border border-line bg-white">
+      <h2 class="px-4 pt-4 font-semibold">Запросы</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead
+            ><tr
+              ><th class={th}>Запрос</th><th class={th}>Ответы</th><th class={th}>Упоминания</th><th
+                class={th}>Видимость</th
+              ></tr
+            ></thead
+          ><tbody
+            >{#each a.queries as q (q)}<tr
+                ><td class={td}
+                  >{q.text}{#if q.group}<span class="mt-1 block text-xs text-muted">{q.group}</span
+                    >{/if}</td
+                ><td class={td}>{q.successful}</td><td class={td}>{q.mentioned}</td><td class={td}
+                  >{percent(q.visibility)}</td
+                ></tr
+              >{/each}</tbody
+          >
+        </table>
+      </div>
+    </section>
+    {#if a.groups?.length}<section class="overflow-hidden rounded-xl border border-line bg-white">
+        <h2 class="px-4 pt-4 font-semibold">Группы промптов</h2>
+        <table class="w-full">
+          <thead
+            ><tr
+              ><th class={th}>Группа</th><th class={th}>Упоминания</th><th class={th}>Видимость</th
+              ></tr
+            ></thead
+          ><tbody
+            >{#each a.groups as group (group.name)}<tr
+                ><td class={td}>{group.name}</td><td class={td}
+                  >{group.mentioned} из {group.successful}</td
+                ><td class={td}>{percent(group.visibility)}</td></tr
+              >{/each}</tbody
+          >
+        </table>
+      </section>{/if}
+    {#if a.competitors.length}<section
+        class="overflow-hidden rounded-xl border border-line bg-white"
+      >
+        <h2 class="px-4 pt-4 font-semibold">Конкуренты</h2>
+        <table class="w-full">
+          <thead
+            ><tr
+              ><th class={th}>Бренд</th><th class={th}>Упоминания</th><th class={th}>Видимость</th
+              ></tr
+            ></thead
+          ><tbody
+            >{#each a.competitors as c (c)}<tr
+                ><td class={td}>{c.brand}</td><td class={td}>{c.mentioned} из {c.successful}</td><td
+                  class={td}>{percent(c.visibility)}</td
+                ></tr
+              >{/each}</tbody
+          >
+        </table>
+      </section>{/if}
+  {/if}
+  {#if view === 'sources'}<section class="overflow-hidden rounded-xl border border-line bg-white">
+      <h2 class="px-4 pt-4 font-semibold">Цитирование сайта моделями</h2>
       <table class="w-full">
         <thead
           ><tr
-            ><th class={th}>Запрос</th><th class={th}>Ответы</th><th class={th}>Упоминания</th><th
-              class={th}>Видимость</th
-            ></tr
+            ><th class={th}>Модель</th><th class={th}>Ответов с цитатами сайта</th><th class={th}
+              >Доля</th
+            ><th class={th}>Средний порядок</th></tr
           ></thead
         ><tbody
-          >{#each a.queries as q (q)}<tr
-              ><td class={td}>{q.text}</td><td class={td}>{q.successful}</td><td class={td}
-                >{q.mentioned}</td
-              ><td class={td}>{percent(q.visibility)}</td></tr
-            >{/each}</tbody
-        >
-      </table>
-    </div>
-  </section>
-  {#if a.competitors.length}<section class="overflow-hidden rounded-xl border border-line bg-white">
-      <h2 class="px-4 pt-4 font-semibold">Конкуренты</h2>
-      <table class="w-full">
-        <thead
-          ><tr
-            ><th class={th}>Бренд</th><th class={th}>Упоминания</th><th class={th}>Видимость</th
-            ></tr
-          ></thead
-        ><tbody
-          >{#each a.competitors as c (c)}<tr
-              ><td class={td}>{c.brand}</td><td class={td}>{c.mentioned} из {c.successful}</td><td
-                class={td}>{percent(c.visibility)}</td
+          >{#each a.models as m (m.connection_id)}<tr
+              ><td class={td}>{m.name}</td><td class={td}
+                >{m.citation.successes} из {m.citation.denominator}</td
+              ><td class={td}>{percent(m.citation.share)}</td><td class={td}
+                >{m.citation.average_position?.toFixed(1) ?? '—'}</td
               ></tr
             >{/each}</tbody
         >
       </table>
-    </section>{/if}
+    </section>
+    <section class="overflow-hidden rounded-xl border border-line bg-white">
+      <h2 class="px-4 pt-4 font-semibold">Источники</h2>
+      {#if a.sources.length}<table class="w-full">
+          <thead
+            ><tr><th class={th}>Домен</th><th class={th}>Ответов</th><th class={th}>Цитат</th></tr
+            ></thead
+          ><tbody
+            >{#each a.sources as source (source)}<tr
+                ><td class={td}>{source.domain}</td><td class={td}>{source.answers}</td><td
+                  class={td}>{source.citations}</td
+                ></tr
+              >{/each}</tbody
+          >
+        </table>{:else}<p class="p-4 text-sm text-muted">
+          Внешних цитируемых источников нет. У моделей без веб-поиска цитирование не применяется.
+        </p>{/if}
+    </section>
+  {/if}
   <section class="overflow-hidden rounded-xl border border-line bg-white">
-    <h2 class="px-4 pt-4 font-semibold">Источники</h2>
-    {#if a.sources.length}<table class="w-full">
-        <thead
-          ><tr><th class={th}>Домен</th><th class={th}>Ответов</th><th class={th}>Цитат</th></tr
-          ></thead
-        ><tbody
-          >{#each a.sources as source (source)}<tr
-              ><td class={td}>{source.domain}</td><td class={td}>{source.answers}</td><td class={td}
-                >{source.citations}</td
-              ></tr
-            >{/each}</tbody
-        >
-      </table>{:else}<p class="p-4 text-sm text-muted">
-        Внешних цитируемых источников нет. У моделей без веб-поиска цитирование не применяется.
-      </p>{/if}
-  </section>
-  <section class="overflow-hidden rounded-xl border border-line bg-white">
-    <h2 class="px-4 pt-4 font-semibold">Ответы моделей</h2>
+    <h2 class="px-4 pt-4 font-semibold">
+      {view === 'sources' ? 'Ответы с веб-поиском' : 'Ответы моделей'}
+    </h2>
     <div class="overflow-x-auto">
       <table class="w-full">
         <thead
@@ -157,7 +211,7 @@
             ><th class={th}>Источники</th></tr
           ></thead
         ><tbody
-          >{#each modelRows as row (row)}<tr
+          >{#each visibleRows as row (row)}<tr
               ><td class={`${td} min-w-40`}
                 ><span>{row.query}</span><span class="mt-1 block text-xs text-muted"
                   >{row.provider_name} · {row.answer_mode === 'deepseek_web'
@@ -196,7 +250,7 @@
         onclick={() => onMore('model')}>Показать ещё ответы</button
       >{/if}
   </section>
-  {#if snapshot.snapshot.project.yandex_enabled}<section
+  {#if view === 'mentions' && snapshot.snapshot.project.yandex_enabled}<section
       class="overflow-hidden rounded-xl border border-line bg-white"
     >
       <h2 class="px-4 pt-4 font-semibold">
