@@ -21,6 +21,7 @@ from app.api.errors import (
 )
 from app.api.openapi import install_openapi
 from app.api.router import api_router
+from app.core import database
 from app.core.config import Settings, load_env_file
 from app.core.errors import AppError
 
@@ -49,6 +50,9 @@ async def lifespan(application: FastAPI):
     await container.search.close()
     if container.search_client is not None:
         await container.search_client.aclose()
+    # The background workers are stopped first, so no task can still hold a
+    # connection while the pools of this process are closed.
+    database.close_pools()
     log.info("ИИ-трекинг API остановлен")
 
 
