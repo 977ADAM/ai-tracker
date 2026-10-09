@@ -29,8 +29,6 @@ const data = {
     api_key_source: 'none' as const,
   },
   seoSettingsError: '',
-  chats: [],
-  chatsError: '',
   loadError: '',
 };
 
