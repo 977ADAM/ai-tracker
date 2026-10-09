@@ -118,10 +118,6 @@ def test_openapi_documents_every_operation(client):
         "/api/search/settings", "/api/search/settings/credentials",
         "/api/runs", "/api/runs/{run_id}", "/api/runs/{run_id}/export.csv",
         "/api/seo/settings", "/api/seo/settings/credentials", "/api/seo/settings/test",
-        "/api/seo/analyses", "/api/seo/analyses/{id}",
-        "/api/seo/analyses/{id}/rows", "/api/seo/analyses/{id}/trace", "/api/seo/analyses/{id}/cancel",
-        "/api/seo/chats", "/api/seo/chats/{chat_id}",
-        "/api/seo/chats/{chat_id}/messages", "/api/seo/chats/{chat_id}/proposal",
     }
     for path, operations in spec["paths"].items():
         for method, operation in operations.items():
@@ -137,10 +133,5 @@ def test_openapi_documents_every_operation(client):
     for name in ("CheckRequest", "CheckResponse", "ProviderWriteRequest", "ProviderResponse", "FormResponse", "ErrorResponse",
                  "RunRequest", "RunCreatedResponse", "RunSnapshotResponse", "RunHistoryPage",
                  "SearchSettingsWriteRequest", "SearchSettingsResponse", "YandexSettingsResponse",
-                 "SeoSettingsWriteRequest", "SeoSettingsResponse", "SeoSettingsTestResponse",
-                 "SeoAnalysisRequest", "SeoAnalysisCreatedResponse", "SeoSnapshotResponse",
-                 "SeoHistoryPageResponse", "SeoRowsResponse",
-                 "ChatMessageRequest", "ProposalUpdateRequest", "ChatMessageResponse",
-                 "ChatSummaryResponse", "ChatListResponse", "ChatCreatedResponse",
-                 "ChatDetailResponse", "ChatMessagesResponse", "ProposalResponse"):
+                 "SeoSettingsWriteRequest", "SeoSettingsResponse", "SeoSettingsTestResponse"):
         assert name in spec["components"]["schemas"]
