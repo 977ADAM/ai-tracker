@@ -8,15 +8,20 @@ defaults to the local Postgres.app server.
 This module is the only place that talks to the driver. It gives the
 repositories a small DB-API-like surface:
 
-* `connect()` opens a connection whose rows are `Row` objects, addressable both
-  by column name and by position, exactly as the repositories and their callers
-  use them;
+* `connect()` borrows a connection from the pool of that database and returns
+  rows as `Row` objects, addressable both by column name and by position,
+  exactly as the repositories and their callers use them;
+* `pool()` keeps one `psycopg_pool.ConnectionPool` per database URL for the
+  whole process, so an operation does not pay for a new connection, and
+  `close_pools()` shuts them down with the application;
 * `?` placeholders are translated to the driver's `%s`, so a statement stays
   readable next to the PostgreSQL schema in `backend/migrations/`, and literals
   that contain `%` keep working;
 * `table_columns()` wraps `information_schema` where the code used
   `PRAGMA table_info`;
 * `require_project()` refuses a row written for a project that does not exist;
+* `safe_target()` names a database in a log message as `host:port/database`,
+  because the DSN itself carries credentials;
 * the driver's error classes are re-exported, so a repository catches one
   vocabulary (`Error`, `IntegrityError`, `OperationalError`) regardless of the
   driver below it.
@@ -29,11 +34,14 @@ lock explicitly with `SELECT ... FOR UPDATE`.
 
 from __future__ import annotations
 
+import logging
 import os
+import threading
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, Self
 
 import psycopg
+import psycopg_pool
 from psycopg import errors as psycopg_errors
 from psycopg.rows import dict_row
 
@@ -45,6 +53,20 @@ IntegrityError = psycopg_errors.IntegrityError
 OperationalError = psycopg.OperationalError
 UniqueViolation = psycopg_errors.UniqueViolation
 ForeignKeyViolation = psycopg_errors.ForeignKeyViolation
+
+# One permanent connection is always ready; the pool only grows when concurrent
+# work needs it. The ceiling is per process, so a deployment multiplies it by its
+# workers and replicas and keeps the total under the server's `max_connections`.
+POOL_MIN_SIZE = 1
+DEFAULT_POOL_MAX_SIZE = 8
+# How long a caller waits for a free connection before the operation fails.
+POOL_TIMEOUT_SECONDS = 5.0
+POOL_MAX_SIZE_VARIABLE = "AI_TRACKER_DB_POOL_MAX_SIZE"
+
+LOGGER = logging.getLogger(__name__)
+
+_POOLS: dict[str, psycopg_pool.ConnectionPool] = {}
+_POOLS_LOCK = threading.Lock()
 
 # Statements that only make sense to SQLite. They are accepted and ignored so a
 # caller that still carries one does not have to know which engine runs below.
@@ -96,6 +118,33 @@ def database_url(env: Mapping[str, str] | None = None) -> str:
     source = os.environ if env is None else env
     value = source.get(DATABASE_URL_VARIABLE)
     return value.strip() if value and value.strip() else DEFAULT_DATABASE_URL
+
+
+def pool_max_size(env: Mapping[str, str] | None = None) -> int:
+    """The per-process connection ceiling; a bad value keeps the default."""
+    source = os.environ if env is None else env
+    raw = source.get(POOL_MAX_SIZE_VARIABLE)
+    try:
+        value = int(str(raw).strip()) if raw is not None else DEFAULT_POOL_MAX_SIZE
+    except (TypeError, ValueError):
+        return DEFAULT_POOL_MAX_SIZE
+    return value if value >= POOL_MIN_SIZE else DEFAULT_POOL_MAX_SIZE
+
+
+def safe_target(dsn: str) -> str:
+    """`host:port/database` of one connection URL — never the user or the password.
+
+    Logs may name the database they reached, so every message about the
+    connection goes through here: the DSN itself carries credentials.
+    """
+    try:
+        info = psycopg.conninfo.conninfo_to_dict(dsn)
+    except psycopg.Error:
+        return "?"
+    host = info.get("host") or "localhost"
+    port = info.get("port") or "5432"
+    database = info.get("dbname") or "?"
+    return f"{host}:{port}/{database}"
 
 
 def _adapt(value: Any) -> Any:
@@ -198,11 +247,15 @@ class Connection:
     repository that reads a row and then changes it asks for that row with
     `SELECT ... FOR UPDATE` while `writing` is set, which is the exclusion that
     SQLite's `BEGIN IMMEDIATE` used to give the whole file.
+
+    A connection borrowed from the pool goes back to it on `close()`; only a
+    directly opened one (autocommit DDL) is really closed.
     """
 
-    def __init__(self, raw: psycopg.Connection) -> None:
+    def __init__(self, raw: psycopg.Connection, *, pool: psycopg_pool.ConnectionPool | None = None) -> None:
         self.raw = raw
         self.writing = False
+        self._pool = pool
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Result:
         if _ignored(sql):
@@ -233,7 +286,14 @@ class Connection:
         self.raw.rollback()
 
     def close(self) -> None:
-        self.raw.close()
+        if self._pool is None:
+            self.raw.close()
+            return
+        # A repository can leave the transaction open when it raises an
+        # application error (an unknown id, a conflict). The pool would roll it
+        # back anyway, but only after logging a warning, so it happens here.
+        self.raw.rollback()
+        self._pool.putconn(self.raw)
 
     def __enter__(self) -> Self:
         return self
@@ -242,10 +302,80 @@ class Connection:
         self.close()
 
 
-def connect(dsn: str | None = None, *, autocommit: bool = False) -> Connection:
-    """Open one connection to the configured database."""
+def _log_new_connection(connection: psycopg.Connection) -> None:
+    """DEBUG once per physical connection: how many the pool really opens."""
+    info = connection.info
+    LOGGER.debug(
+        "Новое соединение с PostgreSQL: %s:%s/%s",
+        info.host or "localhost",
+        info.port or 5432,
+        info.dbname or "?",
+    )
+
+
+def pool(dsn: str | None = None) -> psycopg_pool.ConnectionPool:
+    """The pool of one database, created on first use and kept for the process.
+
+    Repositories get a database URL rather than a pool, so pools are keyed by
+    URL: the application has one, and the test session has one per throwaway
+    schema. Creation probes the server once, because a pool would otherwise
+    retry an unreachable database in the background and only time out later.
+    """
     url = dsn or database_url()
-    return Connection(psycopg.connect(url, row_factory=dict_row, autocommit=autocommit))
+    with _POOLS_LOCK:
+        existing = _POOLS.get(url)
+        if existing is not None:
+            return existing
+        try:
+            psycopg.connect(url).close()
+        except psycopg.Error:
+            LOGGER.error("Не удалось подключиться к PostgreSQL: %s", safe_target(url))
+            raise
+        created = psycopg_pool.ConnectionPool(
+            url,
+            min_size=POOL_MIN_SIZE,
+            max_size=pool_max_size(),
+            timeout=POOL_TIMEOUT_SECONDS,
+            open=False,
+            kwargs={"row_factory": dict_row},
+            configure=_log_new_connection,
+        )
+        created.open()
+        _POOLS[url] = created
+        LOGGER.info(
+            "Подключение к PostgreSQL установлено: %s (пул %d..%d)",
+            safe_target(url),
+            POOL_MIN_SIZE,
+            created.max_size,
+        )
+        return created
+
+
+def close_pools() -> None:
+    """Close every pool of this process; the application calls it on shutdown."""
+    with _POOLS_LOCK:
+        pools = list(_POOLS.values())
+        _POOLS.clear()
+    for created in pools:
+        created.close()
+
+
+def connect(dsn: str | None = None, *, autocommit: bool = False) -> Connection:
+    """Borrow one connection from the process pool of that database.
+
+    `autocommit=True` bypasses the pool and really closes on `close()`: the few
+    callers that own DDL outside a transaction (creating or dropping a schema in
+    the tests) must not leave a half-finished transaction in a pooled session.
+    """
+    url = dsn or database_url()
+    if autocommit:
+        return Connection(psycopg.connect(url, row_factory=dict_row, autocommit=True))
+    created = pool(url)
+    try:
+        raw = created.getconn(timeout=POOL_TIMEOUT_SECONDS)
+    except psycopg_pool.PoolError as exc:
+        raise OperationalError(str(exc)) from exc
+    return Connection(raw, pool=created)
 
 
 def table_columns(connection: Connection, table: str) -> set[str]:
