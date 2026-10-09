@@ -1,14 +1,60 @@
-"""Validated project settings and order-independent measurement identity."""
+"""Validated project settings and order-independent measurement identity.
+
+A company is one project: it holds the brand, the site, the fixed query list,
+and the competitors, and every measurement and run belongs to it.
+"""
 
 import hashlib
+import ipaddress
 import json
+import re
 from copy import deepcopy
+from urllib.parse import urlsplit
 
 from app.core.errors import ValidationError
-from app.domain.matching import normalize_text
-from app.domain.search import KNOWN_REGION_IDS
-from app.domain.seo import QUERY_CATEGORIES, url_problem
+from app.domain.matching import mentions_host, normalize_text
+from app.domain.search import ALLOWED_SCHEMES, KNOWN_REGION_IDS
 from app.domain.seo_answer import normalize_source_url
+from app.domain.site_fetch import canonical_host
+
+QUERY_CATEGORIES = ("commercial", "informational", "comparative", "recommendation")
+MAX_URL_LENGTH = 2048
+INVALID_SITE = "Некорректный адрес сайта"
+INVALID_HOST_IP = "Укажите адрес сайта доменом, а не IP"
+
+
+def _is_ip_literal(host: str) -> bool:
+    """Report whether a canonical host is an IP address rather than a domain.
+
+    Short forms such as `127.1` and decimal literals are refused as well: every
+    all-numeric host is an address to a resolver, never a registrable domain.
+    """
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return bool(re.fullmatch(r"[0-9.]+", host))
+    return True
+
+
+def url_problem(value: object) -> str | None:
+    """Return why the site address is unusable, or `None` when it can be crawled.
+
+    The address must be a public HTTP(S) URL of a domain. An IP literal gets its
+    own message because a private address must never reach the crawler, and a
+    bare host is refused because the fetcher needs an explicit scheme.
+    """
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > MAX_URL_LENGTH:
+        return INVALID_SITE
+    site = value.strip()
+    try:
+        host = canonical_host(site)
+    except ValidationError:
+        return INVALID_SITE
+    if _is_ip_literal(host):
+        return INVALID_HOST_IP
+    if urlsplit(site).scheme not in ALLOWED_SCHEMES:
+        return INVALID_SITE
+    return None
 
 
 def _text(value, label, limit=100):
@@ -199,9 +245,6 @@ def project_host_matches(project: dict, other: str) -> bool:
 
 def mentions_project_domain(text: str, project: dict) -> bool:
     import re
-
-    from app.domain.seo import mentions_host
-    from app.domain.site_fetch import canonical_host
 
     host = canonical_host(project["site_url"])
     if project.get("include_subdomains", True):
