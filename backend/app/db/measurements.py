@@ -13,10 +13,12 @@ from app.db.project_storage import (
     encode,
     stamp,
 )
-from app.domain.projects import comparison_key, mentions_project_brand
-from app.domain.seo import mentions_host
+from app.domain.projects import (
+    comparison_key,
+    mentions_project_brand,
+    mentions_project_domain,
+)
 from app.domain.seo_answer import answer_from_dict
-from app.domain.site_fetch import canonical_host
 
 
 class MeasurementRepository(ProjectStorage):
@@ -108,7 +110,7 @@ class MeasurementRepository(ProjectStorage):
                 value = asdict(answer)
                 answer_from_dict(value)
                 name = mentions_project_brand(answer.text, p)
-                host = mentions_host(answer.text, canonical_host(p["site_url"]))
+                host = mentions_project_domain(answer.text, p)
             else:
                 value, name, host = None, False, False
             return bool(
@@ -237,6 +239,7 @@ class MeasurementRepository(ProjectStorage):
             "connection_id": row["connection_id"],
             "query": query["text"],
             "category": query.get("category"),
+            "group": query.get("group"),
             "provider_name": c["name"],
             "status": row["status"],
             "answer": evidence["text"] if evidence else None,
