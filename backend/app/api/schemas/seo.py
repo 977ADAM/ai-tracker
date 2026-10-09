@@ -111,11 +111,20 @@ class SeoCategoryAggregatesResponse(BaseModel):
     citation: dict[str, SeoMetricResponse] = Field(default_factory=dict)
 
 
+class SeoSourceCountResponse(BaseModel):
+    """One external domain cited by answers with a completed web search."""
+
+    domain: StrictStr
+    answers: int
+    citations: int
+
+
 class SeoAggregatesResponse(BaseModel):
     site: SeoSiteAggregatesResponse
     competitors: list[SeoCompetitorAggregatesResponse]
     categories: dict[str, SeoCategoryAggregatesResponse]
     services: dict[str, SeoCategoryAggregatesResponse]
+    sources: list[SeoSourceCountResponse]
     counts: SeoCountsResponse
 
 

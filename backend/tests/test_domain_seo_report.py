@@ -14,6 +14,7 @@ from app.domain.seo import (
     SearchRowValue,
     SeoInput,
 )
+from app.domain.seo_answer import Citation, SeoAnswer
 from app.domain.seo_report import Metric, build_report
 
 
@@ -75,6 +76,7 @@ def model_row(
     name: bool = False,
     host: bool = False,
     error: str | None = None,
+    seo_answer: SeoAnswer | None = None,
 ) -> ModelRowValue:
     return ModelRowValue(
         connection_id=connection_id,
@@ -84,6 +86,23 @@ def model_row(
         name_mentioned=name,
         host_mentioned=host,
         error=error,
+        seo_answer=seo_answer,
+    )
+
+
+def web_answer(*urls: str, search_status: str = "completed") -> SeoAnswer:
+    """A saved answer citing the given URLs in order, with the web search finished."""
+    return SeoAnswer(
+        text="Ответ со ссылками",
+        answer_mode="deepseek_web",
+        search_status=search_status,  # type: ignore[arg-type]
+        search_results=(),
+        citations=tuple(
+            Citation(url=url, title=None, cited_text=None, block_index=0, order=order)
+            for order, url in enumerate(urls, 1)
+        ),
+        model="Модель",
+        search_calls=1,
     )
 
 
@@ -436,6 +455,76 @@ def test_the_ahead_metric_has_an_empty_denominator_without_candidates():
     assert ahead.share is None
 
 
+# -- sources ------------------------------------------------------------------
+
+
+def test_sources_rank_external_domains_and_skip_the_own_host():
+    data = seo_input()
+    queries = (query(0), query(1))
+    models = (
+        model_row("conn-1", 0, seo_answer=web_answer(
+            "https://habr.com/first", "https://habr.com/second",
+            "https://example.ru/page", "not-a-url", "https://localhost/private",
+        )),
+        model_row("conn-1", 1, seo_answer=web_answer(
+            "https://habr.com/third", "https://blog.example.ru/post",
+        )),
+    )
+    report = build_report(data, "Ромашка", data.services, (), queries, (), models)
+
+    assert report["sources"][0] == {"domain": "habr.com", "answers": 2, "citations": 3}
+    assert all(item["domain"] != "example.ru" for item in report["sources"])
+    # The own subdomain and the unparseable URLs add nothing either.
+    assert report["sources"] == [{"domain": "habr.com", "answers": 2, "citations": 3}]
+
+
+def test_a_row_without_completed_web_search_never_reaches_sources():
+    data = seo_input()
+    queries = (query(0), query(1), query(2))
+    models = (
+        model_row("conn-1", 0, seo_answer=web_answer("https://habr.com/a", search_status="error")),
+        model_row("conn-1", 1, seo_answer=web_answer("https://vc.ru/b", search_status="not_requested")),
+        model_row("conn-1", 2, answer="Текстовый ответ без веб-поиска"),
+    )
+    report = build_report(data, "Ромашка", data.services, (), queries, (), models)
+
+    assert report["sources"] == []
+
+
+def test_sources_are_sorted_by_answers_then_citations_then_domain():
+    data = seo_input()
+    queries = (query(0), query(1))
+    models = (
+        model_row("conn-1", 0, seo_answer=web_answer(
+            "https://alfa.ru/1", "https://beta.ru/1", "https://gamma.ru/1",
+            "https://delta.ru/1", "https://epsilon.ru/1",
+        )),
+        model_row("conn-1", 1, seo_answer=web_answer(
+            "https://alfa.ru/2", "https://gamma.ru/2", "https://gamma.ru/3",
+        )),
+    )
+    report = build_report(data, "Ромашка", data.services, (), queries, (), models)
+
+    assert report["sources"] == [
+        {"domain": "gamma.ru", "answers": 2, "citations": 3},
+        {"domain": "alfa.ru", "answers": 2, "citations": 2},
+        {"domain": "beta.ru", "answers": 1, "citations": 1},
+        {"domain": "delta.ru", "answers": 1, "citations": 1},
+        {"domain": "epsilon.ru", "answers": 1, "citations": 1},
+    ]
+
+
+def test_sources_keep_only_the_twenty_most_cited_domains():
+    data = seo_input()
+    urls = tuple(f"https://site{index:02d}.ru/page" for index in range(1, 26))
+    models = (model_row("conn-1", 0, seo_answer=web_answer(*urls)),)
+    report = build_report(data, "Ромашка", data.services, (), (query(0),), (), models)
+
+    domains = [item["domain"] for item in report["sources"]]
+    assert len(domains) == 20
+    assert domains == [f"site{index:02d}.ru" for index in range(1, 21)]
+
+
 def test_counts_report_queries_rows_and_errors():
     data = seo_input()
     queries = (query(0), query(1), query(2))
@@ -462,7 +551,7 @@ def test_counts_report_queries_rows_and_errors():
 def test_the_report_has_the_documented_top_level_keys():
     data = seo_input()
     report = build_report(data, "Ромашка", data.services, (), (), (), ())
-    assert set(report) == {"site", "competitors", "categories", "services", "counts"}
+    assert set(report) == {"site", "competitors", "categories", "services", "sources", "counts"}
 
 
 def test_metric_share_is_a_fraction_and_position_is_none_for_ai():

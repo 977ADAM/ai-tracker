@@ -26,6 +26,7 @@ The exact aggregate structure, consumed by the frontend in Task 9:
   ],
   "categories": {"<category>": {"search": Metric, "ai": {"<connection_id>": Metric}}},
   "services": {"<service or empty>": {"search": Metric, "ai": {"<connection_id>": Metric}}},
+  "sources": [{"domain": str, "answers": int, "citations": int}],
   "counts": {
     "queries": int, "search_rows": int, "model_rows": int,
     "search_errors": int, "model_errors": int,
@@ -46,6 +47,11 @@ re-matched in the saved answer text, never on the SERP title.
 `position` is the paragraph heuristic of one connection (first/early/late/absent
 for the brand, plus `ahead` against the mentioned candidate hosts); it is
 connection-level only and is never duplicated into the branded/unbranded splits.
+
+`sources` ranks the external domains the models cited. Only rows with a
+completed web search contribute, the user's own host and its subdomains are
+skipped, and the list keeps the top twenty by answers, then citations, then
+domain name.
 
 The report is numbers-only: every aggregate here is computed by the server from
 the stored rows, and no model-written text is attached to it.
@@ -79,6 +85,7 @@ ERROR_OUTCOMES = frozenset({"error", "interrupted", "cancelled"})
 NAME = "name"
 HOST = "host"
 COMBINED = "combined"
+SOURCE_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -191,6 +198,7 @@ def build_report(
         "competitors": competitors,
         "categories": categories,
         "services": services_block,
+        "sources": _source_counts(models, input.host),
         "counts": {
             "queries": len(query_list),
             "search_rows": len(searches),
@@ -428,6 +436,38 @@ def _brand_position(
         "absent": _metric(total, absent),
         "ahead": _metric(ahead_denominator, ahead_successes),
     }
+
+
+def _source_counts(models: Sequence[ModelRowValue], host: str) -> list[dict]:
+    """The most cited external domains of the completed web searches.
+
+    ``answers`` counts the rows that cited the domain at least once and
+    ``citations`` counts every citation of it; the user's own host and its
+    subdomains are skipped, and the top twenty stay.
+    """
+    citations: dict[str, int] = {}
+    answers: dict[str, int] = {}
+    for row in models:
+        answer = row.seo_answer
+        if answer is None or answer.search_status != "completed":
+            continue
+        cited: list[str] = []
+        for citation in answer.citations:
+            if normalize_source_url(citation.url) is None:
+                continue
+            domain = canonical_host(citation.url)
+            if same_site_host(host, domain):
+                continue
+            citations[domain] = citations.get(domain, 0) + 1
+            if domain not in cited:
+                cited.append(domain)
+        for domain in cited:
+            answers[domain] = answers.get(domain, 0) + 1
+    ranked = sorted(citations, key=lambda domain: (-answers[domain], -citations[domain], domain))
+    return [
+        {"domain": domain, "answers": answers[domain], "citations": citations[domain]}
+        for domain in ranked[:SOURCE_LIMIT]
+    ]
 
 
 def _citation_metric(rows: Iterable[ModelRowValue], connection_id: str, host: str) -> Metric:

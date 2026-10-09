@@ -20,6 +20,7 @@ from app.domain.seo import (
     SeoInput,
     normalize_seo_request,
 )
+from app.domain.seo_answer import Citation, SeoAnswer
 from app.service.search import DISABLED_ENGINE
 from app.service.seo import LLM_NOT_CONFIGURED
 from tests.fakes import (
@@ -305,9 +306,10 @@ def test_snapshot_projection_hides_model_answers_and_operation_ids(make_client, 
     }
     assert snapshot["readiness"]["report_ready"] is True
     assert set(snapshot["aggregates"]) == {
-        "site", "competitors", "categories", "services", "counts",
+        "site", "competitors", "categories", "services", "sources", "counts",
     }
     assert snapshot["aggregates"]["counts"] == snapshot["counters"]
+    assert snapshot["aggregates"]["sources"] == []
     assert snapshot["aggregates"]["site"]["search"]["overall"]["share"] == 1.0
     assert snapshot["aggregates"]["site"]["ai"]["conn-1"]["combined"]["share"] == 1.0
     position = snapshot["aggregates"]["site"]["ai"]["conn-1"]["position"]
@@ -323,6 +325,35 @@ def test_snapshot_projection_hides_model_answers_and_operation_ids(make_client, 
     assert MODEL_ANSWER not in response.text
     assert "yandex-operation-secret" not in response.text
     assert "operation_id" not in response.text
+
+
+def test_snapshot_projects_the_sources_of_completed_web_search(make_client, settings):
+    repository = make_repository(settings)
+    analysis_id = repository.create_analysis(seed_input(), ESTIMATE)
+    repository.save_model_row(
+        analysis_id, "conn-1", "Модель", 0, status="found", answer=MODEL_ANSWER,
+        name_mentioned=True, host_mentioned=True,
+        seo_answer=SeoAnswer(
+            text=MODEL_ANSWER,
+            answer_mode="deepseek_web",
+            search_status="completed",
+            search_results=(),
+            citations=(
+                Citation(url="https://habr.com/a", title="Habr", cited_text=None,
+                         block_index=0, order=1),
+                Citation(url="https://example.ru/page", title="Ромашка", cited_text=None,
+                         block_index=0, order=2),
+            ),
+            model="m", search_calls=1,
+        ),
+    )
+    with make_client(seo_repository=repository) as client:
+        response = client.get(f"/api/seo/analyses/{analysis_id}")
+
+    assert response.status_code == 200
+    assert response.json()["aggregates"]["sources"] == [
+        {"domain": "habr.com", "answers": 1, "citations": 1},
+    ]
 
 
 def test_snapshot_of_an_unfinished_analysis_has_no_answers(make_client, settings):
