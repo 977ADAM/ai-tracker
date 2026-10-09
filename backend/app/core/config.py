@@ -9,8 +9,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# postgresql
-TADABASE_URL = "postgresql://adam977@localhost:5432/ai-tracker"
+# The application's single PostgreSQL database. The default addresses the local
+# Postgres.app server (`postgresql://adam977@localhost:5432/ai-tracker`); a
+# deployment sets `AI_TRACKER_DATABASE_URL`, and `docker compose` points the
+# backend at its own `postgres` service.
+DATABASE_URL_VARIABLE = "AI_TRACKER_DATABASE_URL"
+DEFAULT_DATABASE_URL = "postgresql://adam977@localhost:5432/ai-tracker"
 
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "ai-tracker"
 DEFAULT_SERVICE_NAME = "ai-tracker"
@@ -29,7 +33,8 @@ ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 YANDEX_SEARCH_API_KEY_VARIABLES = ("YANDEX_SEARCH_API_KEY", "API_KEY")
 YANDEX_SEARCH_FOLDER_ID_VARIABLES = ("YANDEX_SEARCH_FOLDER_ID", "FOLDER_ID")
 
-# SEO service LLM. These are only fallbacks: a value saved in the settings
+# The service LLM (measurement answer modes, sentiment, and generation).
+# These are only fallbacks: a value saved in the settings
 # screen always wins over the environment.
 SEO_LLM_ENDPOINT_VARIABLES = ("SEO_LLM_ENDPOINT",)
 SEO_LLM_MODEL_VARIABLES = ("SEO_LLM_MODEL",)
@@ -91,6 +96,7 @@ class Settings:
     """Everything the app needs from its environment, resolved once at startup."""
 
     config_dir: Path = DEFAULT_CONFIG_DIR
+    database_url: str = DEFAULT_DATABASE_URL
     service_name: str = DEFAULT_SERVICE_NAME
     allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS
     env_api_keys: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_ENV_API_KEYS))
@@ -106,6 +112,7 @@ class Settings:
         source = os.environ if env is None else env
         return cls(
             config_dir=Path(source.get("AI_TRACKER_CONFIG_DIR") or DEFAULT_CONFIG_DIR),
+            database_url=(source.get(DATABASE_URL_VARIABLE) or "").strip() or DEFAULT_DATABASE_URL,
             allowed_hosts=parse_allowed_hosts(source.get(ALLOWED_HOSTS_VARIABLE)),
             yandex_search_api_key=first_value(source, YANDEX_SEARCH_API_KEY_VARIABLES),
             yandex_search_folder_id=first_value(source, YANDEX_SEARCH_FOLDER_ID_VARIABLES),
