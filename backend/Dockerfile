@@ -47,6 +47,7 @@ USER app
 VOLUME ["/data"]
 EXPOSE 8000
 
-# Migrations are an explicit CLI step: the container applies them once, with the
-# same `alembic` command a developer runs, and only then starts the server.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Migrations are their own step, not part of this entrypoint: several replicas of
+# this image would otherwise race on `alembic upgrade head` at once. Run them
+# separately (`make migrate`, or the `migrate` service of docker-compose.yml).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
