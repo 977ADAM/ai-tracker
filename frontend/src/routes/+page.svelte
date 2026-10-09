@@ -441,16 +441,6 @@
         <span class="text-ink">SEO-анализ сайта</span>
     </nav>
 
-    <section class="relative overflow-hidden rounded-3xl bg-ink px-6 py-10 text-white shadow-lg shadow-ink/10 sm:px-10 sm:py-12 lg:px-14">
-        <div class="relative max-w-4xl">
-            <p class="mb-5 text-xs font-bold tracking-[0.16em] text-emerald-200 uppercase">SEO-анализ сайта и конкурентов</p>
-            <h1 class="text-3xl font-bold leading-tight sm:text-4xl lg:text-5xl">Расскажите о сайте — ассистент соберёт прогон</h1>
-            <p class="mt-6 max-w-3xl text-sm leading-7 text-emerald-50/90 sm:text-base">
-                Опишите задачу словами: адрес сайта, сферу бизнеса, ключевые запросы и услуги. Ассистент уточнит недостающее и покажет карточку параметров — прогон стартует после слова «да». Результаты остаются в чате, а незавершённый прогон можно отменить.
-            </p>
-        </div>
-    </section>
-
     {#if data.loadError}
         <p role="alert" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             {data.loadError}
