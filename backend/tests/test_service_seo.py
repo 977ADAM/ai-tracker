@@ -46,7 +46,7 @@ from tests.fakes import (
 )
 
 SEEDS = ("букет цветов", "доставка цветов", "розы")
-ESTIMATE = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1, "deepseek_search_upper": 0}
+ESTIMATE = {"search_upper": 10, "model_upper": 10, "generated_limit": 7, "connections": 1, "deepseek_search_upper": 0}
 TERMINAL = frozenset({"completed", "failed", "interrupted", "cancelled"})
 # A sentinel for "this container has no Yandex gateway at all".
 NO_GATEWAY = object()
@@ -183,7 +183,7 @@ async def test_the_estimate_keeps_the_model_upper_flat_for_every_connection(tmp_
     created = await harness.service.start(payload(connection_ids=["openai", "deepseek"]))
 
     assert created["estimate"] == {
-        "search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 2, "deepseek_search_upper": 0,
+        "search_upper": 10, "model_upper": 10, "generated_limit": 7, "connections": 2, "deepseek_search_upper": 0,
     }
     await asyncio.sleep(0)
     assert harness.runtime.runs[0][1].connection_ids == ("openai", "deepseek")

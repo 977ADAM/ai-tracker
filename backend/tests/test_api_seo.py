@@ -41,7 +41,7 @@ QUERY_TEXTS = (
 )
 SUMMARY = "Итог: сайт виден в Яндексе и упоминается моделями."
 MODEL_ANSWER = "Модель советует «Ромашка» и https://example.ru/"
-ESTIMATE = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1}
+ESTIMATE = {"search_upper": 10, "model_upper": 10, "generated_limit": 7, "connections": 1}
 SNAPSHOT_FIELDS = {
     "id", "status", "created_at", "updated_at", "finished_at", "input", "estimate",
     "company_name", "services", "pages", "stages", "agents", "budget", "budget_exhausted",
@@ -168,7 +168,7 @@ def test_create_answers_202_with_the_upper_estimate_and_finishes_in_the_backgrou
         assert set(body) == {"id", "status", "estimate"}
         assert body["status"] == "running"
         assert body["estimate"] == {
-            "search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 2,
+            "search_upper": 10, "model_upper": 10, "generated_limit": 7, "connections": 2,
             # Both connections answer in text mode, so no DeepSeek search is paid for.
             "deepseek_search_upper": 0,
         }

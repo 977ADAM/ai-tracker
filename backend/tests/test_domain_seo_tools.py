@@ -49,10 +49,10 @@ def query(text: str, category: str = "commercial", service: str = "") -> dict[st
 
 
 def test_the_agreed_limits_are_the_ones_the_run_uses():
-    assert GENERATED_QUERY_LIMIT == 2
+    assert GENERATED_QUERY_LIMIT == 7
     assert MIN_GENERATED_QUERIES == 2
-    assert MAX_SEARCH_REQUESTS == 5
-    assert MAX_MODEL_ANSWERS == 5
+    assert MAX_SEARCH_REQUESTS == 10
+    assert MAX_MODEL_ANSWERS == 10
     assert MAX_FETCH_PAGES == 5
     assert MAX_SUPERVISOR_HANDOFFS == 15
     assert MAX_SPECIALIST_TURNS == 20
@@ -241,7 +241,7 @@ def test_every_budget_raises_budget_exceeded_at_its_cap():
 def test_the_model_answer_cap_is_flat_and_ignores_the_connection_count():
     budget = SeoBudget.for_run()
     assert budget.max_model_answers == MAX_MODEL_ANSWERS
-    assert budget.spend_model_answer(budget.max_model_answers).model_answers == 5
+    assert budget.spend_model_answer(budget.max_model_answers).model_answers == 10
     with pytest.raises(BudgetExceeded):
         budget.spend_model_answer(budget.max_model_answers + 1)
 

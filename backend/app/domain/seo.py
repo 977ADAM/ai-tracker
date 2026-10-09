@@ -29,16 +29,17 @@ from app.domain.site_fetch import canonical_host, same_site_host
 
 # Fixed SEO constants: the form has no limit field and the old 20-query
 # validators of `/api/check`, `/api/search`, and `/api/runs` stay untouched.
-# The run is deliberately small and its shape is fixed: two generated queries on
-# top of the three key ones (`3 + 2 = 5` Yandex searches in total) and five model
-# answers for the whole run, however many connections were selected.
-GENERATED_QUERY_LIMIT = 2
+# The run is deliberately small and its shape is fixed: seven generated queries
+# on top of the three key ones (`3 + 7 = 10` Yandex searches in total) and ten
+# model answers for the whole run, however many connections were selected.
+GENERATED_QUERY_LIMIT = 7
 MIN_GENERATED_QUERIES = 2
-QUERY_CATEGORIES = ("commercial", "informational", "comparative")
+QUERY_CATEGORIES = ("commercial", "informational", "comparative", "recommendation")
 CATEGORY_LABELS = {
     "commercial": "Коммерческие",
     "informational": "Информационные",
     "comparative": "Сравнительные",
+    "recommendation": "Рекомендовательные",
 }
 MAX_QUERY_LENGTH = 400
 MAX_QUERY_WORDS = 40

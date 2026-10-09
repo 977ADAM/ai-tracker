@@ -87,16 +87,22 @@ def test_key_queries_keep_the_entered_spelling():
 
 
 def test_the_seo_limits_and_labels_are_the_agreed_ones():
-    assert GENERATED_QUERY_LIMIT == 2
+    assert GENERATED_QUERY_LIMIT == 7
     assert MIN_GENERATED_QUERIES == 2
-    assert QUERY_CATEGORIES == ("commercial", "informational", "comparative")
+    assert QUERY_CATEGORIES == ("commercial", "informational", "comparative", "recommendation")
     assert CATEGORY_LABELS == {
         "commercial": "Коммерческие",
         "informational": "Информационные",
         "comparative": "Сравнительные",
+        "recommendation": "Рекомендовательные",
     }
     assert MAX_QUERY_LENGTH == 400
     assert MAX_QUERY_WORDS == 40
+
+
+def test_the_four_query_categories_and_their_russian_labels_are_fixed():
+    assert QUERY_CATEGORIES == ("commercial", "informational", "comparative", "recommendation")
+    assert CATEGORY_LABELS["recommendation"] == "Рекомендовательные"
 
 
 @pytest.mark.parametrize(
@@ -293,11 +299,14 @@ def test_accepts_a_valid_generated_payload():
     assert [query.text for query in accepted] == [
         "купить имплантацию",
         "как лечить зубы",
+        "имплантация или протез",
     ]
     assert accepted[0].category == "commercial"
     assert accepted[0].service == "Имплантация"
     assert accepted[1].category == "informational"
     assert accepted[1].service is None
+    assert accepted[2].category == "comparative"
+    assert accepted[2].service is None
     assert accepted[0].flags == QueryFlags(False, False, False, False)
 
 
@@ -311,10 +320,13 @@ def test_accepts_fenced_json_text_and_maps_service_case():
 
 
 def test_generated_queries_are_deduplicated_in_model_order_and_truncated_to_the_limit():
-    items = [item("запрос 0"), item("ЗАПРОС 0"), item("запрос 1"), item("запрос 2")]
+    # One duplicate plus one query over the limit: eight entries, seven accepted.
+    items = [item("запрос 0")] + [
+        item("ЗАПРОС 0" if index == 0 else f"запрос {index}") for index in range(GENERATED_QUERY_LIMIT + 1)
+    ]
     accepted = accept_generated_queries({"queries": items}, ())
     assert len(accepted) == GENERATED_QUERY_LIMIT
-    assert [query.text for query in accepted] == ["запрос 0", "запрос 1"]
+    assert [query.text for query in accepted] == [f"запрос {index}" for index in range(GENERATED_QUERY_LIMIT)]
 
 
 def test_rejects_fewer_unique_generated_queries_than_the_minimum():
@@ -365,7 +377,7 @@ def test_rejects_generated_queries_outside_the_yandex_limits():
 
 def test_accepts_generated_queries_at_the_yandex_limits():
     items = [item("x" * MAX_QUERY_LENGTH), item(" ".join(["слово"] * MAX_QUERY_WORDS))]
-    assert len(accept_generated_queries({"queries": items}, ())) == GENERATED_QUERY_LIMIT
+    assert len(accept_generated_queries({"queries": items}, ())) == MIN_GENERATED_QUERIES
 
 
 def test_flag_queries_marks_the_company_name():

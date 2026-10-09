@@ -229,8 +229,8 @@ API провайдера. Разные модели одной группы де
 агентный граф идёт в фоне:
 
 - `domain/seo.py` — вход (URL, сфера, ровно три ключевых запроса, услуги, от одного до пяти
-  подключений), фиксированный лимит `GENERATED_QUERY_LIMIT = 2` и минимум два запроса
-  (`MIN_GENERATED_QUERIES`), категории `commercial`/`informational`/`comparative`, объединение
+  подключений), фиксированный лимит `GENERATED_QUERY_LIMIT = 7` и минимум два запроса
+  (`MIN_GENERATED_QUERIES`), категории `commercial`/`informational`/`comparative`/`recommendation`, объединение
   услуг (введённые первыми), ранжирование кандидатов и признаки бренда. Здесь же словарь агентов:
   `AGENTS`, `AGENT_LABELS` и `AgentStatus = Literal["pending", "running", "waiting", "done",
   "error", "skipped"]`. Лимиты прежних `/api/check`, `/api/search` и `/api/runs` не меняются.
@@ -238,8 +238,8 @@ API провайдера. Разные модели одной группы де
   хоста и его поддоменов: до 5 страниц, до 1 МиБ на ответ, 10 секунд на соединение и 60 секунд на
   весь обход, до пяти перенаправлений, только публичные IP-адреса с подключением по проверенному
   адресу, соблюдение `robots.txt`, извлечение заголовка и текста стандартной библиотекой.
-- `domain/seo_tools.py` — чистые правила серверных инструментов: бюджеты (`MAX_SEARCH_REQUESTS = 5`,
-  `MAX_MODEL_ANSWERS = 5`, `MAX_SUPERVISOR_HANDOFFS = 15`, `MAX_SPECIALIST_TURNS = 20`,
+- `domain/seo_tools.py` — чистые правила серверных инструментов: бюджеты (`MAX_SEARCH_REQUESTS = 10`,
+  `MAX_MODEL_ANSWERS = 10`, `MAX_SUPERVISOR_HANDOFFS = 15`, `MAX_SPECIALIST_TURNS = 20`,
   `MAX_TOOL_CALLS = 120`, `LLM_CALL_TIMEOUT = 120.0`), `TOOL_SCHEMAS`, наборы инструментов по
   агентам и валидация
   аргументов. Неизвестный инструмент, лишнее поле, неверный тип и исчерпанный бюджет становятся

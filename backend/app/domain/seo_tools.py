@@ -8,8 +8,8 @@ an exhausted budget becomes a safe `ToolRejected`/`BudgetExceeded` that the
 toolbox returns to the model instead of executing.
 
 The limits are the agreed ceilings of one run: 5 fetched pages (owned by
-`domain.site_fetch`), 5 paid Yandex searches (the three key ones plus the two
-generated ones), 5 model answers for the whole run, 15 supervisor handoffs, 20
+`domain.site_fetch`), 10 paid Yandex searches (the three key ones plus the seven
+generated ones), 10 model answers for the whole run, 15 supervisor handoffs, 20
 model turns per specialist, 120 tool calls, and 120 seconds per LLM call.
 """
 
@@ -37,11 +37,11 @@ from app.domain.site_fetch import MAX_FETCH_PAGES
 
 # Budget ceilings of one run. `MAX_FETCH_PAGES` is re-exported so a caller reads
 # every cap from one module. The Yandex pool is derived from the fixed query
-# shape, so the three key searches and the generated ones can never drift apart,
-# and the model-answer cap is flat: five paid answers per run, not per
+# shape, so the three key searches and the seven generated ones can never drift
+# apart, and the model-answer cap is flat: ten paid answers per run, not per
 # connection, so adding a connection never raises the price of the run.
 MAX_SEARCH_REQUESTS = SEED_COUNT + GENERATED_QUERY_LIMIT
-MAX_MODEL_ANSWERS = 5
+MAX_MODEL_ANSWERS = 10
 MAX_SUPERVISOR_HANDOFFS = 15
 MAX_SPECIALIST_TURNS = 20
 MAX_TOOL_CALLS = 120
@@ -296,7 +296,8 @@ TOOL_ARGUMENTS: Mapping[str, tuple[ArgumentSpec, ...]] = {
     "read_facts": (),
     "save_queries": (
         _arg("queries", "query_objects", GENERATED_QUERY_LIMIT,
-             "Запросы с категорией commercial|informational|comparative и услугой.", required=True),
+             "Запросы с категорией commercial|informational|comparative|recommendation и услугой.",
+             required=True),
     ),
     "search_many": (
         _arg("queries", "query_list", GENERATED_QUERY_LIMIT,

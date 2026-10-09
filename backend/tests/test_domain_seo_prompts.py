@@ -19,6 +19,7 @@ from app.domain.seo_prompts import (
 from app.domain.seo_tools import (
     AGENT_TOOLS,
     MAX_FETCH_PAGES,
+    MAX_MODEL_ANSWERS,
     MAX_SEARCH_REQUESTS,
     SEARCH_REGION,
     TOOL_SCHEMAS,
@@ -149,10 +150,18 @@ def test_query_agent_prompt_states_the_query_limits_and_categories():
     assert "Готовность" in system
 
 
+def test_the_query_agent_asks_for_every_category_up_to_the_new_limit():
+    system, _user = query_agent_prompt(seo_input())
+    assert "recommendation" in system
+    assert str(GENERATED_QUERY_LIMIT) in system
+
+
 def test_check_agent_prompt_states_the_region_pool_and_the_one_time_pairs():
     system, _user = check_agent_prompt(seo_input())
     assert str(SEARCH_REGION) in system
     assert str(MAX_SEARCH_REQUESTS) in system
-    assert str(GENERATED_QUERY_LIMIT) in system
+    # The check agent spends the flat model-answer cap, not the query limit: it
+    # never generates queries, and the prompt no longer repeats that number.
+    assert str(MAX_MODEL_ANSWERS) in system
     assert "один раз" in system
     assert "Готовность" in system

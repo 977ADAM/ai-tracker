@@ -633,7 +633,8 @@ async def test_save_queries_requires_site_facts_and_validates_the_domain_rules(t
     saved = result(await env.toolbox.call("save_queries", {"queries": query_objects()}))
     assert saved == {
         "status": "saved", "saved": GENERATED_QUERY_LIMIT,
-        "categories": {"commercial": GENERATED_QUERY_LIMIT, "informational": 0, "comparative": 0},
+        "categories": {"commercial": GENERATED_QUERY_LIMIT, "informational": 0, "comparative": 0,
+                        "recommendation": 0},
         "branded": 0,
     }
     assert len(env.repository.snapshot(env.analysis_id)["queries"]) == GENERATED_QUERY_LIMIT
@@ -661,8 +662,8 @@ async def test_save_queries_flags_brands_on_the_server_side(tmp_path, repository
     saved = result(await env.toolbox.call("save_queries", {"queries": queries}))
 
     assert saved == {
-        "status": "saved", "saved": GENERATED_QUERY_LIMIT,
-        "categories": {"commercial": 1, "informational": 0, "comparative": 1},
+        "status": "saved", "saved": 2,
+        "categories": {"commercial": 1, "informational": 0, "comparative": 1, "recommendation": 0},
         "branded": 1,
     }
     stored = {item["text"]: item["flags"] for item in env.repository.snapshot(env.analysis_id)["queries"]}
@@ -703,11 +704,12 @@ async def test_search_many_isolates_a_failed_row_and_reports_the_budget(tmp_path
         gateway=ScriptedSeoGateway(DOCUMENTS, fail_submits=(query_objects()[1]["query"],)),
     )
     await ready(env)
+    batch = query_objects(MIN_GENERATED_QUERIES)
 
-    answer = result(await env.toolbox.call("search_many", {}))
+    answer = result(await env.toolbox.call("search_many", {"queries": [item["query"] for item in batch]}))
 
     assert (answer["found"], answer["absent"], answer["error"]) == (1, 0, 1)
-    assert answer["errors"][0]["query"] == query_objects()[1]["query"]
+    assert answer["errors"][0]["query"] == batch[1]["query"]
     assert "https://" not in answer["errors"][0]["error"]
     rows = {row["query_index"]: row["status"] for row in env.repository.rows_page(env.analysis_id, "search")["items"]}
     assert rows[1] == "error" and rows[0] == "found"
@@ -800,13 +802,13 @@ async def test_ask_models_answers_every_pair_and_isolates_a_broken_connection(tm
     answer = result(await env.toolbox.call("ask_models", {}))
 
     assert answer["connections"] == {
-        "openai": {"found": 2, "absent": 0, "error": 0, "skipped": 0, "budget": 0},
-        "deepseek": {"found": 0, "absent": 0, "error": 2, "skipped": 0, "budget": 0},
+        "openai": {"found": 5, "absent": 0, "error": 0, "skipped": 0, "budget": 2},
+        "deepseek": {"found": 0, "absent": 0, "error": 5, "skipped": 0, "budget": 2},
     }
-    assert answer["found"] == 2 and answer["error"] == 2
+    assert answer["found"] == 5 and answer["error"] == 5
     assert {item["connection_id"] for item in answer["errors"]} == {"deepseek"}
     rows = env.repository.rows_page(env.analysis_id, "model")["items"]
-    assert len(rows) == 4
+    assert len(rows) == 10
     assert all(row["answer"] == SEO_MENTION_ANSWER for row in rows if row["connection_id"] == "openai")
     assert all(row["error"] for row in rows if row["connection_id"] == "deepseek")
 
@@ -820,10 +822,10 @@ async def test_ask_models_reuses_stored_pairs_with_zero_provider_calls(tmp_path,
     first = result(await env.toolbox.call("ask_models", {}))
     second = result(await env.toolbox.call("ask_models", {}))
 
-    assert first["found"] == 2
-    assert second["skipped"] == 2 and second["found"] == 0
+    assert first["found"] == 7
+    assert second["skipped"] == 7 and second["found"] == 0
     # The stored pairs are reused, so the second call creates no provider call at all.
-    assert len(factory.calls_made) == 2
+    assert len(factory.calls_made) == 7
     assert result(await env.toolbox.call("ask_models", {"connection_ids": ["неизвестное"]}))["error"] == (
         "Выбрано неизвестное подключение"
     )
@@ -841,7 +843,7 @@ async def test_ask_models_requires_queries_and_respects_the_answer_budget(tmp_pa
     answer = result(await env.toolbox.call("ask_models", {}))
 
     assert answer["found"] == 1 and answer["budget_exhausted"] is True
-    assert answer["connections"]["openai"]["budget"] == 1
+    assert answer["connections"]["openai"]["budget"] == GENERATED_QUERY_LIMIT - 1
     assert env.toolbox.exhausted is True
 
 
@@ -925,13 +927,15 @@ async def test_ask_models_never_runs_more_than_the_connection_cap_at_once(tmp_pa
         tmp_path, repository, settings, provider_factory=spy,
         connection_ids=("openai", "deepseek"),
         configured=(("openai", "key-1"), ("deepseek", "key-2")),
+        # Fewer answers than pairs, so the batch ends on the flat model-answer cap.
+        budget=bounded(max_model_answers=4),
         max_model_concurrency=1,
     )
     await ready(env)
 
     answer = result(await env.toolbox.call("ask_models", {}))
 
-    assert answer["found"] == 4
+    assert answer["found"] == 4 == env.toolbox.budget.max_model_answers
     assert spy.calls == 4
     assert spy.peak == 1
 
@@ -943,8 +947,9 @@ async def test_read_checks_counts_rows_and_reports_only_safe_errors(tmp_path, re
         gateway=ScriptedSeoGateway(DOCUMENTS, fail_submits=(query_objects()[1]["query"],)),
     )
     await ready(env)
-    await env.toolbox.call("search_many", {})
-    await env.toolbox.call("ask_models", {})
+    batch = {"queries": [item["query"] for item in query_objects(MIN_GENERATED_QUERIES)]}
+    await env.toolbox.call("search_many", batch)
+    await env.toolbox.call("ask_models", batch)
 
     checks = result(await env.toolbox.call("read_checks", {}))
 
@@ -1041,7 +1046,7 @@ async def test_read_status_reports_agents_budget_and_readiness(tmp_path, reposit
     assert next(agent for agent in status["agents"] if agent["agent"] == "queries")["status"] == "done"
     assert status["budget"]["tool_calls"]["used"] == 4
     assert status["stored"] == {
-        "pages": 1, "candidates": 0, "queries": 2, "search_rows": 0, "model_rows": 0,
+        "pages": 1, "candidates": 0, "queries": GENERATED_QUERY_LIMIT, "search_rows": 0, "model_rows": 0,
         "data_ready": True,
     }
     assert status["exhausted"] is False
