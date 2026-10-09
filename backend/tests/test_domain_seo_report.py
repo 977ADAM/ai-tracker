@@ -343,7 +343,7 @@ def test_the_brand_position_counts_the_paragraph_of_the_first_mention():
         data, "Ромашка", data.services, (), queries,
         (), (model_row("conn-1", 0, answer="Ромашка в первом абзаце.\n\nВторой."),
              model_row("conn-1", 1, answer="Раз.\n\nДва.\n\nТри.\n\nРомашка тут."),
-             model_row("conn-1", 2, answer="Ничего про бренд.")),
+             model_row("conn-1", 2, "absent", answer="Ничего про бренд.")),
     )
     position = report["site"]["ai"]["conn-1"]["position"]
     assert position["first"].successes == 1
@@ -384,7 +384,7 @@ def test_the_second_and_third_paragraphs_count_as_early():
     assert position["late"].successes == 0
 
 
-def test_position_ignores_error_absent_and_empty_answers():
+def test_position_counts_absent_and_ignores_error_and_empty_answers():
     data = seo_input()
     queries = (query(0), query(1), query(2), query(3))
     report = build_report(
@@ -392,12 +392,12 @@ def test_position_ignores_error_absent_and_empty_answers():
         (model_row("conn-1", 0, answer="Ромашка в первом абзаце."),
          model_row("conn-1", 1, "found", "   "),
          model_row("conn-1", 2, "error", None, error="Сбой модели"),
-         model_row("conn-1", 3, "absent", "Ромашка тут")),
+         model_row("conn-1", 3, "absent", "Ничего про бренд.")),
     )
     position = report["site"]["ai"]["conn-1"]["position"]
-    assert position["first"] == Metric(1, 1, 1.0, None)
-    assert position["absent"] == Metric(1, 0, 0.0, None)
-    assert position["early"] == Metric(1, 0, 0.0, None)
+    assert position["first"] == Metric(2, 1, 0.5, None)
+    assert position["absent"] == Metric(2, 1, 0.5, None)
+    assert position["early"] == Metric(2, 0, 0.0, None)
 
 
 def test_position_is_not_duplicated_into_the_branded_and_unbranded_splits():
@@ -441,6 +441,26 @@ def test_a_candidate_in_the_same_paragraph_does_not_put_the_brand_ahead():
     report = build_report(
         data, "Ромашка", data.services, candidates(), (query(0),), (),
         (model_row("conn-1", 0, answer="Ромашка и rival.ru в одном абзаце.\n\nЕщё абзац."),),
+    )
+    assert report["site"]["ai"]["conn-1"]["position"]["ahead"] == Metric(1, 0, 0.0, None)
+
+
+def test_a_candidate_without_the_brand_enters_the_ahead_denominator():
+    data = seo_input()
+    report = build_report(
+        data, "Ромашка", data.services, candidates(), (query(0),), (),
+        (model_row("conn-1", 0, "absent", "В ответе только rival.ru."),),
+    )
+    position = report["site"]["ai"]["conn-1"]["position"]
+    assert position["ahead"] == Metric(1, 0, 0.0, None)
+    assert position["absent"] == Metric(1, 1, 1.0, None)
+
+
+def test_the_brand_behind_one_of_two_candidates_is_not_ahead():
+    data = seo_input()
+    report = build_report(
+        data, "Ромашка", data.services, candidates(), (query(0),), (),
+        (model_row("conn-1", 0, answer="Сначала rival.ru.\n\nПотом Ромашка.\n\nИ one-off.ru."),),
     )
     assert report["site"]["ai"]["conn-1"]["position"]["ahead"] == Metric(1, 0, 0.0, None)
 

@@ -392,17 +392,20 @@ def _brand_position(
 ) -> dict[str, Metric]:
     """Where the brand is first named in the answered rows of one connection.
 
-    ``first``/``early``/``late``/``absent`` share one denominator: the `found`
-    rows with a non-empty answer. ``ahead`` counts only rows that mention at
-    least one candidate host, and a success needs the brand strictly earlier
-    than every mentioned candidate, so a mention in the same paragraph is not
-    ahead. Both denominators are empty when nothing qualifies, and their
-    ``share`` is then `None`.
+    ``first``/``early``/``late``/``absent`` share one denominator: the rows with
+    a finite status (`found` or `absent`) and a non-empty answer, so an answered
+    row that never names the brand counts as ``absent``. ``ahead`` counts only
+    rows that mention at least one candidate host, and a success needs the brand
+    strictly earlier than every mentioned candidate, so a mention in the same
+    paragraph is not ahead. Both denominators are empty when nothing qualifies,
+    and their ``share`` is then `None`.
     """
     answered = [
         row
         for row in rows
-        if row.connection_id == connection_id and row.status == "found" and _answered(row)
+        if row.connection_id == connection_id
+        and row.status in FINITE_OUTCOMES
+        and _answered(row)
     ]
     first = early = late = absent = 0
     ahead_denominator = 0

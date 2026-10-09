@@ -244,7 +244,7 @@ describe('SeoReport', () => {
     expect(content('[data-model-coverage]')).toBe('7 из 7');
   });
 
-  it('hides the sources section when no answer cited a source', () => {
+  it('keeps the sources section with its disclaimer when no answer cited a source', () => {
     render(SeoReport, {
       props: {
         snapshot: snapshot({ aggregates: { ...snapshot().aggregates, sources: [] } }),
@@ -252,6 +252,8 @@ describe('SeoReport', () => {
     });
     expect(document.querySelector('[data-source-row]')).toBeNull();
     expect(screen.queryByRole('table', { name: 'Источники' })).toBeNull();
+    expect(screen.getByText(/только у подключений с веб-поиском/i)).toBeTruthy();
+    expect(content('[data-sources-empty]')).toBe('—');
   });
 
   it('shows the candidate citation share next to its host share', () => {

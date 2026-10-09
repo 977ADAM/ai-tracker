@@ -368,12 +368,14 @@
     </div>
   </section>
 
-  {#if sources.length > 0}
-    <section class={section} aria-labelledby="seo-sources-title">
-      <h3 id="seo-sources-title" class={title}>Источники</h3>
-      <p class="mt-1 text-xs text-muted">
-        Домены, которые модели цитируют; источники есть только у подключений с веб-поиском.
-      </p>
+  <section class={section} aria-labelledby="seo-sources-title">
+    <h3 id="seo-sources-title" class={title}>Источники</h3>
+    <p class="mt-1 text-xs text-muted">
+      Домены, которые модели цитируют; источники есть только у подключений с веб-поиском.
+    </p>
+    {#if sources.length === 0}
+      <p class="mt-2 text-xs text-muted" data-sources-empty>—</p>
+    {:else}
       <div class="mt-2 overflow-x-auto rounded-lg border border-line">
         <table class={table} aria-label="Источники">
           <thead class="bg-canvas">
@@ -396,8 +398,8 @@
           </tbody>
         </table>
       </div>
-    </section>
-  {/if}
+    {/if}
+  </section>
 
   <section class={section} aria-labelledby="seo-competitors-title">
     <h3 id="seo-competitors-title" class={title}>Повторяющиеся кандидаты</h3>
