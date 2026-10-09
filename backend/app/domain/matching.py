@@ -1,9 +1,10 @@
 """Exact-name brand matching against a model answer.
 
 Two matchers live here on purpose. `mentions_brand` is the behavior of the old
-`/api/check` flow and stays exactly as it was. `mentions_phrase` is the SEO
-matcher: it normalizes Unicode NFKC, casefolds, folds `ё` to `е`, collapses
-whitespace, and then looks for the whole phrase between word boundaries.
+`/api/check` flow and stays exactly as it was. `mentions_phrase` is the AI
+tracker matcher: it normalizes Unicode NFKC, casefolds, folds `ё` to `е`,
+collapses whitespace, and then looks for the whole phrase between word
+boundaries. `mentions_host` is the same literal search for a site name.
 """
 
 from __future__ import annotations
@@ -12,10 +13,11 @@ import re
 import unicodedata
 
 _WHITESPACE = re.compile(r"\s+")
+_HOST_PATTERN = r"(?<!\w)(?:www\.)?{}\b"
 
 
 def normalize_text(value: str) -> str:
-    """Fold one string to the comparable SEO form.
+    """Fold one string to the comparable form.
 
     Unicode NFKC, `casefold`, `ё`→`е`, and collapsed whitespace: the shapes a
     model may return for the same name compare equal, while punctuation stays
@@ -50,3 +52,16 @@ def mentions_phrase(answer: str, phrase: str) -> bool:
     if not normalized_answer:
         return False
     return re.search(rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)", normalized_answer) is not None
+
+
+def mentions_host(text: str, host: str) -> bool:
+    """Return whether the normalized text contains the host or its `www.` form.
+
+    Literal only, with word boundaries: `rival.ru` is found inside
+    `shop.rival.ru` and `https://www.rival.ru/`, never inside `notrival.ru`.
+    """
+    normalized = normalize_text(text)
+    target = normalize_text(host).strip(".").removeprefix("www.")
+    if not normalized or not target:
+        return False
+    return re.search(_HOST_PATTERN.format(re.escape(target)), normalized) is not None
