@@ -2,16 +2,16 @@
 
 from dataclasses import asdict
 
-from app.domain.matching import mentions_phrase
-from app.domain.projects import comparison_key, project_host_matches
-from app.domain.search import SearchDocument, first_matching_result, result_url_host
-from app.domain.seo import ModelRowValue
-from app.domain.seo_answer import answer_from_dict
-from app.domain.seo_report import (
+from app.domain.answer_metrics import (
+    ModelRowValue,
     brand_position_with_aliases,
     citation_metric,
     source_counts,
 )
+from app.domain.matching import mentions_phrase
+from app.domain.projects import comparison_key, project_host_matches
+from app.domain.search import SearchDocument, first_matching_result, result_url_host
+from app.domain.seo_answer import answer_from_dict
 from app.domain.site_fetch import canonical_host
 
 
