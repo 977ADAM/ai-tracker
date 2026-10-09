@@ -288,6 +288,24 @@ describe('SeoReport', () => {
     expect(links[1]?.textContent).toBe('https://vc.ru/marketing/2');
   });
 
+  it('renders a citation URL repeated in one answer without crashing the dialog', async () => {
+    const duplicate = { url: 'https://habr.com/ru/articles/1', title: 'Разбор доставки' };
+    const row: SeoModelRow = {
+      ...modelRow,
+      answer: 'я'.repeat(400),
+      citations: [duplicate, { ...duplicate }],
+    };
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Читать полностью' }));
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    const links = document.querySelector('[data-answer-sources-list]')?.querySelectorAll('a') ?? [];
+    expect(links).toHaveLength(2);
+    expect(links[0]?.getAttribute('href')).toBe('https://habr.com/ru/articles/1');
+    expect(links[1]?.getAttribute('href')).toBe('https://habr.com/ru/articles/1');
+  });
+
   it('shows the detail category as its Russian label', () => {
     render(SeoReport, {
       props: { snapshot: snapshot(), rows: { model: [], search: [searchRow] } },

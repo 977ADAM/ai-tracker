@@ -686,7 +686,10 @@
                 Источники ответа
               </h4>
               <ul class="mt-1.5 space-y-1 text-xs" data-answer-sources-list>
-                {#each openAnswer.citations as citation (citation.url)}
+                <!-- One answer can cite the same URL twice (refs accumulate across text
+                     blocks), so the key is the position: the list mirrors the row's
+                     citation count and no source is dropped. -->
+                {#each openAnswer.citations as citation, index (index)}
                   <li>
                     <a
                       class="break-all text-accent hover:underline"
