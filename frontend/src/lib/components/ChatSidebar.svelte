@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { ChatSummary } from '$lib/types';
-  import { statusLabel } from '$lib/chat';
 
   let {
     chats,
@@ -74,10 +73,6 @@
             }`}
           >
             <span class="block truncate font-semibold text-ink">{chat.title}</span>
-            <span class="mt-1 block text-xs text-muted">{dateLabel(chat.updated_at)}</span>
-            <span data-chat-status class="mt-1 block text-xs font-semibold text-muted"
-              >{statusLabel(chat)}</span
-            >
           </button>
           <button
             type="button"
