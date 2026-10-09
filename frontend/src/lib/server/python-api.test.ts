@@ -42,7 +42,7 @@ import {
   seoChatProposalPath,
   SEO_CHAT_MESSAGE_TIMEOUT_MS,
 } from './python-api';
-import type { ApiPath } from '$lib/types';
+import type { ApiPath, SeoModelRow } from '$lib/types';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -957,8 +957,45 @@ describe('search BFF', () => {
 describe('SEO BFF', () => {
   const metric = { denominator: 4, successes: 2, share: 0.5, average_position: 3.5 };
   const searchMetrics = { overall: metric, branded: metric, unbranded: metric };
-  const siteAiMetrics = { name: metric, host: metric, combined: metric };
-  const siteAiBlock = { ...siteAiMetrics, branded: siteAiMetrics, unbranded: siteAiMetrics };
+  const brandPosition = {
+    first: { denominator: 4, successes: 1, share: 0.25, average_position: 2 },
+    early: metric,
+    late: metric,
+    absent: metric,
+    ahead: metric,
+  };
+  // The sub-blocks never carry a position: the backend sends it per connection only.
+  const siteAiMetrics = {
+    name: metric,
+    host: metric,
+    combined: metric,
+    citation: metric,
+    position: null,
+  };
+  const siteAiBlock = {
+    ...siteAiMetrics,
+    position: brandPosition,
+    branded: siteAiMetrics,
+    unbranded: siteAiMetrics,
+  };
+  const modelRow = {
+    query_index: 0,
+    connection_id: 'p1',
+    provider_name: 'Demo',
+    status: 'found',
+    answer: 'Ответ',
+    name_mentioned: true,
+    host_mentioned: false,
+    error: null,
+    query: 'букеты',
+    category: 'commercial',
+    service: 'Букеты',
+    answer_mode: 'text',
+    search_status: 'not_requested',
+    citations: [],
+    model: null,
+    search_calls: null,
+  };
   const publicSeoState = {
     endpoint: 'https://llm.example.com/v1/chat/completions',
     model: 'seo-model',
@@ -1073,6 +1110,7 @@ describe('SEO BFF', () => {
       ],
       categories: { commercial: { search: metric, ai: { p1: metric } } },
       services: { Букеты: { search: metric, ai: { p1: metric } } },
+      sources: [{ domain: 'habr.com', answers: 2, citations: 3 }],
       counts: { queries: 1, search_rows: 1, model_rows: 1, search_errors: 0, model_errors: 0 },
     },
     api_key: 'secret',
@@ -1402,6 +1440,17 @@ describe('SEO BFF', () => {
     expect(projected.queries[0].flags.branded).toBe(false);
   });
 
+  it('projects the citation, position and sources of a snapshot', () => {
+    const projected = publicSeoSnapshot(seoSnapshot);
+    expect(projected.aggregates.site.ai.p1.citation?.share).toBe(0.5);
+    expect(projected.aggregates.site.ai.p1.position?.first.successes).toBe(1);
+    expect(projected.aggregates.sources[0]).toEqual({
+      domain: 'habr.com',
+      answers: 2,
+      citations: 3,
+    });
+  });
+
   it('refuses a malformed snapshot instead of inventing values', () => {
     expect(() => publicSeoSnapshot({ ...seoSnapshot, status: 'later' })).toThrow();
     expect(() =>
@@ -1488,17 +1537,12 @@ describe('SEO BFF', () => {
       {
         items: [
           {
-            query_index: 0,
-            connection_id: 'p1',
-            provider_name: 'Demo',
-            status: 'found',
-            answer: 'Ответ',
-            name_mentioned: true,
-            host_mentioned: false,
-            error: null,
-            query: 'букеты',
-            category: 'commercial',
-            service: 'Букеты',
+            ...modelRow,
+            answer_mode: 'deepseek_web',
+            search_status: 'completed',
+            citations: [{ url: 'https://habr.com/a', title: 'A' }],
+            model: 'deepseek-chat',
+            search_calls: 2,
             operation_id: 'secret',
             api_key: 'secret',
           },
@@ -1521,6 +1565,11 @@ describe('SEO BFF', () => {
       query: 'букеты',
       category: 'commercial',
       service: 'Букеты',
+      answer_mode: 'deepseek_web',
+      search_status: 'completed',
+      citations: [{ url: 'https://habr.com/a', title: 'A' }],
+      model: 'deepseek-chat',
+      search_calls: 2,
     });
 
     const search = publicSeoRows(
@@ -1564,6 +1613,27 @@ describe('SEO BFF', () => {
       publicSeoRows({ items: [{ query_index: 0, status: 'found' }], next_cursor: null }, 'model'),
     ).toThrow();
     expect(() => publicSeoRows({ items: [], next_cursor: 'a b' }, 'search')).toThrow();
+  });
+
+  it('projects the answer mode and the citations of a model row', () => {
+    const page = publicSeoRows(
+      {
+        items: [
+          {
+            ...modelRow,
+            answer_mode: 'deepseek_web',
+            search_status: 'completed',
+            citations: [{ url: 'https://habr.com/a', title: 'A' }],
+          },
+        ],
+        next_cursor: null,
+      },
+      'model',
+    );
+    const row = page.items[0] as SeoModelRow;
+    expect(row.answer_mode).toBe('deepseek_web');
+    expect(row.search_status).toBe('completed');
+    expect(row.citations[0].url).toBe('https://habr.com/a');
   });
 
   it('projects trace pages step by step and drops secrets and unknown fields', () => {

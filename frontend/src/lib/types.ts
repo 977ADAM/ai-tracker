@@ -307,7 +307,24 @@ export type SeoMetric = {
 };
 
 export type SeoSearchMetrics = { overall: SeoMetric; branded: SeoMetric; unbranded: SeoMetric };
-export type SeoSiteAiMetrics = { name: SeoMetric; host: SeoMetric; combined: SeoMetric };
+
+/** Where the brand is first named in the answered rows of one connection. */
+export type SeoBrandPosition = {
+  first: SeoMetric;
+  early: SeoMetric;
+  late: SeoMetric;
+  absent: SeoMetric;
+  ahead: SeoMetric;
+};
+
+/** The connection block carries `citation` and `position`; the brand splits only `citation`. */
+export type SeoSiteAiMetrics = {
+  name: SeoMetric;
+  host: SeoMetric;
+  combined: SeoMetric;
+  citation: SeoMetric | null;
+  position: SeoBrandPosition | null;
+};
 export type SeoSiteAiBlock = SeoSiteAiMetrics & {
   branded: SeoSiteAiMetrics;
   unbranded: SeoSiteAiMetrics;
@@ -326,11 +343,19 @@ export type SeoCompetitorAggregates = {
   ai: Record<string, Record<string, SeoMetric>>;
 };
 export type SeoCategoryAggregates = { search: SeoMetric; ai: Record<string, SeoMetric> };
+
+/** One external domain cited by answers with a completed web search. */
+export type SeoSourceCount = { domain: string; answers: number; citations: number };
+
+/** One link a model answer cites: the safe subset the UI shows. */
+export type SeoCitation = { url: string; title: string | null };
+
 export type SeoAggregates = {
   site: SeoSiteAggregates;
   competitors: SeoCompetitorAggregates[];
   categories: Record<string, SeoCategoryAggregates>;
   services: Record<string, SeoCategoryAggregates>;
+  sources: SeoSourceCount[];
   counts: SeoCounts;
 };
 
@@ -437,6 +462,11 @@ export type SeoModelRow = {
   query: string | null;
   category: string | null;
   service: string | null;
+  answer_mode: 'text' | 'deepseek_web';
+  search_status: 'not_requested' | 'completed' | 'error';
+  citations: SeoCitation[];
+  model: string | null;
+  search_calls: number | null;
 };
 
 export type SeoRow = SeoSearchRow | SeoModelRow;

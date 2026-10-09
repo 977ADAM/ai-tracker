@@ -34,8 +34,10 @@ import type {
   SeoAnalysisStatus,
   SeoBudgetItem,
   SeoBudgetView,
+  SeoBrandPosition,
   SeoCategoryAggregates,
   SeoCandidate,
+  SeoCitation,
   SeoCompetitorAggregates,
   SeoCounts,
   SeoEstimate,
@@ -57,6 +59,7 @@ import type {
   SeoSiteAiBlock,
   SeoSiteAiMetrics,
   SeoSource,
+  SeoSourceCount,
   SeoStage,
   SeoStageStatus,
   SeoTracePage,
@@ -778,6 +781,8 @@ const SEO_ROW_STATUSES: readonly SeoRowStatus[] = [
   'interrupted',
   'cancelled',
 ];
+const SEO_ANSWER_MODES = ['text', 'deepseek_web'] as const;
+const SEO_SEARCH_STATUSES = ['not_requested', 'completed', 'error'] as const;
 const SEO_AGENT_STATUSES: readonly SeoAgentStatus[] = [
   'pending',
   'running',
@@ -876,12 +881,35 @@ function seoSearchMetrics(value: unknown): SeoSearchMetrics {
   };
 }
 
+function seoBrandPosition(value: unknown): SeoBrandPosition {
+  const item = record(value);
+  return {
+    first: seoMetric(item.first),
+    early: seoMetric(item.early),
+    late: seoMetric(item.late),
+    absent: seoMetric(item.absent),
+    ahead: seoMetric(item.ahead),
+  };
+}
+
+function optionalSeoMetric(value: unknown): SeoMetric | null {
+  if (value === null || value === undefined) return null;
+  return seoMetric(value);
+}
+
+function optionalSeoBrandPosition(value: unknown): SeoBrandPosition | null {
+  if (value === null || value === undefined) return null;
+  return seoBrandPosition(value);
+}
+
 function seoSiteAiMetrics(value: unknown): SeoSiteAiMetrics {
   const item = record(value);
   return {
     name: seoMetric(item.name),
     host: seoMetric(item.host),
     combined: seoMetric(item.combined),
+    citation: optionalSeoMetric(item.citation),
+    position: optionalSeoBrandPosition(item.position),
   };
 }
 
@@ -906,9 +934,19 @@ function seoNestedMetricRecord(value: unknown): Record<string, Record<string, Se
   );
 }
 
+function seoSourceCount(value: unknown): SeoSourceCount {
+  const item = record(value);
+  return {
+    domain: requiredString(item.domain),
+    answers: requiredInteger(item.answers),
+    citations: requiredInteger(item.citations),
+  };
+}
+
 function seoAggregates(value: unknown): SeoAggregates {
   const item = record(value);
   if (!Array.isArray(item.competitors)) throw new Error('Invalid SEO aggregates');
+  if (!Array.isArray(item.sources)) throw new Error('Invalid SEO aggregates');
   const siteRaw = record(item.site);
   const site: SeoSiteAggregates = {
     search: seoSearchMetrics(siteRaw.search),
@@ -940,6 +978,7 @@ function seoAggregates(value: unknown): SeoAggregates {
     competitors,
     categories: groups(item.categories),
     services: groups(item.services),
+    sources: item.sources.map(seoSourceCount),
     counts: seoCounts(item.counts),
   };
 }
@@ -1136,6 +1175,16 @@ function seoSearchRow(value: unknown): SeoSearchRow {
   };
 }
 
+function seoCitation(value: unknown): SeoCitation {
+  const item = record(value);
+  return { url: requiredString(item.url), title: optionalString(item.title) };
+}
+
+function seoCitations(value: unknown): SeoCitation[] {
+  if (!Array.isArray(value)) throw new Error('Invalid API response');
+  return value.map(seoCitation);
+}
+
 function seoModelRow(value: unknown): SeoModelRow {
   const item = record(value);
   return {
@@ -1150,6 +1199,11 @@ function seoModelRow(value: unknown): SeoModelRow {
     query: optionalString(item.query),
     category: optionalString(item.category),
     service: optionalString(item.service),
+    answer_mode: oneOf(item.answer_mode, SEO_ANSWER_MODES),
+    search_status: oneOf(item.search_status, SEO_SEARCH_STATUSES),
+    citations: seoCitations(item.citations),
+    model: optionalString(item.model),
+    search_calls: optionalInteger(item.search_calls),
   };
 }
 

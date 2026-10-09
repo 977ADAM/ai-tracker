@@ -136,6 +136,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
       competitors: [],
       categories: {},
       services: {},
+      sources: [],
       counts: {},
     },
     ...overrides,
