@@ -29,8 +29,8 @@ async def create_run(runs: RunServiceDep, payload: RunRequest) -> dict:
 
 
 @router.get("", response_model=RunHistoryPage, responses=ERROR_RESPONSES)
-def list_runs(runs: RunServiceDep, cursor: str | None = None) -> dict:
-    return runs.list_page(cursor)
+def list_runs(runs: RunServiceDep, cursor: str | None = None, project_id: str | None = None) -> dict:
+    return runs.list_page(cursor, project_id=project_id)
 
 
 @router.get("/{run_id}", response_model=RunSnapshotResponse, responses=ERROR_RESPONSES)
