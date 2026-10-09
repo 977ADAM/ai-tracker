@@ -441,7 +441,7 @@ def _brand_position(
     }
 
 
-def _source_counts(models: Sequence[ModelRowValue], host: str) -> list[dict]:
+def _source_counts(models: Sequence[ModelRowValue], host: str, include_subdomains: bool = True) -> list[dict]:
     """The most cited external domains of the completed web searches.
 
     ``answers`` counts the rows that cited the domain at least once and
@@ -459,7 +459,7 @@ def _source_counts(models: Sequence[ModelRowValue], host: str) -> list[dict]:
             if normalize_source_url(citation.url) is None:
                 continue
             domain = canonical_host(citation.url)
-            if same_site_host(host, domain):
+            if domain == host or (include_subdomains and same_site_host(host, domain)):
                 continue
             citations[domain] = citations.get(domain, 0) + 1
             if domain not in cited:
@@ -473,7 +473,7 @@ def _source_counts(models: Sequence[ModelRowValue], host: str) -> list[dict]:
     ]
 
 
-def _citation_metric(rows: Iterable[ModelRowValue], connection_id: str, host: str) -> Metric:
+def _citation_metric(rows: Iterable[ModelRowValue], connection_id: str, host: str, include_subdomains: bool = True) -> Metric:
     finite = [row for row in rows if row.connection_id == connection_id and row.status in FINITE_OUTCOMES
               and row.seo_answer is not None and row.seo_answer.search_status == "completed"]
     positions: list[int] = []
@@ -484,7 +484,7 @@ def _citation_metric(rows: Iterable[ModelRowValue], connection_id: str, host: st
                 continue
             domain = canonical_host(citation.url)
             # Count the target and its subdomains as one site in the ordering.
-            domain = host if same_site_host(host, domain) else domain
+            domain = host if domain == host or (include_subdomains and same_site_host(host, domain)) else domain
             if domain not in domains:
                 domains.append(domain)
         if host in domains:
@@ -554,16 +554,20 @@ citation_metric = _citation_metric
 source_counts = _source_counts
 
 
-def brand_position_with_aliases(rows, connection_id, company_name, host, candidate_hosts, aliases=()):
-    """Count saved brand aliases in position without changing original answers."""
-    from dataclasses import replace
-    normalized = []
-    for row in rows:
-        paragraphs = []
-        for paragraph in _paragraphs(row.answer or ""):
-            text = normalize_text(paragraph)
-            for alias in aliases:
-                text = re.sub(r"(?<!\w)" + re.escape(normalize_text(alias)) + r"(?!\w)", lambda _: normalize_text(company_name), text)
-            paragraphs.append(text)
-        normalized.append(replace(row, answer="\n\n".join(paragraphs)))
-    return _brand_position(normalized, connection_id, company_name, host, candidate_hosts)
+def brand_position_with_aliases(rows, connection_id, company_name, host, candidate_hosts, aliases=(), include_subdomains=True):
+    """Exact brand/alias and site-scope positions for project measurements."""
+    from app.domain.matching import mentions_phrase
+    from app.domain.projects import mentions_project_domain
+    answered = [r for r in rows if r.connection_id == connection_id and r.status in FINITE_OUTCOMES and _answered(r)]
+    counts = {k:0 for k in ('first','early','late','absent')}
+    ahead_total = ahead = 0
+    for row in answered:
+        paragraphs = _paragraphs(row.answer)
+        number = next((i for i,p in enumerate(paragraphs,1) if any(mentions_phrase(p,n) for n in (company_name,*aliases)) or mentions_project_domain(p, {'site_url':'https://'+host,'include_subdomains':include_subdomains})), None)
+        key = 'absent' if number is None else 'first' if number == 1 else 'early' if number <= 3 else 'late'
+        counts[key] += 1
+        rivals = [n for c in candidate_hosts if (n:=_first_mention_paragraph(row.answer,'',c)) is not None]
+        if rivals:
+            ahead_total += 1
+            ahead += number is not None and all(number<n for n in rivals)
+    return {**{k:_metric(len(answered),n) for k,n in counts.items()}, 'ahead':_metric(ahead_total,ahead)}
