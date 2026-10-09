@@ -44,8 +44,10 @@ class DeepSeekWebClient:
         body = {
             "model": self.model, "max_tokens": 4096,
             "messages": [{"role": "user", "content": [{"type": "text", "text": (
-                "Выполни веб-поиск по следующему запросу и ответь на него, цитируя использованные "
-                "источники. Не добавляй заранее заданные бренды в запрос.\n\n" + prompt
+                "Сделай ровно один вызов web_search по следующему запросу и ответь на основе "
+                "его результатов, цитируя использованные источники. Дополнительный поиск "
+                "недоступен: не пытайся его вызвать. Не добавляй заранее заданные бренды "
+                "в запрос.\n\n" + prompt
             )}]}],
             "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}],
         }
@@ -111,6 +113,8 @@ def parse_search_answer(payload: object, requested_model: str) -> SeoAnswer:
                 raise ProviderError(SEARCH_FAILED)
             search_completed = True
             for item in items:
+                if isinstance(item, dict) and item.get("type") == "web_search_tool_result_error":
+                    raise ProviderError(SEARCH_FAILED)
                 if not isinstance(item, dict) or item.get("type") != "web_search_result" or not isinstance(item.get("url"), str):
                     raise ProviderError(INVALID_ANSWER)
                 results.append(SearchResult(item["url"], _optional_text(item.get("title"))))

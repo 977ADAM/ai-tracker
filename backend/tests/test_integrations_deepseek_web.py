@@ -38,6 +38,7 @@ def test_request_uses_native_search_and_selected_model():
         assert body["max_tokens"] == 4096
         assert body["tools"] == [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
         assert "Где заказать цветы?" in body["messages"][0]["content"][0]["text"]
+        assert "ровно один вызов" in body["messages"][0]["content"][0]["text"]
         return httpx.Response(200, json=response_body())
     with DeepSeekWebClient("secret", "selected-model", transport=httpx.MockTransport(handler)) as client:
         assert client.answer("Где заказать цветы?").text == "Ответ"
@@ -81,6 +82,12 @@ def test_links_in_prose_do_not_become_citations():
     body = response_body()
     body["content"][-1]["text"] = "Рекомендуем https://example.com/"
     assert answer(body).citations == ()
+
+
+def test_search_error_in_list_is_reported_as_search_failure():
+    body = response_body(results=[{"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"}])
+    with pytest.raises(ProviderError, match="не выполнил веб-поиск|поиск завершился ошибкой"):
+        answer(body)
 
 
 @pytest.mark.parametrize("body", [
