@@ -105,3 +105,22 @@ class ProjectStorage:
                 PRAGMA user_version=7;
                 COMMIT;
             """)
+
+            # New optional measurement dimensions must not strand historical series.
+            from app.domain.projects import comparison_key
+
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                for row in db.execute(
+                    "SELECT id,snapshot_json,comparison_key FROM project_measurements"
+                ).fetchall():
+                    key = comparison_key(json.loads(row["snapshot_json"]))
+                    if key != row["comparison_key"]:
+                        db.execute(
+                            "UPDATE project_measurements SET comparison_key=? WHERE id=?",
+                            (key, row["id"]),
+                        )
+                db.commit()
+            except (ValueError, TypeError, KeyError, ValidationError) as exc:
+                db.rollback()
+                raise StorageError("Не удалось обновить серии замеров") from exc
