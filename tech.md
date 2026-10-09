@@ -213,7 +213,15 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 (по умолчанию локальный Postgres.app `postgresql://adam977@localhost:5432/ai-tracker`;
 в Docker — служба `postgres` с образом `postgres:18-bookworm`). Схему создают и меняют
 только миграции Alembic из `backend/migrations` — приложение их не запускает и падает
-безопасной ошибкой хранилища, если база не на head.
+безопасной ошибкой хранилища, если база не на head. В compose миграции выполняет
+одноразовая служба `migrate` (команда `alembic upgrade head`), а `backend` стартует
+после её успешного завершения: реплики не гоняются за одну схему.
+
+Соединения не открываются на каждую операцию: на каждый адрес базы в процессе живёт
+`psycopg_pool.ConnectionPool` (постоянное соединение плюс рост до
+`AI_TRACKER_DB_POOL_MAX_SIZE`, по умолчанию 8). `app.core.database` пишет `INFO` при
+создании пула, `DEBUG` на каждое физическое соединение и `ERROR` при недоступной базе;
+в сообщениях только `host:port/база` — логин, пароль и `options` не попадают в лог.
 
 `projects` — корневая таблица, и каждая компания ведётся отдельным проектом:
 `project_measurements` и `runs` ссылаются на неё через
@@ -257,11 +265,12 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 | `make ruff` | `ruff check --fix` в backend |
 | `make docker-up`, `make docker-down`, `make docker-logs` | Стек в Docker Compose |
 
-- Docker: три службы — backend на `127.0.0.1:8000`, интерфейс на `127.0.0.1:3001` с base path
-  `/clustering/tracker` и PostgreSQL (`postgres:18-bookworm`, публикуется на `127.0.0.1:5433`)
+- Docker: четыре службы — PostgreSQL (`postgres:18-bookworm`, публикуется на
+  `127.0.0.1:5433`), одноразовая служба миграций `migrate`, backend на `127.0.0.1:8000` и
+  интерфейс на `127.0.0.1:3001` с base path `/clustering/tracker`
   ([docker-compose.yml](docker-compose.yml), [svelte.config.js](frontend/svelte.config.js));
-  публичный origin задаётся `AI_TRACKER_ORIGIN`. Миграции контейнер backend применяет сам —
-  `alembic upgrade head` перед `uvicorn`.
+  публичный origin задаётся `AI_TRACKER_ORIGIN`. Entrypoint backend миграций не содержит:
+  их применяет `migrate`, и backend зависит от её успешного завершения.
 - Backend-тесты: `cd backend && uv run pytest` — модули в [backend/tests](backend/tests) по слоям
   (api, db, domain, integrations, service); PostgreSQL в тестах живой (случайная схема,
   мигрированная Alembic), а внешние HTTP-вызовы — модели, Яндекс, обход сайтов и
