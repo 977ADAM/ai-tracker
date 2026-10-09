@@ -247,6 +247,23 @@ class SeoChatPage:
     def metric_text(self, key: str) -> str:
         return (self.metric(key).inner_text() or "").strip()
 
+    @property
+    def model_coverage(self) -> Locator:
+        """The «N из M пар» poll-coverage line above the per-connection AI tables."""
+        return self.page.locator("[data-model-coverage]")
+
+    def brand_position(self, key: str) -> Locator:
+        """One brand-position share of a connection, for example `first` or `ahead`."""
+        return self.page.locator(f"[data-brand-position='{key}']")
+
+    def source_domain(self, domain: str) -> Locator:
+        """The row of one cited domain.
+
+        `data-source-domain` sits on the row's `<th>`, so the locator matches the
+        whole row: an assertion then sees the answers and citations of that domain.
+        """
+        return self.page.locator(f'[data-source-row]:has([data-source-domain="{domain}"])')
+
     def candidate(self, host: str) -> Locator:
         return self.page.locator(f"[data-candidate='{host}']")
 

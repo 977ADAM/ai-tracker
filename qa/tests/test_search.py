@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from playwright.sync_api import Page, expect
 
-from pages.fake_api import ANALYSIS_ID
+from pages.fake_api import ANALYSIS_ID, model_row
 from pages.seo import AGENT_IDS, SeoChatPage
 
 DESCRIPTION = (
@@ -112,6 +112,7 @@ def snapshot(status: str) -> dict:
                 "comparative": {"search": metric(0, 0), "ai": {MODEL_ID: metric(0, 0)}},
             },
             "services": {"Доставка цветов": {"search": metric(2, 1, 3), "ai": {MODEL_ID: metric(1, 1)}}},
+            "sources": [],
             "counts": {"queries": GENERATED, "search_rows": 2, "model_rows": 1, "search_errors": 1, "model_errors": 0},
         },
     }
@@ -132,6 +133,23 @@ def agent_snapshot(status: str, *, exhausted: bool = False) -> dict:
     """A snapshot of the agent runtime: five agents, their budget, and numbers."""
     data = snapshot(status)
     running = status == "running"
+    # The connection answers with a completed web search: the citation share sits
+    # on the connection block and the brand position is its own split.
+    data["aggregates"]["site"]["ai"][MODEL_ID] = {
+        **cover(1, 1),
+        "citation": metric(2, 1, 4),
+        "position": {
+            "first": metric(10, 3),
+            "early": metric(10, 2),
+            "late": metric(10, 1),
+            "absent": metric(10, 4),
+            "ahead": metric(10, 1),
+        },
+    }
+    data["aggregates"]["sources"] = [
+        {"domain": "habr.com", "answers": 2, "citations": 3},
+        {"domain": "vc.ru", "answers": 1, "citations": 1},
+    ]
     data["estimate"] = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1}
     data["agents"] = [
         {
@@ -198,6 +216,7 @@ def test_the_run_card_shows_six_stages_and_reaches_the_report(page: Page, api) -
 
 def test_the_agent_run_shows_agents_budget_trace_and_numbers(page: Page, api) -> None:
     api.route_snapshots(agent_snapshot("running", exhausted=True), agent_snapshot("completed"))
+    api.route_rows("model", {None: {"items": [model_row(MODEL_ID)], "next_cursor": None}})
     api.route_trace({
         None: {
             "items": [trace_step(
@@ -252,6 +271,17 @@ def test_the_agent_run_shows_agents_budget_trace_and_numbers(page: Page, api) ->
     expect(chat.report()).to_be_visible()
     expect(page.locator("[data-report-conclusions]")).to_have_count(0)
     assert chat.metric_text("site-overall") == "50 %"
+
+    # The report carries the cited sources, the brand position and the poll
+    # coverage of the saved answers; the citation share is per connection.
+    expect(chat.source_domain("habr.com")).to_contain_text("2")
+    expect(chat.brand_position("first")).to_have_text("30 %")
+    expect(chat.model_coverage).to_contain_text("из")
+    assert chat.metric_text("ai-qa-run-connection-all-citation") == "50 %"
+    # The saved answer shows its web-search mode and how many sources it cites.
+    row = chat.model_detail_rows.first
+    expect(row.locator("[data-answer-mode]")).to_have_text("веб-поиск")
+    expect(row.locator("[data-answer-sources-count]")).to_have_text("2")
 
 
 def test_cancel_stops_the_run_without_a_body(page: Page, api) -> None:

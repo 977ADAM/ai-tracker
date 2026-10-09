@@ -81,6 +81,14 @@ def completed_snapshot(analysis_id: str = ANALYSIS_ID) -> dict:
         "name": metric(2, 1),
         "host": metric(2, 1),
         "combined": metric(2, 1),
+        "citation": metric(2, 1, 4),
+        "position": {
+            "first": metric(10, 3),
+            "early": metric(10, 2),
+            "late": metric(10, 1),
+            "absent": metric(10, 4),
+            "ahead": metric(10, 1),
+        },
         "branded": {"name": metric(1, 1), "host": metric(1, 1), "combined": metric(1, 1)},
         "unbranded": {"name": metric(1, 0), "host": metric(1, 1), "combined": metric(1, 1)},
     }
@@ -165,8 +173,39 @@ def completed_snapshot(analysis_id: str = ANALYSIS_ID) -> dict:
                 "comparative": {"search": metric(0, 0), "ai": {MODEL_ID: metric(0, 0)}},
             },
             "services": {"букеты": {"search": metric(2, 1, 3), "ai": {MODEL_ID: metric(2, 1)}}},
+            "sources": [
+                {"domain": "habr.com", "answers": 2, "citations": 3},
+                {"domain": "vc.ru", "answers": 1, "citations": 1},
+            ],
             "counts": counts,
         },
+    }
+
+
+def model_row(connection_id: str = MODEL_ID, index: int = 0) -> dict:
+    """One saved answer of a connection whose web search completed.
+
+    The row carries the mode, the search status and the citations the report
+    renders, so a check can observe «веб-поиск» and the sources without a model call.
+    """
+    return {
+        "query_index": index,
+        "connection_id": connection_id,
+        "provider_name": "Модель",
+        "status": "found",
+        "answer": "Ромашка предлагает доставку цветов; подробности — в источниках.",
+        "name_mentioned": True,
+        "host_mentioned": False,
+        "error": None,
+        "query": f"запрос {index + 1}",
+        "category": "commercial",
+        "service": SERVICES[0],
+        "answer_mode": "deepseek_web",
+        "search_status": "completed",
+        "citations": [
+            {"url": "https://habr.com/ru/articles/1", "title": "Как выбрать букет"},
+            {"url": "https://vc.ru/marketing/2", "title": None},
+        ],
     }
 
 
