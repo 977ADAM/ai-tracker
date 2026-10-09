@@ -71,15 +71,15 @@ normalize_sources(results: Sequence[SearchResult], citations: Sequence[Citation]
 **Files:** создать доменный модуль и DeepSeek-адаптер из карты файлов; тесты `backend/tests/test_domain_seo_answer.py`, `backend/tests/test_integrations_deepseek_web.py`.
 
 **Consumes:** официальный формат Messages, существующие правила URL проекта и `ProviderError`.
-**Produces:** типы выше; `DeepSeekWebClient(api_key: str, model: str, *, transport: httpx.BaseTransport | None = None)` реализует `SeoAnswerProvider`.
+**Produces:** типы выше; `DeepSeekWebClient(api_key: str, model: str, *, transport: httpx.AsyncBaseTransport | None = None)` реализует `SeoAnswerProvider`. Синхронный метод запускает асинхронный HTTP-вызов в worker thread; общий таймаут охватывает всё выполнение.
 
-- [ ] Написать `test_request_uses_native_search_and_selected_model`: MockTransport проверяет фиксированный endpoint, авторизацию, `anthropic-version=2023-06-01`, выбранную модель, `max_tokens=4096` и `max_uses=1`.
-- [ ] Добавить `test_maps_text_results_and_citations`: два текстовых блока сохраняются по порядку; поисковые страницы и цитаты не смешиваются, повтор цитаты остаётся в citations. `test_empty_successful_search` ожидает completed и пустые списки; `test_completed_search_without_citations` — completed и ноль цитат.
-- [ ] Добавить тесты отсутствующего блока поиска, tool error, пустого/неправильного ответа, `pause_turn`, `max_tokens` stop reason, таймаута, 401/403/429/500 и перенаправления. Все дают безопасный ProviderError без текста upstream и без повторного HTTP-запроса.
-- [ ] Добавить URL-тесты: credentials, javascript/data, localhost, приватные IP и недопустимый хост исключаются по существующим правилам без DNS-запроса; fragment удаляется, query остаётся. Не считать домен из текста структурированной цитатой.
-- [ ] Выполнить `cd backend && uv run pytest tests/test_domain_seo_answer.py tests/test_integrations_deepseek_web.py`; подтвердить падение на ещё отсутствующем модуле.
-- [ ] Реализовать типы, нормализацию и клиент. Ограничить полный вызов 120 секундами, запретить redirects; ошибки не содержат ключ. Число поисковых вызовов брать из структурированных данных при наличии, неизвестное оставлять None.
-- [ ] Повторить команду; все тесты должны пройти. Сохранить отдельным коммитом `feat: add DeepSeek native search answer adapter`.
+- [x] Написать `test_request_uses_native_search_and_selected_model`: MockTransport проверяет фиксированный endpoint, авторизацию, `anthropic-version=2023-06-01`, выбранную модель, `max_tokens=4096` и `max_uses=1`.
+- [x] Добавить `test_maps_text_results_and_citations`: два текстовых блока сохраняются по порядку; поисковые страницы и цитаты не смешиваются, повтор цитаты остаётся в citations. `test_empty_successful_search` ожидает completed и пустые списки; `test_completed_search_without_citations` — completed и ноль цитат.
+- [x] Добавить тесты отсутствующего блока поиска, tool error, пустого/неправильного ответа, `pause_turn`, `max_tokens` stop reason, таймаута, 401/403/429/500 и перенаправления. Все дают безопасный ProviderError без текста upstream и без повторного HTTP-запроса.
+- [x] Добавить URL-тесты: credentials, javascript/data, localhost, приватные IP и недопустимый хост исключаются по существующим правилам без DNS-запроса; fragment удаляется, query остаётся. Не считать домен из текста структурированной цитатой.
+- [x] Выполнить `cd backend && uv run pytest tests/test_domain_seo_answer.py tests/test_integrations_deepseek_web.py`; подтвердить падение на ещё отсутствующем модуле.
+- [x] Реализовать типы, нормализацию и клиент. Ограничить полный вызов 120 секундами, запретить redirects; ошибки не содержат ключ. Число поисковых вызовов брать из структурированных данных при наличии, неизвестное оставлять None.
+- [x] Повторить команду; все тесты должны пройти. Сохранить отдельным коммитом `feat: add DeepSeek native search answer adapter`.
 
 ### Task 2: Проверка реального API до интеграции
 
@@ -181,4 +181,12 @@ normalize_sources(results: Sequence[SearchResult], citations: Sequence[Citation]
 
 ## Validation
 
-План ещё не исполнялся. Живой API и тесты реализации пока не проверены.
+2026-10-09: адаптер и доменные типы реализованы; 41 новая проверка проходит.
+Работа ведётся без worktree, по просьбе пользователя, в ветке `codex/deepseek-web-search`.
+
+Контрольный вызов поиска через сохранённое прямое подключение `deepseek-flash`
+получил отказ авторизации. Бесплатный `GET /models` с тем же ключом также вернул
+HTTP 401. Ключ и тела ошибок не выводились. Поддержка поиска не подтверждена;
+Tasks 3–8 ожидают исправления подключения и успешной проверки Task 2.
+
+Полный backend-набор: 1205 passed in 7.63s. Ruff для новых модулей и тестов: All checks passed.
