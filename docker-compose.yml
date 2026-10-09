@@ -20,6 +20,18 @@ services:
       retries: 12
     restart: unless-stopped
 
+  migrate:
+    # One shot: it applies the Alembic revisions and exits. Keeping it out of
+    # the backend entrypoint means N replicas never race on `upgrade head`.
+    image: ai-tracker-backend:local
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      AI_TRACKER_DATABASE_URL: postgresql://ai_tracker:ai_tracker@postgres:5432/ai-tracker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   backend:
     build:
       context: ./backend
@@ -34,8 +46,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   frontend:
