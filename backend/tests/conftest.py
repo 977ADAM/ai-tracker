@@ -128,6 +128,9 @@ from app.main import app as application
 def session_database() -> Iterator[str]:
     """Yield the migrated test schema and drop it when the session ends."""
     yield TEST_DSN
+    # The pools of this process are closed before the schema they point at is
+    # dropped, so no backend stays alive for the rest of the session.
+    database.close_pools()
     _drop_database()
 
 
