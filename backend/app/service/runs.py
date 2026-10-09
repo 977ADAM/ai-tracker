@@ -146,11 +146,11 @@ class RunService:
             self._storage_failure(run_id)
             raise
 
-    def list_page(self, cursor: str | None = None, limit: int = 20) -> dict:
+    def list_page(self, cursor: str | None = None, limit: int = 20, project_id: str | None = None) -> dict:
         if self.stopping.is_set():
             raise StorageError(STOPPED)
         try:
-            return self.repository.list_page(cursor, limit)
+            return self.repository.list_page(cursor, limit, project_id)
         except StorageError:
             self._storage_failure("history")
             raise
