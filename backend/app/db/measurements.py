@@ -1,10 +1,10 @@
 """Persist individual outcomes; reject writes after a terminal measurement."""
 
 import json
-import sqlite3
 from dataclasses import asdict
 from uuid import uuid4
 
+from app.core import database
 from app.core.errors import RunConflict, RunNotFound, ValidationError
 from app.db.project_storage import (
     ProjectStorage,
@@ -72,7 +72,7 @@ class MeasurementRepository(ProjectStorage):
                             "INSERT INTO project_search_rows(measurement_id,query_index) VALUES(?,?)",
                             (id, i),
                         )
-        except sqlite3.IntegrityError as exc:
+        except database.IntegrityError as exc:
             raise RunConflict("Замер проекта уже выполняется") from exc
         return id
 
