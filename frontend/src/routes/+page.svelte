@@ -435,7 +435,7 @@
 <svelte:head><title>ИИ-трекинг · Чат SEO-анализа</title></svelte:head>
 
 <main class="mx-auto w-full max-w-[1920px] px-4 pb-16 sm:px-6 lg:px-8">
-    <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-6 text-xs font-medium text-muted">
+    <nav aria-label="Хлебные крошки" class="flex items-center gap-2 py-4 text-xs font-medium text-muted">
         <a href={base || '/'} class="hover:text-accent">Инструменты</a>
         <span aria-hidden="true">/</span>
         <span class="text-ink">SEO-анализ сайта</span>
@@ -453,7 +453,7 @@
         </p>
     {/if}
 
-    <div class="mt-8 grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-start">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-start">
         <ChatSidebar
             {chats}
             {activeId}

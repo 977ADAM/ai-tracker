@@ -285,7 +285,6 @@ export type SeoBudgetView = {
 };
 
 /** The report agent's text: labeled as model output and never a metric. */
-export type SeoConclusions = { summary: string; recommendations: string; model: string };
 
 /** One traced step: safe arguments and a short result, never a secret. */
 export type SeoTraceStep = {
@@ -320,8 +319,6 @@ export type SeoAnalysisSnapshot = {
   budget_exhausted: boolean;
   candidates: SeoCandidate[];
   queries: SeoQuery[];
-  summary: string | null;
-  conclusions: SeoConclusions | null;
   counters: SeoCounts;
   readiness: SeoReadiness;
   aggregates: SeoAggregates;

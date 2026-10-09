@@ -12,7 +12,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     finished_at: null,
     input: { url: 'https://example.ru', host: 'example.ru', sphere: 'Цветы', seeds: ['а'], services: ['б'], connection_ids: ['model-1', 'model-2'] },
     estimate: { search_upper: 43, model_upper: 40, generated_limit: 40, connections: 2 },
-    company_name: '', services: [], pages: [], stages: [], candidates: [], queries: [], summary: null,
+    company_name: '', services: [], pages: [], stages: [], candidates: [], queries: [],
     counters: { queries: 0, search_rows: 0, model_rows: 0, search_errors: 0, model_errors: 0 },
     readiness: {
       report_ready: false, summary_ready: false, queries_ready: false, has_submitted_search_rows: false,

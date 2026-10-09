@@ -66,14 +66,12 @@ DOCUMENTS = (
     SearchDocument("https://rival.ru/page", "Соперник — букеты"),
     SearchDocument("https://example.ru/page", "Ромашка — букеты"),
 )
-SUMMARY = "Ромашка упоминается в ответах частично."
-RECOMMENDATIONS = "Усилить информационные запросы."
-FINISH_REASON = "Отчёт сохранён"
+FINISH_REASON = "Числа готовы"
 
 STEP_MODEL = "model"
 STEP_TOOL = "tool"
 STEP_HANDOFF = "handoff"
-SPECIALISTS = ("site", "competitors", "queries", "checks", "report")
+SPECIALISTS = ("site", "competitors", "queries", "checks")
 
 
 def payload() -> dict[str, object]:
@@ -122,13 +120,7 @@ def happy_path_script() -> list[AIMessage]:
         call("search_many"),
         call("ask_models"),
         AIMessage(content="Проверки завершены"),
-        # Supervisor turn 5: the report agent.
-        call("handoff_to", agent="report", reason="Написать отчёт"),
-        # Report agent.
-        call("read_metrics"),
-        call("save_report", summary=SUMMARY, recommendations=RECOMMENDATIONS),
-        AIMessage(content="Отчёт сохранён"),
-        # Supervisor turn 6: the end.
+        # Supervisor turn 5: the data is ready, so the run ends here.
         call("finish_run", reason=FINISH_REASON),
     ]
 
@@ -161,13 +153,6 @@ HAPPY_PATH_TRACE = [
     ("checks", STEP_TOOL, "ask_models"),
     ("checks", STEP_MODEL, "checks"),
     ("supervisor", STEP_MODEL, "supervisor"),
-    ("supervisor", STEP_HANDOFF, "handoff_to"),
-    ("report", STEP_MODEL, "report"),
-    ("report", STEP_TOOL, "read_metrics"),
-    ("report", STEP_MODEL, "report"),
-    ("report", STEP_TOOL, "save_report"),
-    ("report", STEP_MODEL, "report"),
-    ("supervisor", STEP_MODEL, "supervisor"),
     ("supervisor", STEP_TOOL, "finish_run"),
 ]
 
@@ -177,7 +162,6 @@ HAPPY_PATH_STATUSES = [
     "running", "done", "running", "done", "running", "done", "done",
     "running", "done", "running", "done", "running", "done", "done",
     "running", "done", "running", "done", "done",
-    "running", "done", "running", "done", "running", "done", "done",
     "running", "done", "running", "done", "running", "done", "done",
     "running", "done",
 ]
@@ -250,7 +234,6 @@ class Harness:
             connection_ids=input.connection_ids,
             budget=budget,
             poll_interval=0.0,
-            model_name="seo-model",
         )
         self.toolboxes.append(toolbox)
         return toolbox
@@ -433,15 +416,14 @@ async def test_happy_path_runs_every_agent_and_completes_the_analysis(
         entry["agent"]: entry["status"] for entry in harness.repository.agents(harness.analysis_id)
     }
     # `save_*` marks its own agent `done`; a running checks agent is closed as
-    # `done` when the supervisor moves on to the report; the supervisor itself
-    # gets a terminal status when the run is published.
+    # `done` when the supervisor finishes the run; the supervisor itself gets a
+    # terminal status when the run is published.
     assert statuses == {
         "supervisor": "done",
         "site": "done",
         "competitors": "done",
         "queries": "done",
         "checks": "done",
-        "report": "done",
     }
     assert harness.repository.snapshot(harness.analysis_id)["status"] == "completed"
     assert harness.repository.snapshot(harness.analysis_id)["budget_exhausted"] is False
@@ -461,7 +443,7 @@ async def test_model_steps_record_only_the_agent_and_the_turn_status(
     await harness.runtime().run(harness.analysis_id, harness.input)
 
     steps = [item for item in harness.trace() if item["kind"] == STEP_MODEL]
-    assert len(steps) == 20
+    assert len(steps) == 16
     assert [item["status"] for item in steps] == [
         status
         for (agent, kind, _name), status in zip(HAPPY_PATH_TRACE, HAPPY_PATH_STATUSES, strict=True)
@@ -490,9 +472,6 @@ async def test_saved_rows_reach_the_repository_and_the_paid_calls_stay_inside_th
     assert [query["text"] for query in snapshot["queries"]] == [
         item["query"] for item in ANALYSIS_QUERIES
     ]
-    assert snapshot["conclusions"]["summary"] == SUMMARY
-    assert snapshot["conclusions"]["recommendations"] == RECOMMENDATIONS
-    assert snapshot["conclusions"]["model"] == "seo-model"
 
     # One paid key search plus the generated searches, and one model answer per
     # generated query. Tool batches run concurrently, so only the sets are
@@ -509,7 +488,7 @@ async def test_saved_rows_reach_the_repository_and_the_paid_calls_stay_inside_th
     assert budget["seed_searches"] == 1
     assert budget["searches"] == GENERATED_QUERY_LIMIT
     assert budget["model_rows"] == GENERATED_QUERY_LIMIT
-    assert budget["handoffs"] == 5
+    assert budget["handoffs"] == 4
 
 
 @pytest.mark.anyio
@@ -525,6 +504,33 @@ async def test_finish_run_only_flags_the_end_and_the_runtime_completes_the_analy
     assert toolbox.finished is True
     assert toolbox.finish_reason == FINISH_REASON
     assert harness.repository.snapshot(harness.analysis_id)["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_finish_run_closes_a_running_checks_agent_before_the_run_is_published(
+    tmp_path, repository, settings,
+):
+    # The checks agent is the one specialist whose work can end while it is still
+    # `running`: it is closed by the supervisor's `finish_run`, inside the graph,
+    # so no `running` row survives the end of the dialogue.
+    script = [
+        call("handoff_to", agent="checks", reason="Проверить"),
+        call("search_many"),
+        AIMessage(content="Проверки завершены"),
+        call("finish_run", reason=FINISH_REASON),
+    ]
+    harness = make_harness(tmp_path, repository, settings, script=script)
+    toolbox = harness.toolbox_factory(harness.analysis_id, harness.input, SeoBudget.for_run())
+    graph = build_agent_graph(harness.model, toolbox, checkpointer=None)
+
+    await graph.ainvoke({"messages": []})
+
+    statuses = {
+        entry["agent"]: entry["status"] for entry in harness.repository.agents(harness.analysis_id)
+    }
+    assert statuses["checks"] == "done"
+    # The graph never publishes the run: the runtime does, after the dialogue.
+    assert harness.repository.snapshot(harness.analysis_id)["status"] == "running"
 
 
 @pytest.mark.anyio
@@ -569,7 +575,7 @@ async def test_specialist_turn_budget_stops_the_run_with_the_limit_flag(
 
 
 @pytest.mark.anyio
-async def test_a_run_without_site_facts_fails_before_it_can_publish_a_report(
+async def test_a_run_without_site_facts_fails_instead_of_publishing_numbers(
     tmp_path, repository, settings,
 ):
     script = [
@@ -579,7 +585,7 @@ async def test_a_run_without_site_facts_fails_before_it_can_publish_a_report(
         call("save_site_facts", company_name="Ромашка", services=["Букеты"]),
         AIMessage(content="Не удалось сохранить сведения"),
         # The supervisor gives up early instead of looping: the run must not
-        # pretend to have a report when the site facts are missing.
+        # publish numbers when the site facts are missing.
         call("finish_run", reason="Больше нечего делать"),
     ]
     harness = make_harness(tmp_path, repository, settings, script=script)
@@ -625,7 +631,7 @@ async def test_checkpoint_is_owner_only_and_a_second_graph_sees_the_finished_sta
     assert state.values["finished"] is True
     assert state.values["finish_reason"] == FINISH_REASON
     assert state.values["specialists"] == {
-        "supervisor": 6, "site": 1, "competitors": 1, "queries": 1, "checks": 1, "report": 1,
+        "supervisor": 5, "site": 1, "competitors": 1, "queries": 1, "checks": 1,
     }
     assert reader.index == 0
 
@@ -730,7 +736,6 @@ async def test_resume_continues_from_the_checkpoint_and_never_repeats_stored_wor
     assert resumed.fetcher.hosts == []
     assert [page["url"] for page in snapshot["pages"]] == [DEFAULT_SEO_PAGE.url]
     assert snapshot["company_name"] == "Ромашка"
-    assert snapshot["conclusions"]["summary"] == SUMMARY
 
 
 @pytest.mark.anyio

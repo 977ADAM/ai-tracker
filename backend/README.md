@@ -151,7 +151,7 @@ API провайдера. Разные модели одной группы де
 | `POST` | `/api/seo/settings/test` | Два пробных вызова: обычный ответ и поддержка инструментов; `{ok, model, error, tools}` |
 | `POST` | `/api/seo/analyses` | Создать SEO-анализ; ответ `202` с `{id, status, estimate}` |
 | `GET` | `/api/seo/analyses` | SEO-история новыми сверху, по 20 записей с курсором |
-| `GET` | `/api/seo/analyses/{id}` | Снимок: агенты, бюджет, `budget_exhausted`, выводы, вход, кандидаты, агрегаты и готовность |
+| `GET` | `/api/seo/analyses/{id}` | Снимок: агенты, бюджет, `budget_exhausted`, вход, кандидаты, агрегаты и готовность |
 | `GET` | `/api/seo/analyses/{id}/rows` | Постраничная детализация `kind=model` или `kind=search` с ответами моделей |
 | `GET` | `/api/seo/analyses/{id}/trace?cursor=` | Постраничная трасса шагов агентов: `{items, next_cursor}` |
 | `POST` | `/api/seo/analyses/{id}/cancel` | Отменить активный анализ; готовые строки остаются |
@@ -263,7 +263,7 @@ API провайдера. Разные модели одной группы де
   Идемпотентность живёт здесь: повторный `yandex_search` по уже проверенному запросу возвращает
   сохранённую выдачу, отправленная операция Яндекса опрашивается по сохранённому ID, а `ask_models`
   пропускает пары, у которых уже есть сохранённая строка модели.
-- `service/seo_agents.py` — граф LangGraph: узел супервизора и пять специалистов, собранных через
+- `service/seo_agents.py` — граф LangGraph: узел супервизора и четыре специалиста, собранных через
   `create_agent`; супервизор вызывает только `handoff_to`, `finish_run` и `read_status`. Обёртка
   `ModelTracer` пишет по шагу трассы на каждый ход модели и пробрасывает привязку инструментов
   внутренней модели: без этого `create_agent` и супервизор не получили бы инструментов вовсе.
@@ -281,7 +281,7 @@ API провайдера. Разные модели одной группы де
   `resume_pending` запускает их из startup-хука приложения. Глобальный механизм остановки
   `RunService` не затрагивается.
 - `db/seo.py` — таблицы `seo_analyses`, `seo_stages`, `seo_agents`, `seo_agent_steps`,
-  `seo_conclusions`, `seo_pages`, `seo_candidates`, `seo_queries`, `seo_search_rows`,
+  `seo_pages`, `seo_candidates`, `seo_queries`, `seo_search_rows`,
   `seo_candidate_hits`, `seo_model_rows`, `seo_seed_rows` (и `seo_search_documents`) в той же
   `runs.sqlite3`. Репозиторий поднимает `PRAGMA user_version` до 4: база версии 3 с SEO-данными
   мигрирует на месте (прежние версии 0–2 остаются читаемыми для `RunRepository`), а версия 5 и
@@ -290,8 +290,8 @@ API провайдера. Разные модели одной группы де
   лимиту.
 - Отложенный идентификатор операции Яндекса хранится в базе и никогда не возвращается в API;
   ответы моделей отдаёт только постраничный `/rows`, а снимок анализа их не содержит. Снимок
-  дополнен полями `agents`, `budget` (использовано и предел по каждому ресурсу),
-  `budget_exhausted` и `conclusions`; трасса отдаётся отдельным ресурсом
+  дополнен полями `agents`, `budget` (использовано и предел по каждому ресурсу) и
+  `budget_exhausted`; трасса отдаётся отдельным ресурсом
   `GET /api/seo/analyses/{id}/trace?cursor=` как `{items, next_cursor}` с безопасными аргументами
   и краткими результатами.
 

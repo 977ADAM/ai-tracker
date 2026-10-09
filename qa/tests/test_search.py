@@ -3,8 +3,8 @@
 The run screen is no longer a page of its own: the chat feed holds it, and a run
 appears only after the dialogue confirms a proposal. Every chat turn and every
 `/api/seo/analyses` response is answered by the `api` fake through `page.route`,
-so the checks observe the six agents, their budget, the trace feed with its
-cursor, the conclusions, the counters, the actual estimates and the cancel action
+so the checks observe the five agents, their budget, the trace feed with its
+cursor, the counters, the actual estimates and the cancel action
 without starting a run and without reaching Yandex or a model API.
 
 An analysis without agent rows exercises the pre-agent screen: the six saved
@@ -27,8 +27,6 @@ CONFIRM_JSON = '{"reply": "Запускаю прогон.", "intent": "confirm",
 TRACE_CURSOR = "cursor-trace-2"
 GENERATED = 3
 MODEL_ID = "qa-run-connection"
-CONCLUSIONS_SUMMARY = "Ромашка видна в половине ответов моделей."
-CONCLUSIONS_MODEL = "qa-service-model"
 STAGE_NAMES = [
     "Анализ сайта",
     "Поиск конкурентов",
@@ -131,7 +129,7 @@ def trace_step(
 
 
 def agent_snapshot(status: str, *, exhausted: bool = False) -> dict:
-    """A snapshot of the agent runtime: six agents, their budget, and conclusions."""
+    """A snapshot of the agent runtime: five agents, their budget, and numbers."""
     data = snapshot(status)
     running = status == "running"
     data["estimate"] = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 1}
@@ -154,11 +152,6 @@ def agent_snapshot(status: str, *, exhausted: bool = False) -> dict:
         "agent_steps": {agent: 1 for agent in AGENT_IDS},
     }
     data["budget_exhausted"] = exhausted
-    data["conclusions"] = None if running else {
-        "summary": CONCLUSIONS_SUMMARY,
-        "recommendations": "Усилить страницы услуг и показать цены.",
-        "model": CONCLUSIONS_MODEL,
-    }
     return data
 
 
@@ -201,7 +194,7 @@ def test_the_run_card_shows_six_stages_and_reaches_the_report(page: Page, api) -
     expect(chat.report_status).to_have_text("Завершён")
 
 
-def test_the_agent_run_shows_agents_budget_trace_and_conclusions(page: Page, api) -> None:
+def test_the_agent_run_shows_agents_budget_trace_and_numbers(page: Page, api) -> None:
     api.route_snapshots(agent_snapshot("running", exhausted=True), agent_snapshot("completed"))
     api.route_trace({
         None: {
@@ -221,10 +214,10 @@ def test_the_agent_run_shows_agents_budget_trace_and_conclusions(page: Page, api
     page.clock.install()
     chat = start_run(page, api)
 
-    # The agent screen replaces the stage list: six agents with their statuses.
+    # The agent screen replaces the stage list: five agents with their statuses.
     expect(chat.agents_panel).to_be_visible()
     expect(page.locator("[data-stage]")).to_have_count(0)
-    expect(page.locator("[data-agent]")).to_have_count(6)
+    expect(page.locator("[data-agent]")).to_have_count(5)
     expect(chat.agent("supervisor")).to_contain_text("Супервизор")
     expect(chat.agent_status("supervisor")).to_have_text("Выполняется")
     expect(chat.agent_status("site")).to_have_text("Ожидает")
@@ -250,16 +243,12 @@ def test_the_agent_run_shows_agents_budget_trace_and_conclusions(page: Page, api
     expect(feed.get_by_role("button", name="Показать ещё")).to_have_count(0)
     assert api.trace_cursors == [None, TRACE_CURSOR]
 
-    # The finished run shows the model-written conclusions inside its report.
+    # The finished run shows server-computed numbers only: there is no
+    # model-written block in the report any more.
     page.clock.fast_forward(30_000)
     expect(page.locator("[data-run-status]")).to_have_text("Завершён")
     expect(chat.report()).to_be_visible()
-    conclusions = chat.conclusions
-    expect(conclusions).to_be_visible()
-    expect(conclusions).to_contain_text("Текст модели")
-    expect(conclusions).to_contain_text(CONCLUSIONS_MODEL)
-    expect(chat.conclusions_summary).to_have_text(CONCLUSIONS_SUMMARY)
-    # The numbers stay server-computed next to the labelled model text.
+    expect(page.locator("[data-report-conclusions]")).to_have_count(0)
     assert chat.metric_text("site-overall") == "50 %"
 
 

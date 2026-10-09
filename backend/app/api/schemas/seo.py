@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 SeoAnalysisStatus = Literal["running", "completed", "failed", "interrupted", "cancelled"]
 SeoStageStatus = Literal["pending", "running", "done", "error", "skipped"]
@@ -37,6 +37,7 @@ class SeoEstimateResponse(BaseModel):
     model_upper: int
     generated_limit: int
     connections: int
+    deepseek_search_upper: int = 0
 
 
 class SeoAnalysisCreatedResponse(BaseModel):
@@ -62,6 +63,7 @@ class SeoSiteAiMetricsResponse(BaseModel):
     name: SeoMetricResponse
     host: SeoMetricResponse
     combined: SeoMetricResponse
+    citation: SeoMetricResponse | None = None
 
 
 class SeoSiteAiBlockResponse(SeoSiteAiMetricsResponse):
@@ -95,6 +97,7 @@ class SeoCompetitorAggregatesResponse(BaseModel):
 class SeoCategoryAggregatesResponse(BaseModel):
     search: SeoMetricResponse
     ai: dict[str, SeoMetricResponse]
+    citation: dict[str, SeoMetricResponse] = Field(default_factory=dict)
 
 
 class SeoAggregatesResponse(BaseModel):
@@ -192,14 +195,6 @@ class SeoBudgetResponse(BaseModel):
     agent_steps: dict[str, int]
 
 
-class SeoConclusionsResponse(BaseModel):
-    """The report agent's text: labeled as model output, never a metric."""
-
-    summary: str
-    recommendations: str
-    model: str
-
-
 class SeoSnapshotResponse(BaseModel):
     """The saved analysis without model answers and without operation IDs."""
 
@@ -220,7 +215,6 @@ class SeoSnapshotResponse(BaseModel):
     candidates: list[SeoCandidateResponse]
     queries: list[SeoQueryResponse]
     summary: str | None
-    conclusions: SeoConclusionsResponse | None
     counters: SeoCountsResponse
     readiness: SeoReadinessResponse
     aggregates: SeoAggregatesResponse
@@ -274,6 +268,17 @@ class SeoSearchRowResponse(BaseModel):
     error: str | None
 
 
+class SeoSourceResponse(BaseModel):
+    url: str
+    title: str | None
+
+
+class SeoCitationResponse(SeoSourceResponse):
+    cited_text: str | None
+    block_index: int
+    order: int
+
+
 class SeoModelRowResponse(BaseModel):
     """One saved model answer, served only by the paginated detail resource."""
 
@@ -288,6 +293,12 @@ class SeoModelRowResponse(BaseModel):
     query: str | None
     category: str | None
     service: str | None
+    answer_mode: Literal["text", "deepseek_web"] = "text"
+    search_status: Literal["not_requested", "completed", "error"] = "not_requested"
+    search_results: list[SeoSourceResponse] = Field(default_factory=list)
+    citations: list[SeoCitationResponse] = Field(default_factory=list)
+    model: str | None = None
+    search_calls: int | None = None
 
 
 class SeoRowsResponse(BaseModel):

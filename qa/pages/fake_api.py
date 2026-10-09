@@ -62,9 +62,6 @@ QUESTIONS = {
     "services": "Перечислите услуги, которые нужно проверить: от одной до 5.",
 }
 
-CONCLUSIONS_SUMMARY = "Ромашка видна в половине ответов моделей."
-CONCLUSIONS_RECOMMENDATIONS = "Усилить страницы услуг и показать цены."
-CONCLUSIONS_MODEL = "qa-service-model"
 
 
 def metric(denominator: int, successes: int, average: float | None = None) -> dict:
@@ -78,7 +75,7 @@ def metric(denominator: int, successes: int, average: float | None = None) -> di
 
 
 def completed_snapshot(analysis_id: str = ANALYSIS_ID) -> dict:
-    """A finished agent run: the report, its metrics and the model conclusions."""
+    """A finished agent run: the report and its server-computed metrics."""
     counts = {"queries": 3, "search_rows": 2, "model_rows": 2, "search_errors": 0, "model_errors": 0}
     ai_block = {
         "name": metric(2, 1),
@@ -141,12 +138,6 @@ def completed_snapshot(analysis_id: str = ANALYSIS_ID) -> dict:
             }
             for index in range(3)
         ],
-        "summary": CONCLUSIONS_SUMMARY,
-        "conclusions": {
-            "summary": CONCLUSIONS_SUMMARY,
-            "recommendations": CONCLUSIONS_RECOMMENDATIONS,
-            "model": CONCLUSIONS_MODEL,
-        },
         "counters": counts,
         "readiness": {
             "report_ready": True,

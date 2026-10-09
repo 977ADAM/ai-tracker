@@ -59,8 +59,6 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     },
     budget_exhausted: false,
     candidates: [], queries: [],
-    summary: 'Ромашка упоминается в половине успешных ответов.',
-    conclusions: null,
     counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 1, model_errors: 0 },
     readiness: {
       report_ready: true, summary_ready: true, queries_ready: true, has_submitted_search_rows: false,
@@ -107,7 +105,6 @@ describe('SeoReport', () => {
     expect(table.textContent).toContain('2 из 4');
     expect(table.textContent).toContain('3,5');
     expect(content('[data-report-counters]')).toContain('Запросов: 4');
-    expect(screen.getByText('Ромашка упоминается в половине успешных ответов.')).toBeTruthy();
   });
 
   it('renders the name, host and combined AI shares of every connection split by brand', () => {
@@ -239,23 +236,6 @@ describe('SeoReport', () => {
     expect(body.querySelector('strong')?.textContent).toBe('жирный');
   });
 
-  it('renders the saved summary and conclusions as Markdown too', () => {
-    render(SeoReport, { props: { snapshot: snapshot({
-      summary: '## Итог\n- **главное**',
-      conclusions: {
-        summary: '## Выводы\n\n**Важно** для услуг',
-        recommendations: '- Первое\n- Второе',
-        model: 'seo-model'
-      }
-    }) } });
-
-    expect(document.querySelector('[data-report-summary] h2')?.textContent).toBe('Итог');
-    expect(document.querySelector('[data-report-summary] strong')?.textContent).toBe('главное');
-    expect(document.querySelector('[data-conclusions-summary] h2')?.textContent).toBe('Выводы');
-    expect(document.querySelector('[data-conclusions-summary] strong')?.textContent).toBe('Важно');
-    expect(document.querySelectorAll('[data-conclusions-recommendations] li')).toHaveLength(2);
-  });
-
   it('closes the answer dialog on the button, on Escape, and on the backdrop', async () => {
     const row: SeoModelRow = { ...modelRow, answer: 'я'.repeat(400) };
     render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
@@ -311,7 +291,7 @@ describe('SeoReport', () => {
   it('renders a failed analysis report with empty sections instead of crashing', () => {
     render(SeoReport, { props: {
       snapshot: snapshot({
-        status: 'failed', summary: null, counters: undefined as unknown as SeoAnalysisSnapshot['counters'],
+        status: 'failed', counters: undefined as unknown as SeoAnalysisSnapshot['counters'],
         aggregates: undefined as unknown as SeoAnalysisSnapshot['aggregates']
       })
     } });
@@ -319,32 +299,5 @@ describe('SeoReport', () => {
     expect(content('[data-metric="site-overall"]')).toBe('—');
     expect(screen.getByText('Повторяющихся кандидатов нет: не хватило успешных ключевых выдач.')).toBeTruthy();
     expect(screen.getByText('Ответы моделей не сохранены.')).toBeTruthy();
-  });
-
-  it('shows the conclusions as labelled model text beside the untouched numbers', () => {
-    render(SeoReport, { props: {
-      snapshot: snapshot({
-        conclusions: {
-          summary: 'Сайт виден в половине поисковых выдач.',
-          recommendations: 'Добавить страницы под коммерческие запросы.',
-          model: 'seo-model'
-        }
-      })
-    } });
-    const block = document.querySelector('[data-report-conclusions]');
-    expect(block).toBeTruthy();
-    expect(block?.textContent).toContain('Выводы и рекомендации');
-    expect(block?.textContent).toContain('Текст модели: seo-model');
-    expect(block?.textContent).toContain('не заменяет и не изменяет числа отчёта');
-    expect(content('[data-conclusions-summary]')).toBe('Сайт виден в половине поисковых выдач.');
-    expect(content('[data-conclusions-recommendations]')).toBe('Добавить страницы под коммерческие запросы.');
-    // The model text never changes a metric.
-    expect(content('[data-metric="site-overall"]')).toBe('50 %');
-  });
-
-  it('omits the conclusions block when the report agent saved nothing', () => {
-    render(SeoReport, { props: { snapshot: snapshot({ conclusions: null }) } });
-    expect(document.querySelector('[data-report-conclusions]')).toBeNull();
-    expect(content('[data-metric="site-overall"]')).toBe('50 %');
   });
 });

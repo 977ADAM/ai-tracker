@@ -107,7 +107,6 @@ def make_env(
     provider_factory: Any = None,
     budget: SeoBudget | None = None,
     poll_interval: float = 0.0,
-    model_name: str = "seo-model",
     on_step: Any = None,
     **toolbox_options: Any,
 ) -> SimpleNamespace:
@@ -135,7 +134,6 @@ def make_env(
         connection_ids=connection_ids,
         budget=budget if budget is not None else SeoBudget.for_run(),
         poll_interval=poll_interval,
-        model_name=model_name,
         on_step=on_step,
         **toolbox_options,
     )
@@ -183,7 +181,7 @@ async def test_schemas_for_records_the_agent_and_blocks_foreign_tools(tmp_path, 
     assert refused["status"] == "rejected"
     assert refused["error"] == NOT_ALLOWED
 
-    assert result(await env.toolbox.call("finish_run", {}, agent="report"))["error"] == NOT_ALLOWED
+    assert result(await env.toolbox.call("finish_run", {}, agent="checks"))["error"] == NOT_ALLOWED
     assert result(await env.toolbox.call("yandex_search", {"query": SEEDS[0]}, agent="site"))[
         "error"
     ] == NOT_ALLOWED
@@ -191,7 +189,7 @@ async def test_schemas_for_records_the_agent_and_blocks_foreign_tools(tmp_path, 
     assert env.gateway.submitted == []
     items = trace_items(env)
     assert [item["status"] for item in items] == ["rejected", "rejected", "rejected"]
-    assert [item["agent"] for item in items] == ["site", "report", "site"]
+    assert [item["agent"] for item in items] == ["site", "checks", "site"]
 
 
 @pytest.mark.anyio
@@ -201,7 +199,7 @@ async def test_unknown_tool_and_bad_arguments_are_safe_rejections(tmp_path, repo
     assert result(await env.toolbox.call("неизвестный", {}))["status"] == "rejected"
     assert result(await env.toolbox.call("fetch_site", {"url": "https://example.ru/"}))["status"] == "rejected"
     assert result(await env.toolbox.call("read_page", {"url": ""}))["status"] == "rejected"
-    assert result(await env.toolbox.call("save_report", {"summary": "только сводка"}))["status"] == "rejected"
+    assert result(await env.toolbox.call("save_queries", {"queries": query_objects()}))["status"] == "rejected"
 
     assert env.fetcher.hosts == []
     assert env.gateway.submitted == []
@@ -229,11 +227,10 @@ async def test_every_call_writes_one_short_trace_step_without_secrets(tmp_path, 
     env = make_env(tmp_path, repository, settings)
     await ready(env)
     assert result(await env.toolbox.call("yandex_search", {"query": SEEDS[0]}))["status"] == "found"
-    await env.toolbox.call("read_metrics", {})
 
     items = trace_items(env)
     assert [item["name"] for item in items] == [
-        "fetch_site", "save_site_facts", "save_queries", "yandex_search", "read_metrics",
+        "fetch_site", "save_site_facts", "save_queries", "yandex_search",
     ]
     assert all(item["step_index"] == index + 1 for index, item in enumerate(items))
     assert all(len(item["result_summary"] or "") <= 300 for item in items)
@@ -960,43 +957,6 @@ async def test_read_checks_counts_rows_and_reports_only_safe_errors(tmp_path, re
     assert "seo-operation" not in serialized
 
 
-@pytest.mark.anyio
-async def test_read_metrics_returns_only_server_aggregates(tmp_path, repository, settings):
-    env = make_env(tmp_path, repository, settings)
-    await ready(env)
-    await env.toolbox.call("search_many", {})
-    await env.toolbox.call("ask_models", {})
-
-    metrics = result(await env.toolbox.call("read_metrics", {}))
-
-    assert metrics["site"]["search"]["overall"]["denominator"] == 2
-    assert metrics["counts"]["queries"] == 2
-    serialized = json.dumps(metrics, ensure_ascii=False)
-    assert SEO_MENTION_ANSWER not in serialized
-    assert "https://example.ru/page" not in serialized
-
-
-@pytest.mark.anyio
-async def test_save_report_stores_the_model_text_beside_the_numbers(tmp_path, repository, settings):
-    env = make_env(tmp_path, repository, settings)
-    await ready(env)
-
-    saved = result(await env.toolbox.call(
-        "save_report", {"summary": "Сводка по числам", "recommendations": "Рекомендации модели"},
-    ))
-
-    assert saved["status"] == "saved"
-    conclusions = env.repository.conclusions(env.analysis_id)
-    assert conclusions["summary"] == "Сводка по числам"
-    assert conclusions["recommendations"] == "Рекомендации модели"
-    assert conclusions["model"] == "seo-model"
-    agents = env.repository.snapshot(env.analysis_id)["agents"]
-    assert next(agent for agent in agents if agent["agent"] == "report")["status"] == "done"
-    assert result(await env.toolbox.call(
-        "save_report", {"summary": "Ещё раз", "recommendations": "Ещё раз"},
-    ))["error"] == "Отчёт уже сохранён"
-
-
 # -- supervisor tools --------------------------------------------------------
 
 
@@ -1076,13 +1036,13 @@ async def test_read_status_reports_agents_budget_and_readiness(tmp_path, reposit
     status = result(await env.toolbox.call("read_status", {}, agent="supervisor"))
 
     assert {agent["agent"] for agent in status["agents"]} == {
-        "supervisor", "site", "competitors", "queries", "checks", "report",
+        "supervisor", "site", "competitors", "queries", "checks",
     }
     assert next(agent for agent in status["agents"] if agent["agent"] == "queries")["status"] == "done"
     assert status["budget"]["tool_calls"]["used"] == 4
     assert status["stored"] == {
         "pages": 1, "candidates": 0, "queries": 2, "search_rows": 0, "model_rows": 0,
-        "report_ready": False,
+        "data_ready": True,
     }
     assert status["exhausted"] is False
 
@@ -1135,8 +1095,8 @@ async def test_a_hostile_page_cannot_make_a_specialist_call_another_tool(tmp_pat
         ("site", "save_queries"),
         ("competitors", "save_site_facts"),
         ("queries", "yandex_search"),
-        ("checks", "save_report"),
-        ("report", "handoff_to"),
+        ("checks", "save_queries"),
+        ("queries", "handoff_to"),
     ):
         answer = result(await env.toolbox.call(name, {}, agent=agent))
         assert answer["status"] == "rejected"

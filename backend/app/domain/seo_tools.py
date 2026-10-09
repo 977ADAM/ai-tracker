@@ -55,8 +55,6 @@ MAX_COMPANY_NAME_LENGTH = 200
 MAX_REASON_LENGTH = 500
 MAX_NOTE_LENGTH = 300
 MAX_URL_ARGUMENT_LENGTH = 2048
-MAX_SUMMARY_LENGTH = 8000
-MAX_RECOMMENDATIONS_LENGTH = 8000
 MAX_CANDIDATE_ARGUMENTS = 40
 MAX_CONNECTION_ID_LENGTH = 100
 MAX_CATEGORY_ARGUMENT = 40
@@ -267,8 +265,6 @@ TOOL_DESCRIPTIONS: Mapping[str, str] = {
         f"оплачивается не больше {MAX_MODEL_ANSWERS} ответов: пары сверх лимита не оплачиваются."
     ),
     "read_checks": "Показать состояние поисковых и модельных проверок и безопасные тексты ошибок.",
-    "read_metrics": "Показать агрегированные числа, посчитанные сервером по сохранённым строкам.",
-    "save_report": "Сохранить сводку, выводы и рекомендации агента отчёта как текст модели.",
     "handoff_to": "Передать управление специалисту. Доступно только супервизору.",
     "finish_run": "Завершить прогон. Доступно только супервизору.",
     "read_status": "Показать состояния агентов, израсходованный бюджет и готовность данных.",
@@ -313,14 +309,8 @@ TOOL_ARGUMENTS: Mapping[str, tuple[ArgumentSpec, ...]] = {
              "Выбранные подключения моделей; без поля используются все подключения прогона."),
     ),
     "read_checks": (),
-    "read_metrics": (),
-    "save_report": (
-        _arg("summary", "text", MAX_SUMMARY_LENGTH, "Сводка по агрегированным числам.", required=True),
-        _arg("recommendations", "text", MAX_RECOMMENDATIONS_LENGTH,
-             "Выводы и рекомендации.", required=True),
-    ),
     "handoff_to": (
-        _arg("agent", "text", 32, "Имя специалиста: site, competitors, queries, checks, report.",
+        _arg("agent", "text", 32, "Имя специалиста: site, competitors, queries, checks.",
              required=True),
         _arg("reason", "optional_text", MAX_REASON_LENGTH, "Короткая причина передачи.", required=True),
     ),
@@ -334,7 +324,6 @@ SITE_TOOLS = ("fetch_site", "read_page", "save_site_facts")
 COMPETITOR_TOOLS = ("yandex_search", "list_seed_results", "save_candidates")
 QUERY_TOOLS = ("read_facts", "save_queries")
 CHECK_TOOLS = ("search_many", "ask_models", "read_checks")
-REPORT_TOOLS = ("read_metrics", "save_report")
 SUPERVISOR_TOOLS = ("handoff_to", "finish_run", "read_status")
 AGENT_TOOLS: Mapping[str, tuple[str, ...]] = {
     "supervisor": SUPERVISOR_TOOLS,
@@ -342,7 +331,6 @@ AGENT_TOOLS: Mapping[str, tuple[str, ...]] = {
     "competitors": COMPETITOR_TOOLS,
     "queries": QUERY_TOOLS,
     "checks": CHECK_TOOLS,
-    "report": REPORT_TOOLS,
 }
 
 
@@ -596,7 +584,6 @@ __all__ = [
     "MIN_GENERATED_QUERIES",
     "PAID_TOOLS",
     "QUERY_TOOLS",
-    "REPORT_TOOLS",
     "SEARCH_REGION",
     "SITE_FAILURE_LIMIT",
     "SITE_TOOLS",

@@ -6,7 +6,7 @@ import type {
   ChatProposal, ChatProposalStatus, ChatProposalUpdated, ChatSummary,
   SeoAggregates, SeoAgent, SeoAgentStatus, SeoAnalysisCreated, SeoAnalysisSnapshot, SeoAnalysisStatus,
   SeoBudgetItem, SeoBudgetView, SeoCategoryAggregates, SeoCandidate, SeoCompetitorAggregates,
-  SeoConclusions, SeoCounts, SeoEstimate, SeoHistoryPage, SeoMetric, SeoModelRow, SeoQuery,
+  SeoCounts, SeoEstimate, SeoHistoryPage, SeoMetric, SeoModelRow, SeoQuery,
   SeoQueryFlags, SeoReadiness, SeoRow, SeoRowsKind, SeoRowsPage, SeoRowStatus, SeoSearchMetrics,
   SeoSearchRow, SeoSettings, SeoSettingsTest, SeoSiteAggregates, SeoSiteAiBlock, SeoSiteAiMetrics,
   SeoSource, SeoStage, SeoStageStatus, SeoTracePage, SeoTraceStep
@@ -750,16 +750,6 @@ function seoBudget(value: unknown): SeoBudgetView {
   };
 }
 
-/** The report agent's block: only the labelled text and the model name. */
-function seoConclusions(value: unknown): SeoConclusions {
-  const item = record(value);
-  return {
-    summary: stringValue(item.summary),
-    recommendations: stringValue(item.recommendations),
-    model: stringValue(item.model)
-  };
-}
-
 /** One trace step: safe arguments and a short result, never a secret. */
 function seoTraceStep(value: unknown): SeoTraceStep {
   const item = record(value);
@@ -812,9 +802,6 @@ export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
     budget_exhausted: requiredBoolean(item.budget_exhausted),
     candidates: item.candidates.map(seoCandidate),
     queries: item.queries.map(seoQuery),
-    summary: optionalString(item.summary),
-    conclusions: item.conclusions === null || item.conclusions === undefined
-      ? null : seoConclusions(item.conclusions),
     counters: seoCounts(item.counters),
     readiness: seoReadiness(item.readiness),
     aggregates: seoAggregates(item.aggregates)

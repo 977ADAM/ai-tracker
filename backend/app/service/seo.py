@@ -30,6 +30,7 @@ from typing import Any
 from app.core.errors import AppError, ConfigurationError, RunConflict, StorageError
 from app.db.seo import ANALYSIS_TERMINAL, SeoRepository
 from app.domain.seo import GENERATED_QUERY_LIMIT, normalize_seo_request
+from app.domain.seo_answer import SeoConnectionSnapshot
 from app.domain.seo_llm import (
     LLM_NOT_CONFIGURED,
     AgentMessage,
@@ -103,13 +104,18 @@ class SeoService:
         await self._require_tool_support(model)
 
         connections = len(request.connection_ids)
+        snapshots = tuple(
+            SeoConnectionSnapshot(c.id, c.name, c.kind, c.endpoint or "", c.model, c.answer_mode, c.thinking_disabled)
+            for c in (self.connections.require(identifier) for identifier in request.connection_ids)
+        )
         estimate = {
             "search_upper": MAX_SEARCH_REQUESTS,
             "model_upper": MAX_MODEL_ANSWERS,
             "generated_limit": GENERATED_QUERY_LIMIT,
             "connections": connections,
+            "deepseek_search_upper": MAX_MODEL_ANSWERS if any(c.answer_mode == "deepseek_web" for c in snapshots) else 0,
         }
-        analysis_id = self.repository.create_analysis(request, estimate)
+        analysis_id = self.repository.create_analysis(request, estimate, connection_snapshots=snapshots)
         self._spawn(analysis_id, self.runtime.run(analysis_id, request))
         return {"id": analysis_id, "status": "running", "estimate": estimate}
 

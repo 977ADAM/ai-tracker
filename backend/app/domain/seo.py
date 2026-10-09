@@ -23,6 +23,7 @@ from app.domain.search import (
     TOP_RESULTS,
     result_url_host,
 )
+from app.domain.seo_answer import SeoAnswer
 from app.domain.seo_llm import parse_json_object
 from app.domain.site_fetch import canonical_host, same_site_host
 
@@ -42,19 +43,36 @@ CATEGORY_LABELS = {
 MAX_QUERY_LENGTH = 400
 MAX_QUERY_WORDS = 40
 
-# The six agents of the supervised run, in the order every read reports them.
-# This module is the single source of the vocabulary: `domain.seo_tools` and
-# `db.seo` import these names instead of repeating the tuple and the literal.
-AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
+# The five agents of the supervised run, in the order every read reports them.
+# There is no report agent: the numbers are computed by the server from the
+# stored rows, so the run ends on the supervisor's `finish_run` instead of a
+# model-written report. This module is the single source of the vocabulary:
+# `domain.seo_tools` and `db.seo` import these names instead of repeating the
+# tuple and the literal.
+AGENTS = ("supervisor", "site", "competitors", "queries", "checks")
 AGENT_LABELS: Mapping[str, str] = {
     "supervisor": "Супервизор",
     "site": "Агент сайта",
     "competitors": "Агент конкурентов",
     "queries": "Агент запросов",
     "checks": "Агент проверок",
-    "report": "Агент отчёта",
 }
 AgentStatus = Literal["pending", "running", "waiting", "done", "error", "skipped"]
+
+# The agent whose saved facts are the first half of the publishable minimum.
+SITE_AGENT = "site"
+
+
+def data_ready(agent_statuses: Mapping[str, str], queries_ready: bool) -> bool:
+    """Whether the run holds the minimum it publishes: site facts and queries.
+
+    The supervisor reads this flag from `read_status` and the runtime applies the
+    same rule in `_finalize`, so the model is told to finish exactly when the
+    server would publish the run: saved site facts plus at least one saved
+    generated query. A missing report agent cannot make a run unpublishable —
+    the numbers are computed from the stored rows.
+    """
+    return agent_statuses.get(SITE_AGENT) == "done" and queries_ready
 
 SEED_COUNT = 3
 MAX_SPHERE_LENGTH = 200
@@ -295,6 +313,7 @@ class ModelRowValue:
     name_mentioned: bool | None = None
     host_mentioned: bool | None = None
     error: str | None = None
+    seo_answer: SeoAnswer | None = None
 
 
 @dataclass(frozen=True)

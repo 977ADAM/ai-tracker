@@ -215,30 +215,6 @@
     <p role="alert" class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{error}</p>
   {/if}
 
-  {#if snapshot.summary}
-    <section class="mt-6 rounded-xl border border-line bg-accent-soft px-5 py-4" aria-labelledby="seo-summary-title">
-      <h3 id="seo-summary-title" class="text-base font-semibold text-ink">Текстовое резюме</h3>
-      <div class="prose prose-sm mt-2 max-w-none text-ink" data-report-summary>{@html markdownHtml(snapshot.summary ?? '')}</div>
-    </section>
-  {/if}
-
-  {#if snapshot.conclusions}
-    <section class="mt-6 rounded-xl border border-l-4 border-violet-200 bg-violet-50/70 px-5 py-4" aria-labelledby="seo-conclusions-title" data-report-conclusions>
-      <h3 id="seo-conclusions-title" class="text-base font-semibold text-ink">Выводы и рекомендации</h3>
-      <p class="mt-1 text-xs font-semibold tracking-wide text-violet-800 uppercase">
-        Текст модели{snapshot.conclusions.model ? `: ${snapshot.conclusions.model}` : ''}
-      </p>
-      <div class="prose prose-sm mt-3 max-w-none text-ink" data-conclusions-summary>{@html markdownHtml(snapshot.conclusions.summary)}</div>
-      {#if snapshot.conclusions.recommendations}
-        <h4 class="mt-4 text-sm font-semibold text-ink">Рекомендации</h4>
-        <div class="prose prose-sm mt-2 max-w-none text-ink" data-conclusions-recommendations>{@html markdownHtml(snapshot.conclusions.recommendations)}</div>
-      {/if}
-      <p class="mt-3 text-xs leading-5 text-muted">
-        Это текст языковой модели, а не расчёт. Он не заменяет и не изменяет числа отчёта.
-      </p>
-    </section>
-  {/if}
-
   <section class="mt-8" aria-labelledby="seo-site-title">
     <h3 id="seo-site-title" class="text-xl font-bold tracking-tight">Сайт в Яндексе</h3>
     <p class="mt-1 text-sm text-muted">Доля сгенерированных запросов, где сайт попал в первую десятку, и средняя позиция среди находок.</p>

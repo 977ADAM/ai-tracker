@@ -30,16 +30,15 @@ CARDS_IN_FEED = (
     "[data-chat-feed] :is([data-chat-message], [data-chat-proposal], [data-chat-run])"
 )
 
-# The six agents in their fixed supervisor-to-report order, with the labels the
-# run card renders.
-AGENT_IDS = ("supervisor", "site", "competitors", "queries", "checks", "report")
+# The five agents in their fixed supervisor-to-specialist order, with the
+# labels the run card renders.
+AGENT_IDS = ("supervisor", "site", "competitors", "queries", "checks")
 AGENT_LABELS = {
     "supervisor": "Супервизор",
     "site": "Агент сайта",
     "competitors": "Агент конкурентов",
     "queries": "Агент запросов",
     "checks": "Агент проверок",
-    "report": "Агент отчёта",
 }
 
 # The JS condition of `send`: the turn landed as a new card, or it failed into an
@@ -250,19 +249,6 @@ class SeoChatPage:
 
     def candidate(self, host: str) -> Locator:
         return self.page.locator(f"[data-candidate='{host}']")
-
-    @property
-    def conclusions(self) -> Locator:
-        """The report agent's text, shown apart from the server-computed numbers."""
-        return self.page.locator("[data-report-conclusions]").last
-
-    @property
-    def conclusions_summary(self) -> Locator:
-        return self.page.locator("[data-conclusions-summary]").last
-
-    @property
-    def conclusions_recommendations(self) -> Locator:
-        return self.page.locator("[data-conclusions-recommendations]").last
 
     @property
     def search_detail_rows(self) -> Locator:

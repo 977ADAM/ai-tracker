@@ -416,8 +416,8 @@ def test_flag_queries_marks_the_company_host_and_candidate_hosts():
     assert flagged[4].flags.branded is True
 
 
-def test_the_six_agents_and_their_russian_labels_are_fixed():
-    assert AGENTS == ("supervisor", "site", "competitors", "queries", "checks", "report")
+def test_the_five_agents_and_their_russian_labels_are_fixed():
+    assert AGENTS == ("supervisor", "site", "competitors", "queries", "checks")
     assert set(AGENT_LABELS) == set(AGENTS)
     assert AGENT_LABELS == {
         "supervisor": "Супервизор",
@@ -425,7 +425,6 @@ def test_the_six_agents_and_their_russian_labels_are_fixed():
         "competitors": "Агент конкурентов",
         "queries": "Агент запросов",
         "checks": "Агент проверок",
-        "report": "Агент отчёта",
     }
 
 

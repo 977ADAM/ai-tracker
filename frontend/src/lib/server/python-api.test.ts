@@ -517,9 +517,6 @@ describe('SEO BFF', () => {
     candidates: [{ host: 'rival.ru', title: 'Rival', occurrences: 2, average_position: 3.5, seed_indexes: [0, 1], recurring: true }],
     queries: [{ index: 0, text: 'букеты с доставкой', category: 'commercial', service: 'Букеты',
       flags: { mentions_company_name: false, mentions_company_host: false, mentions_candidate_host: false, branded: false } }],
-    summary: 'Итог',
-    conclusions: { summary: 'Выводы', recommendations: 'Рекомендации', model: 'seo-model',
-      created_at: '2026-09-28T10:20:00Z', operation_id: 'secret' },
     counters: { queries: 1, search_rows: 1, model_rows: 1, search_errors: 0, model_errors: 0 },
     readiness: { report_ready: true, summary_ready: true, queries_ready: true, has_submitted_search_rows: false,
       has_unsubmitted_search_rows: false, has_unfinished_model_rows: false, search_rows: 1, model_rows: 1 },
@@ -700,16 +697,11 @@ describe('SEO BFF', () => {
     expect(projected.budget.agent_steps.supervisor).toBe(4);
     expect(projected.budget).not.toHaveProperty('operation_id');
     expect(projected.budget_exhausted).toBe(true);
-    expect(projected.conclusions).toEqual({ summary: 'Выводы', recommendations: 'Рекомендации', model: 'seo-model' });
-    expect(projected.conclusions).not.toHaveProperty('operation_id');
     expect(projected.candidates[0]).toEqual({ host: 'rival.ru', title: 'Rival', occurrences: 2,
       average_position: 3.5, seed_indexes: [0, 1], recurring: true });
     expect(projected.aggregates.site.ai.p1.combined.share).toBe(0.5);
     expect(projected.aggregates.competitors[0].ai.p1.host.average_position).toBe(3.5);
     expect(projected.queries[0].flags.branded).toBe(false);
-    expect(projected.summary).toBe('Итог');
-    // An analysis without the report agent's block keeps it null, not invented.
-    expect(publicSeoSnapshot({ ...seoSnapshot, conclusions: null }).conclusions).toBeNull();
   });
 
   it('refuses a malformed snapshot instead of inventing values', () => {
@@ -725,7 +717,7 @@ describe('SEO BFF', () => {
     expect(() => publicSeoSnapshot({ ...seoSnapshot, budget: { ...seoSnapshot.budget, searches: { used: 5 } } })).toThrow();
     expect(() => publicSeoSnapshot({ ...seoSnapshot, budget: { ...seoSnapshot.budget, agent_steps: { supervisor: 'many' } } })).toThrow();
     expect(() => publicSeoSnapshot({ ...seoSnapshot, budget_exhausted: 'yes' })).toThrow();
-    expect(() => publicSeoSnapshot({ ...seoSnapshot, conclusions: { summary: 'a', model: 'm' } })).toThrow();
+    expect(() => publicSeoSnapshot({ ...seoSnapshot, conclusions: { summary: 'a', model: 'm' } })).not.toThrow();
   });
 
   it('projects history items and pagination cursors', () => {

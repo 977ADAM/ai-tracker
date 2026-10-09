@@ -41,9 +41,8 @@ corresponding flag. Candidate metrics are computed by host: hits come from
 `candidate_hits` (query index to top-ten hits) and candidate AI mentions are
 re-matched in the saved answer text, never on the SERP title.
 
-`report_payload` wraps that computed mapping for an agentic run: it copies
-every aggregate unchanged and adds the optional model `conclusions` block, so
-the report agent can never move a number.
+The report is numbers-only: every aggregate here is computed by the server from
+the stored rows, and no model-written text is attached to it.
 """
 
 from __future__ import annotations
@@ -64,6 +63,8 @@ from app.domain.seo import (
     hosts_match,
     mentions_host,
 )
+from app.domain.seo_answer import normalize_source_url
+from app.domain.site_fetch import canonical_host, same_site_host
 
 FINITE_OUTCOMES = frozenset({"found", "absent"})
 ERROR_OUTCOMES = frozenset({"error", "interrupted", "cancelled"})
@@ -126,7 +127,7 @@ def build_report(
             ),
         },
         "ai": {
-            connection_id: _site_ai_block(connection_id, models, branded_indexes, known_indexes)
+            connection_id: _site_ai_block(connection_id, models, branded_indexes, known_indexes, input.host)
             for connection_id in connections
         },
     }
@@ -141,6 +142,7 @@ def build_report(
     for category in QUERY_CATEGORIES:
         indexes = {index for index, query in enumerate(query_list) if query.category == category}
         categories[category] = {
+            "citation": {connection_id: _citation_metric((row for row in models if row.query_index in indexes), connection_id, input.host) for connection_id in connections},
             "search": _search_metric(row for row in searches if row.query_index in indexes),
             "ai": {
                 connection_id: _ai_metric(
@@ -156,6 +158,7 @@ def build_report(
     for service in _service_keys(services, query_list):
         indexes = {index for index, query in enumerate(query_list) if (query.service or "") == service}
         services_block[service] = {
+            "citation": {connection_id: _citation_metric((row for row in models if row.query_index in indexes), connection_id, input.host) for connection_id in connections},
             "search": _search_metric(row for row in searches if row.query_index in indexes),
             "ai": {
                 connection_id: _ai_metric(
@@ -180,31 +183,6 @@ def build_report(
             "model_errors": sum(1 for row in models if row.status in ERROR_OUTCOMES),
         },
     }
-
-
-def report_payload(
-    metrics: Mapping[str, object],
-    *,
-    conclusions: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Copy the computed metrics and attach the optional conclusions block.
-
-    Every aggregate key is copied unchanged, one level deep: this function
-    never reads or rewrites a metric, so a missing, empty, or nonsense
-    conclusions block cannot change a number. The block itself is kept as a
-    plain `dict` only when it is a non-empty mapping; otherwise it is `None`
-    and the report shows no model text.
-    """
-    payload: dict[str, object] = dict(metrics)
-    payload["conclusions"] = _conclusions_block(conclusions)
-    return payload
-
-
-def _conclusions_block(conclusions: object) -> dict[str, object] | None:
-    """Return the model conclusions as a plain dict, or `None` when unusable."""
-    if not isinstance(conclusions, Mapping) or not conclusions:
-        return None
-    return {key: value for key, value in conclusions.items()}
 
 
 def _search_metric(rows: Iterable[SearchRowValue]) -> Metric:
@@ -250,6 +228,7 @@ def _site_ai_block(
     models: Sequence[ModelRowValue],
     branded_indexes: set[int],
     known_indexes: set[int],
+    host: str,
 ) -> dict[str, object]:
     """Name, host, and combined AI shares of one connection plus both splits."""
     rows = [row for row in models if row.connection_id == connection_id]
@@ -263,16 +242,18 @@ def _site_ai_block(
         NAME: _ai_metric(rows, connection_id, NAME),
         HOST: _ai_metric(rows, connection_id, HOST),
         COMBINED: _ai_metric(rows, connection_id, COMBINED),
-        "branded": _ai_group(branded, connection_id),
-        "unbranded": _ai_group(unbranded, connection_id),
+        "citation": _citation_metric(rows, connection_id, host),
+        "branded": _ai_group(branded, connection_id, host),
+        "unbranded": _ai_group(unbranded, connection_id, host),
     }
 
 
-def _ai_group(rows: Sequence[ModelRowValue], connection_id: str) -> dict[str, Metric]:
+def _ai_group(rows: Sequence[ModelRowValue], connection_id: str, host: str) -> dict[str, Metric]:
     return {
         NAME: _ai_metric(rows, connection_id, NAME),
         HOST: _ai_metric(rows, connection_id, HOST),
         COMBINED: _ai_metric(rows, connection_id, COMBINED),
+        "citation": _citation_metric(rows, connection_id, host),
     }
 
 
@@ -339,7 +320,8 @@ def _competitor_block(
             ),
         },
         "ai": {
-            connection_id: {"host": _candidate_ai_metric(models, connection_id, candidate.host)}
+            connection_id: {"host": _candidate_ai_metric(models, connection_id, candidate.host),
+                            "citation": _citation_metric(models, connection_id, candidate.host)}
             for connection_id in connections
         },
     }
@@ -348,6 +330,25 @@ def _competitor_block(
 def _answered(row: ModelRowValue) -> bool:
     """An empty or missing answer is never a mention."""
     return isinstance(row.answer, str) and bool(row.answer.strip())
+
+
+def _citation_metric(rows: Iterable[ModelRowValue], connection_id: str, host: str) -> Metric:
+    finite = [row for row in rows if row.connection_id == connection_id and row.status in FINITE_OUTCOMES
+              and row.seo_answer is not None and row.seo_answer.search_status == "completed"]
+    positions: list[int] = []
+    for row in finite:
+        domains: list[str] = []
+        for citation in row.seo_answer.citations:
+            if normalize_source_url(citation.url) is None:
+                continue
+            domain = canonical_host(citation.url)
+            # Count the target and its subdomains as one site in the ordering.
+            domain = host if same_site_host(host, domain) else domain
+            if domain not in domains:
+                domains.append(domain)
+        if host in domains:
+            positions.append(domains.index(host) + 1)
+    return _metric(len(finite), len(positions), positions)
 
 
 def _flagged(row: ModelRowValue, kind: str) -> bool:

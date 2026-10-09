@@ -13,7 +13,6 @@ from app.domain.seo_prompts import (
     check_agent_prompt,
     competitor_agent_prompt,
     query_agent_prompt,
-    report_agent_prompt,
     site_agent_prompt,
     supervisor_prompt,
 )
@@ -72,12 +71,10 @@ def agent_prompt(agent: str) -> tuple[str, str]:
     data = hostile_input()
     if agent == "supervisor":
         return supervisor_prompt(data, BUDGET_STATE, AGENT_STATE)
-    if agent == "report":
-        return report_agent_prompt({"site": {}, "counts": {"queries": 3}})
     return specialist_prompt(agent, data)
 
 
-ALL_AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
+ALL_AGENTS = ("supervisor", "site", "competitors", "queries", "checks")
 
 
 @pytest.mark.parametrize("agent", ALL_AGENTS)
@@ -159,19 +156,3 @@ def test_check_agent_prompt_states_the_region_pool_and_the_one_time_pairs():
     assert str(GENERATED_QUERY_LIMIT) in system
     assert "один раз" in system
     assert "Готовность" in system
-
-
-def test_report_agent_prompt_carries_only_aggregates_in_the_user_message():
-    metrics: dict[str, object] = {
-        "site": {"search": {"overall": {"denominator": 3, "successes": 1, "share": 0.3333}}},
-        "counts": {"queries": 20, "search_errors": 1},
-    }
-    system, user = report_agent_prompt(metrics)
-    assert "0.3333" in user
-    assert "site" in user
-    assert "search_errors" in user
-    assert "0.3333" not in system
-    assert "counts" not in system
-    assert "не пересчитывай" in system.lower() or "не изменяй" in system.lower()
-    assert "Готовность" in system
-    assert PAGE_MARKER not in system

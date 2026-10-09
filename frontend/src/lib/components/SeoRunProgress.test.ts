@@ -36,7 +36,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     estimate: { search_upper: 23, model_upper: 40, generated_limit: 20, connections: 2 },
     company_name: 'Ромашка', services: ['с'], pages: [],
     stages: [stage(1, 'done'), stage(2, 'error', 'Ключевые выдачи недоступны'), stage(3, 'running')],
-    candidates: [], queries: [], summary: null,
+    candidates: [], queries: [],
     counters: { queries: 12, search_rows: 4, model_rows: 6, search_errors: 1, model_errors: 2 },
     readiness: {
       report_ready: false, summary_ready: false, queries_ready: true, has_submitted_search_rows: true,

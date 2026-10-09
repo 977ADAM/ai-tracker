@@ -17,8 +17,8 @@ const fetchStep: SeoTraceStep = {
 };
 
 const modelStep: SeoTraceStep = {
-  step_index: 3, agent: 'report', kind: 'model', name: 'save_report',
-  arguments: {}, result_summary: '{"saved":true}', status: 'running',
+  step_index: 3, agent: 'checks', kind: 'model', name: 'checks',
+  arguments: {}, result_summary: '{"status":"done"}', status: 'running',
   error: null, created_at: '2026-09-28T10:03:00Z'
 };
 

@@ -45,7 +45,7 @@ ESTIMATE = {"search_upper": 5, "model_upper": 5, "generated_limit": 2, "connecti
 SNAPSHOT_FIELDS = {
     "id", "status", "created_at", "updated_at", "finished_at", "input", "estimate",
     "company_name", "services", "pages", "stages", "agents", "budget", "budget_exhausted",
-    "candidates", "queries", "summary", "conclusions", "counters", "readiness", "aggregates",
+    "candidates", "queries", "summary", "counters", "readiness", "aggregates",
 }
 COUNTERS = {
     "queries": 0, "search_rows": 0, "model_rows": 0, "search_errors": 0, "model_errors": 0,

@@ -36,7 +36,7 @@
 </script>
 
 <aside
-  class="rounded-3xl border border-line bg-white px-4 py-5 shadow-sm sm:px-5"
+  class="rounded-3xl border border-line bg-white px-3 py-4 shadow-sm sm:px-5"
   aria-labelledby="chat-sidebar-title"
 >
   <div class="flex flex-wrap items-center justify-between gap-3">

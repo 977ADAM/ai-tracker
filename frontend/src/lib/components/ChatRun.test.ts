@@ -25,7 +25,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     company_name: 'Ромашка', services: ['Сборка букетов'], pages: [],
     stages: [stage(1, 'done'), stage(2, 'running')],
     agents: legacyAgents,
-    candidates: [], queries: [], summary: null, conclusions: null,
+    candidates: [], queries: [],
     counters: { queries: 12, search_rows: 4, model_rows: 6, search_errors: 1, model_errors: 2 },
     readiness: {
       report_ready: false, summary_ready: false, queries_ready: true, has_submitted_search_rows: true,

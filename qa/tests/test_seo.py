@@ -20,7 +20,6 @@ import json
 from playwright.sync_api import Page, Route, expect
 
 from app import Application
-from pages.fake_api import CONCLUSIONS_SUMMARY, CONCLUSIONS_MODEL
 from pages.seo import SeoChatPage
 
 DESCRIPTION = (
@@ -68,9 +67,7 @@ def test_dialogue_reaches_a_report(page: Page, api) -> None:
     expect(chat.report()).to_be_visible()
     expect(chat.report_status).to_have_text("Завершён")
     assert chat.metric_text("site-overall") == "50 %"
-    expect(chat.conclusions).to_contain_text("Текст модели")
-    expect(chat.conclusions).to_contain_text(CONCLUSIONS_MODEL)
-    expect(chat.conclusions_summary).to_have_text(CONCLUSIONS_SUMMARY)
+    expect(page.locator("[data-report-conclusions]")).to_have_count(0)
 
 
 def test_confirm_without_a_proposal_is_explained(page: Page, api) -> None:

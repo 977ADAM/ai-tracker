@@ -76,7 +76,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
     stages: [stage(1, 'running')],
     agents: ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report']
       .map((agent) => ({ agent, status: 'pending' as const, error: null, updated_at: null })),
-    candidates: [], queries: [], summary: null, conclusions: null,
+    candidates: [], queries: [],
     counters: { queries: 12, search_rows: 4, model_rows: 6, search_errors: 1, model_errors: 2 },
     readiness: {
       report_ready: false, summary_ready: false, queries_ready: true, has_submitted_search_rows: true,

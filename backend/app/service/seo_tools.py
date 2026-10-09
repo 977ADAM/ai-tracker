@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 from app.core.errors import AppError, ProviderError, StorageError, ValidationError
 from app.db.seo import SeoRepository
 from app.domain.matching import mentions_phrase, normalize_text
+from app.domain.models import Connection
 from app.domain.providers import AnswerProvider, ProviderFactory
 from app.domain.search import (
     TOP_RESULTS,
@@ -41,11 +42,13 @@ from app.domain.seo import (
     SeedResult,
     SeoInput,
     accept_generated_queries,
+    data_ready,
     flag_queries,
     mentions_host,
     merge_services,
     rank_candidates,
 )
+from app.domain.seo_answer import SeoAnswer, SeoAnswerProvider, SeoConnectionSnapshot
 from app.domain.seo_llm import ToolSchema
 from app.domain.seo_tools import (
     AGENT_TOOLS,
@@ -98,7 +101,6 @@ TRACE_RESULT_CHARS = 300
 TRACE_LIST_ITEMS = 5
 ROWS_PAGE_SIZE = 100
 MAX_REPORTED_ERRORS = 20
-DEFAULT_REPORT_MODEL = "seo-llm"
 
 STATUS_PENDING = "waiting"
 STATUS_FOUND = "found"
@@ -131,7 +133,6 @@ SITE_FACTS_FIRST = "Сначала сохраните сведения о сай
 FACTS_ALREADY = "Сведения о сайте уже сохранены"
 CANDIDATES_ALREADY = "Кандидаты уже сохранены"
 QUERIES_ALREADY = "Сгенерированные запросы уже сохранены"
-REPORT_ALREADY = "Отчёт уже сохранён"
 SEEDS_FIRST = "Сначала получите выдачи по ключевым запросам"
 QUERIES_FIRST = "Сначала сохраните сгенерированные запросы"
 NOT_STORED_QUERY = "Запрос не сохранён в этом анализе"
@@ -162,18 +163,20 @@ class SeoToolbox:
         submit_search: Callable[[str], Awaitable[str]] | None = None,
         poll_search: Callable[[str], Awaitable[tuple[SearchDocument, ...] | None]] | None = None,
         on_step: Callable[[int, str, str], None] | None = None,
-        model_name: str = "",
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         max_poll_interval: float = MAX_POLL_INTERVAL,
         max_search_concurrency: int = MAX_SEARCH_CONCURRENCY,
         max_model_concurrency: int = MAX_MODEL_CONCURRENCY,
         should_stop: Callable[[], bool] | None = None,
+        seo_answer_factory: Callable[[SeoConnectionSnapshot, str], SeoAnswerProvider] | None = None,
     ) -> None:
         self.repository = repository
         self.fetcher = fetcher
         self.gateway = gateway
         self.connections = connections
         self.provider_factory = provider_factory
+        self.seo_answer_factory = seo_answer_factory
+        self._model_snapshots: dict[str, SeoConnectionSnapshot] = {}
         self.submit_search = submit_search
         self.poll_search = poll_search
         self.analysis_id = analysis_id
@@ -184,7 +187,6 @@ class SeoToolbox:
         # The run's own cancellation probe: the runtime sets it after building
         # the toolbox, so a cancelled analysis stops before the next paid call.
         self.should_stop = should_stop
-        self.model_name = model_name or DEFAULT_REPORT_MODEL
         self.poll_interval = poll_interval
         self.max_poll_interval = max_poll_interval
 
@@ -215,7 +217,6 @@ class SeoToolbox:
         self._site_facts_saved = False
         self._candidates_saved = False
         self._queries_saved = False
-        self._report_saved = False
 
     # -- public API ------------------------------------------------------
 
@@ -708,30 +709,6 @@ class SeoToolbox:
             "errors": errors[:MAX_REPORTED_ERRORS],
         }
 
-    async def _tool_read_metrics(self, args: Mapping[str, object]) -> dict:
-        # The report agent receives only server-computed aggregates: model text
-        # can never change a number.
-        return self.repository.snapshot(self.analysis_id)["aggregates"]
-
-    async def _tool_save_report(self, args: Mapping[str, object]) -> dict:
-        if self._report_saved or self._agent_status("report") == "done":
-            raise ToolRejected(REPORT_ALREADY)
-        summary = str(args["summary"])
-        recommendations = str(args["recommendations"])
-        self.repository.save_conclusions(
-            self.analysis_id,
-            summary=summary,
-            recommendations=recommendations,
-            model=self.model_name,
-        )
-        self.repository.upsert_agent(self.analysis_id, "report", "done")
-        self._report_saved = True
-        return {
-            "status": "saved",
-            "summary_chars": len(summary),
-            "recommendations_chars": len(recommendations),
-        }
-
     # -- supervisor tools ------------------------------------------------
 
     async def _tool_handoff_to(self, args: Mapping[str, object]) -> dict:
@@ -774,7 +751,10 @@ class SeoToolbox:
                 "queries": len(snapshot["queries"]),
                 "search_rows": snapshot["counters"]["search_rows"],
                 "model_rows": snapshot["counters"]["model_rows"],
-                "report_ready": snapshot["readiness"]["report_ready"],
+                "data_ready": data_ready(
+                    {agent["agent"]: agent["status"] for agent in snapshot["agents"]},
+                    bool(snapshot["readiness"]["queries_ready"]),
+                ),
             },
             "finished": self.finished,
             "finish_reason": self.finish_reason,
@@ -1028,22 +1008,29 @@ class SeoToolbox:
         provider, setup_error, provider_name = prepared
         answer, error = await self._ask(provider, setup_error, str(target["text"]))
         if error is not None:
+            selected = self._model_snapshots.get(connection_id)
+            evidence = (
+                SeoAnswer("", "deepseek_web", "error", (), (), selected.model, None)
+                if selected is not None and selected.answer_mode == "deepseek_web" else None
+            )
             self.repository.save_model_row(
                 self.analysis_id, connection_id, provider_name, query_index,
-                status=STATUS_ERROR, error=error,
+                status=STATUS_ERROR, error=error, seo_answer=evidence,
             )
             self._remember_pair(connection_id, query_index)
             return {
                 "connection_id": connection_id, "outcome": OUTCOME_ERROR,
                 "query": target["text"], "error": error,
             }
-        name_mentioned = mentions_phrase(answer or "", self._company_name())
-        host_mentioned = mentions_host(answer or "", self.input.host)
+        text = answer.text if isinstance(answer, SeoAnswer) else answer or ""
+        name_mentioned = mentions_phrase(text, self._company_name())
+        host_mentioned = mentions_host(text, self.input.host)
         found = name_mentioned or host_mentioned
         self.repository.save_model_row(
             self.analysis_id, connection_id, provider_name, query_index,
             status=STATUS_FOUND if found else STATUS_ABSENT,
-            answer=answer,
+            answer=text,
+            seo_answer=answer if isinstance(answer, SeoAnswer) else None,
             name_mentioned=name_mentioned,
             host_mentioned=host_mentioned,
         )
@@ -1057,8 +1044,18 @@ class SeoToolbox:
 
     def _prepare_provider(self, connection_id: str) -> tuple[AnswerProvider | None, str | None, str]:
         """Build one adapter, or the safe message every row of it will report."""
+        snapshots = {c.connection_id: c for c in self.repository.connection_snapshots(self.analysis_id)}
         try:
-            connection = self.connections.require(connection_id)
+            frozen = snapshots.get(connection_id)
+            if frozen is None:
+                connection = replace(self.connections.require(connection_id), answer_mode="text")
+                frozen = SeoConnectionSnapshot(connection.id, connection.name, connection.kind, connection.endpoint or "",
+                                                connection.model, "text", connection.thinking_disabled)
+            else:
+                connection = Connection(frozen.connection_id, frozen.name, frozen.kind, frozen.model,
+                                        endpoint=frozen.endpoint, thinking_disabled=frozen.thinking_disabled,
+                                        answer_mode=frozen.answer_mode)
+            self._model_snapshots[connection_id] = frozen
         except AppError as exc:
             return None, str(exc), connection_id
         except Exception:  # noqa: BLE001 - a broken connection affects one group only
@@ -1068,7 +1065,8 @@ class SeoToolbox:
             key = self.connections.api_key(connection_id)
             if not key:
                 return None, MISSING_KEY_MESSAGE, name
-            return self.provider_factory(connection, key), None, name
+            provider = self.seo_answer_factory(frozen, key) if self.seo_answer_factory else self.provider_factory(connection, key)
+            return provider, None, name
         except AppError as exc:
             return None, str(exc), name
         except Exception:  # noqa: BLE001 - a broken adapter affects one group only
@@ -1077,7 +1075,7 @@ class SeoToolbox:
     @staticmethod
     async def _ask(
         provider: AnswerProvider | None, setup_error: str | None, prompt: str,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | SeoAnswer | None, str | None]:
         if provider is None or setup_error is not None:
             return None, setup_error or SETUP_FAILURE_MESSAGE
         try:
@@ -1086,6 +1084,10 @@ class SeoToolbox:
             return None, str(exc)
         except Exception:  # noqa: BLE001 - a broken adapter is a failed row, not a crash
             return None, CALL_FAILURE_MESSAGE
+        if isinstance(answer, SeoAnswer):
+            if not answer.text.strip() or answer.search_status == "error":
+                return None, CALL_FAILURE_MESSAGE
+            return answer, None
         if not isinstance(answer, str) or not answer.strip():
             return None, CALL_FAILURE_MESSAGE
         return answer, None

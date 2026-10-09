@@ -26,7 +26,7 @@ from app.domain.seo import (
 )
 
 DB_FILE = "runs.sqlite3"
-AGENTS = ("supervisor", "site", "competitors", "queries", "checks", "report")
+AGENTS = ("supervisor", "site", "competitors", "queries", "checks")
 LEGACY_TABLES = {"runs", "model_rows", "search_rows"}
 SEO_TABLES = {
     "seo_analyses",
@@ -41,9 +41,8 @@ SEO_TABLES = {
     "seo_seed_rows",
     "seo_agents",
     "seo_agent_steps",
-    "seo_conclusions",
 }
-AGENT_TABLES = {"seo_agents", "seo_agent_steps", "seo_conclusions"}
+AGENT_TABLES = {"seo_agents", "seo_agent_steps"}
 # The tool-layer tables of Task 2: they are new beside the revision-1 tables and
 # a migrated version-3 file gains them empty.
 DOCUMENT_TABLES = {"seo_search_documents"}
@@ -416,7 +415,6 @@ def test_migration_from_a_populated_version_three_database_keeps_every_row(tmp_p
     assert {agent["status"] for agent in snapshot["agents"]} == {"pending"}
     assert snapshot["budget"]["pages"] == 2
     assert snapshot["budget"]["searches"] == 1
-    assert snapshot["conclusions"] is None
     # The same file still opens as plain run history.
     runs = RunRepository(tmp_path)
     runs.initialize()
@@ -1013,11 +1011,8 @@ def test_delete_removes_only_terminal_analyses(tmp_path):
     repository.replace_candidates(finished, CANDIDATES)
     repository.save_candidate_hits(finished, 0, (CandidateHit("rival.ru", 2, None),))
     repository.save_model_row(finished, "chatgpt", "ChatGPT", 0, status="found", answer="да")
-    repository.upsert_agent(finished, "report", "done")
-    repository.append_step(finished, "report", "model", "turn")
-    repository.save_conclusions(
-        finished, summary="Итог", recommendations="Рекомендации", model="gpt-test",
-    )
+    repository.upsert_agent(finished, "checks", "done")
+    repository.append_step(finished, "checks", "model", "turn")
     repository.finish_analysis(finished)
 
     repository.delete(finished)
@@ -1133,7 +1128,7 @@ def test_two_instances_write_hundreds_of_rows_without_locking(tmp_path):
     }
 
 
-# -- step 3: agents, trace, conclusions, and budget --------------------------
+# -- step 3: agents, trace, and budget ---------------------------------------
 
 
 TRACE_FIELDS = {
@@ -1142,7 +1137,7 @@ TRACE_FIELDS = {
 }
 
 
-def test_create_analysis_seeds_six_pending_agents(tmp_path):
+def test_create_analysis_seeds_five_pending_agents(tmp_path):
     repository = seo_repo(tmp_path)
     analysis_id = create(repository)
 
@@ -1174,7 +1169,7 @@ def test_agent_upsert_validates_the_name_and_the_status(tmp_path):
     agents = {agent["agent"]: agent for agent in repository.agents(analysis_id)}
     assert agents["site"]["status"] == "done"
     assert agents["site"]["error"] is None
-    # The default rows survive a reopen: a fresh repository reads the same six agents.
+    # The default rows survive a reopen: a fresh repository reads the same five agents.
     assert [agent["agent"] for agent in seo_repo(tmp_path).agents(analysis_id)] == list(AGENTS)
 
     with pytest.raises(ValidationError):
@@ -1228,7 +1223,7 @@ def test_steps_are_ordered_monotonic_and_paged_by_cursor(tmp_path):
     assert third["next_cursor"] is None
 
     # A restarted repository keeps numbering the same trace.
-    assert seo_repo(tmp_path).append_step(analysis_id, "report", "model", "turn") == 6
+    assert seo_repo(tmp_path).append_step(analysis_id, "checks", "model", "turn") == 6
     assert [item["step_index"] for item in repository.trace_page(analysis_id)["items"]] == [1, 2, 3, 4, 5, 6]
     assert repository.trace_page(analysis_id, limit=100)["next_cursor"] is None
 
@@ -1288,40 +1283,6 @@ def test_step_indexes_stay_monotonic_under_concurrent_appends(tmp_path):
     assert [item["step_index"] for item in page["items"]] == returned
 
 
-def test_conclusions_round_trip_and_replace(tmp_path):
-    repository = seo_repo(tmp_path)
-    analysis_id = create(repository)
-
-    assert repository.conclusions(analysis_id) is None
-
-    repository.save_conclusions(
-        analysis_id, summary="Итог", recommendations="Рекомендации", model="gpt-test",
-    )
-    saved = repository.conclusions(analysis_id)
-    assert saved is not None
-    assert saved["summary"] == "Итог"
-    assert saved["recommendations"] == "Рекомендации"
-    assert saved["model"] == "gpt-test"
-    assert isinstance(saved["created_at"], str)
-    assert set(saved) == {"summary", "recommendations", "model", "created_at"}
-
-    repository.save_conclusions(
-        analysis_id, summary="Новый итог", recommendations="Новые рекомендации", model="gpt-test-2",
-    )
-    assert repository.conclusions(analysis_id)["summary"] == "Новый итог"
-    assert repository.conclusions(analysis_id)["model"] == "gpt-test-2"
-    assert len(seo_repo(tmp_path).conclusions(analysis_id) or {}) == 4
-
-    with pytest.raises(ValidationError):
-        repository.save_conclusions(analysis_id, summary=42, recommendations="r", model="m")  # type: ignore[arg-type]
-    with pytest.raises(ValidationError):
-        repository.save_conclusions(analysis_id, summary="s", recommendations="r", model="")
-    with pytest.raises(RunNotFound):
-        repository.save_conclusions("нет такого", summary="s", recommendations="r", model="m")
-    with pytest.raises(RunNotFound):
-        repository.conclusions("нет такого")
-
-
 def test_budget_state_counts_every_saved_row(tmp_path):
     repository = seo_repo(tmp_path)
     analysis_id = create(repository)
@@ -1352,7 +1313,7 @@ def test_budget_state_counts_every_saved_row(tmp_path):
         "pages": 2, "searches": 2, "seed_searches": 1, "model_rows": 2, "steps": 4,
         "tool_calls": 2, "handoffs": 1,
         "agent_steps": {
-            "supervisor": 1, "site": 2, "competitors": 0, "queries": 0, "checks": 1, "report": 0,
+            "supervisor": 1, "site": 2, "competitors": 0, "queries": 0, "checks": 1,
         },
     }
     assert seo_repo(tmp_path).budget_state(analysis_id) == budget
@@ -1360,7 +1321,7 @@ def test_budget_state_counts_every_saved_row(tmp_path):
         repository.budget_state("нет такого анализа")
 
 
-def test_snapshot_exposes_agents_budget_and_conclusions_without_answers(tmp_path):
+def test_snapshot_exposes_agents_budget_and_numbers_without_answers(tmp_path):
     repository = seo_repo(tmp_path)
     analysis_id = create(repository)
     repository.replace_queries(analysis_id, [query("запрос", 0)])
@@ -1371,9 +1332,6 @@ def test_snapshot_exposes_agents_budget_and_conclusions_without_answers(tmp_path
     )
     repository.append_step(analysis_id, "site", "tool", "fetch_site", status="error",
                            error="Лимит прогона исчерпан")
-    repository.save_conclusions(
-        analysis_id, summary="Итог модели", recommendations="Рекомендации модели", model="gpt-test",
-    )
     repository.save_search_row(
         analysis_id, 0, status="found", operation_id="op-private-1", site_position=2,
         site_url="https://example.ru/",
@@ -1386,19 +1344,17 @@ def test_snapshot_exposes_agents_budget_and_conclusions_without_answers(tmp_path
     snapshot = repository.snapshot(analysis_id)
 
     assert set(snapshot) >= {
-        "stages", "counters", "readiness", "aggregates", "agents", "budget", "conclusions",
+        "stages", "counters", "readiness", "aggregates", "agents", "budget",
     }
     assert [(agent["agent"], agent["status"]) for agent in snapshot["agents"]] == [
         ("supervisor", "pending"), ("site", "error"), ("competitors", "pending"),
-        ("queries", "pending"), ("checks", "pending"), ("report", "pending"),
+        ("queries", "pending"), ("checks", "pending"),
     ]
     assert snapshot["agents"][1]["error"] == "Сбой обхода"
     assert snapshot["budget"]["steps"] == 2
     assert snapshot["budget"]["searches"] == 1
     assert snapshot["budget"]["tool_calls"] == 2
     assert snapshot["budget"]["agent_steps"]["site"] == 2
-    assert snapshot["conclusions"]["summary"] == "Итог модели"
-    assert snapshot["conclusions"]["model"] == "gpt-test"
     # Answers and operation IDs stay inside the database, agents and budget included.
     payload = json.dumps(snapshot, ensure_ascii=False)
     assert "секретный ответ модели" not in payload

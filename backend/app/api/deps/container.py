@@ -29,10 +29,12 @@ from app.db.seo_settings import SeoSettingsRepository
 from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
 from app.domain.seo import SeoInput
+from app.domain.seo_answer import SeoAnswerProvider, SeoConnectionSnapshot
 from app.domain.seo_llm import AgentModel
 from app.domain.seo_tools import SeoBudget
 from app.domain.site_fetch import SiteFetcher
 from app.integrations.factory import build_provider
+from app.integrations.seo_answer import build_seo_answer_provider
 from app.integrations.site_fetcher import HttpxSiteFetcher
 from app.service.chat import ChatService
 from app.service.checks import CheckService
@@ -80,14 +82,13 @@ def make_seo_toolbox_factory(
     search_settings: SearchSettingsService,
     connections: ConnectionService,
     provider_factory: ProviderFactory,
-    seo_settings: SeoSettingsService,
+    seo_answer_factory: Callable[[SeoConnectionSnapshot, str], SeoAnswerProvider] | None = None,
 ) -> Callable[[str, SeoInput, SeoBudget], SeoToolbox]:
     """Return the factory of one run's toolbox, over settings read at run start.
 
-    The gateway and the model name are resolved when a run begins, not at
-    container build, so a settings change reaches the next run; the repository,
-    the fetcher, the connections, and the provider factory are the app's own
-    shared collaborators.
+    The gateway is resolved when a run begins, not at container build, so a
+    settings change reaches the next run; the repository, the fetcher, the
+    connections, and the provider factory are the app's own shared collaborators.
     """
 
     def build(analysis_id: str, run_input: SeoInput, budget: SeoBudget) -> SeoToolbox:
@@ -101,7 +102,7 @@ def make_seo_toolbox_factory(
             input=run_input,
             connection_ids=run_input.connection_ids,
             budget=budget,
-            model_name=str(seo_settings.public()["model"] or ""),
+            seo_answer_factory=seo_answer_factory,
         )
 
     return build
@@ -184,7 +185,8 @@ def build_container(
 
     resolved_fetcher = fetcher if fetcher is not None else HttpxSiteFetcher(search_client)
     toolbox_factory = seo_toolbox_factory or make_seo_toolbox_factory(
-        seo_repository, resolved_fetcher, search_settings, connections, factory, seo_settings_service,
+        seo_repository, resolved_fetcher, search_settings, connections, factory,
+        lambda snapshot, key: build_seo_answer_provider(snapshot, key, settings, text_factory=factory),
     )
 
     if seo_agent_runtime is None:

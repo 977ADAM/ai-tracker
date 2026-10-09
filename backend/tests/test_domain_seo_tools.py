@@ -27,7 +27,6 @@ from app.domain.seo_tools import (
     MAX_SUPERVISOR_HANDOFFS,
     MAX_TOOL_CALLS,
     QUERY_TOOLS,
-    REPORT_TOOLS,
     SEARCH_REGION,
     SITE_TOOLS,
     SPECIALIST_AGENTS,
@@ -60,12 +59,12 @@ def test_the_agreed_limits_are_the_ones_the_run_uses():
     assert MAX_TOOL_CALLS == 120
     assert LLM_CALL_TIMEOUT == 120.0
     assert SEARCH_REGION == 225
-    assert AGENTS == ("supervisor", "site", "competitors", "queries", "checks", "report")
-    assert SPECIALIST_AGENTS == ("site", "competitors", "queries", "checks", "report")
+    assert AGENTS == ("supervisor", "site", "competitors", "queries", "checks")
+    assert SPECIALIST_AGENTS == ("site", "competitors", "queries", "checks")
 
 
 def test_every_tool_schema_is_self_consistent_and_json_serializable():
-    assert len(TOOL_SCHEMAS) == len(TOOL_ARGUMENTS) == 16
+    assert len(TOOL_SCHEMAS) == len(TOOL_ARGUMENTS) == 14
     for name, schema in TOOL_SCHEMAS.items():
         assert isinstance(schema, ToolSchema)
         assert schema.name == name
@@ -93,7 +92,6 @@ def test_each_agent_sees_exactly_its_own_tools():
         "competitors": COMPETITOR_TOOLS,
         "queries": QUERY_TOOLS,
         "checks": CHECK_TOOLS,
-        "report": REPORT_TOOLS,
     }
     assert set(AGENT_TOOLS) == set(AGENTS) == set(subsets)
     seen: list[str] = []
@@ -194,10 +192,6 @@ def test_validate_arguments_normalizes_a_valid_call():
         ("ask_models", {"connection_ids": ["a", "a"]}),
         ("ask_models", {"connection_ids": ["a"] * 6}),
         ("ask_models", {"connection_ids": [42]}),
-        ("read_metrics", {"extra": 1}),
-        ("save_report", {"summary": "сводка"}),
-        ("save_report", {"summary": "", "recommendations": "выводы"}),
-        ("save_report", {"summary": 42, "recommendations": "выводы"}),
         ("handoff_to", {"agent": "site"}),
         ("handoff_to", {"agent": ""}),
         ("handoff_to", {"agent": "супервизор", "reason": 42}),
@@ -261,9 +255,9 @@ def test_turns_are_counted_per_specialist_and_never_for_the_supervisor():
     assert spent.turns_for("queries") == 1
     assert spent.turns_for("checks") == 0
 
-    full = SeoBudget(max_turns=1).spend_turn("report")
+    full = SeoBudget(max_turns=1).spend_turn("checks")
     with pytest.raises(BudgetExceeded):
-        full.spend_turn("report")
+        full.spend_turn("checks")
     assert full.spend_turn("site").turns_for("site") == 1
     with pytest.raises(ToolRejected):
         spent.spend_turn("supervisor")

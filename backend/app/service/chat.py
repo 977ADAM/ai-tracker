@@ -353,15 +353,17 @@ class ChatService:
         defaults = self.default_connection_ids()
         return merge_draft(draft, {"connection_ids": list(defaults)}) if defaults else draft
 
-    @staticmethod
-    def _proposal(draft: ChatDraft) -> dict[str, object]:
+    def _proposal(self, draft: ChatDraft) -> dict[str, object]:
         """Return the stored proposal: the draft, its status, and the run estimate."""
+        modes = {item["id"]: item.get("answer_mode", "text") for item in self.connections.list_public() if item["id"] in draft.connection_ids}
         return {
             "status": "pending",
             **proposal_params(draft),
             "search_upper": MAX_SEARCH_REQUESTS,
             "model_upper": MAX_MODEL_ANSWERS,
             "generated_limit": GENERATED_QUERY_LIMIT,
+            "connection_modes": modes,
+            "deepseek_search_upper": MAX_MODEL_ANSWERS if "deepseek_web" in modes.values() else 0,
         }
 
     def _proposal_payload(self, proposal_id: object) -> Mapping[str, object] | None:

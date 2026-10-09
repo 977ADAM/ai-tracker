@@ -66,7 +66,7 @@ from pydantic import BaseModel, Field, create_model
 
 from app.core.errors import AppError, ConfigurationError, RunConflict, StorageError
 from app.db.seo import SeoRepository
-from app.domain.seo import AGENTS, SeoInput
+from app.domain.seo import AGENTS, SeoInput, data_ready
 from app.domain.seo_llm import (
     LLM_NOT_CONFIGURED,
     AgentModel,
@@ -77,7 +77,6 @@ from app.domain.seo_prompts import (
     check_agent_prompt,
     competitor_agent_prompt,
     query_agent_prompt,
-    report_agent_prompt,
     site_agent_prompt,
     supervisor_prompt,
 )
@@ -120,9 +119,7 @@ STATUS_WITHOUT_TOOL_CALL = "done"
 
 HANDOFF_TOOL = "handoff_to"
 FINISH_TOOL = "finish_run"
-REPORT_AGENT = "report"
 CHECK_AGENT = "checks"
-SITE_AGENT = "site"
 FATAL_DATA_MISSING = "Не собраны сведения о сайте или не сгенерированы запросы"
 
 SEARCH_FAILED = "Инструмент временно недоступен"
@@ -159,11 +156,9 @@ class AgentPrompts(Protocol):
 
     def specialist(self, agent: str, input: SeoInput) -> tuple[str, str]: ...
 
-    def report(self, metrics: Mapping[str, object]) -> tuple[str, str]: ...
-
 
 class SeoPrompts:
-    """The default prompts: the six builders of `domain.seo_prompts` as one object."""
+    """The default prompts: the two builders of `domain.seo_prompts` as one object."""
 
     def supervisor(
         self, input: SeoInput, status: Mapping[str, object], budget: Mapping[str, object],
@@ -181,9 +176,6 @@ class SeoPrompts:
         if builder is None:
             raise AppError(UNKNOWN_SPECIALIST)
         return builder(input)
-
-    def report(self, metrics: Mapping[str, object]) -> tuple[str, str]:
-        return report_agent_prompt(metrics)
 
 
 # -- tool bridge -------------------------------------------------------------
@@ -502,10 +494,7 @@ def build_agent_graph(
 
     builders: dict[str, Any] = {}
     for name in SPECIALIST_NODES:
-        if name == "report":
-            system, _user = prompts.report({})
-        else:
-            system, _user = prompts.specialist(name, toolbox.input)
+        system, _user = prompts.specialist(name, toolbox.input)
         builders[name] = create_agent(
             traced_model(name),
             tools=langchain_tools(toolbox, name),
@@ -590,12 +579,13 @@ async def _supervisor_turn(
         if decision == NEXT_END:
             next_node = NEXT_END
             task = None
+            # The run is over: a checks agent still open did all it could, so it
+            # is closed here instead of staying `running` until the finalizer.
+            _complete_checks(toolbox)
             continue
         if next_node != NEXT_END:
             next_node = decision
             task = _handoff_task(toolbox, prompts, decision)
-            if decision == REPORT_AGENT:
-                _complete_checks(toolbox)
 
     specialists = dict(state.get("specialists", {}))
     specialists[SUPERVISOR_NODE] = turns + 1
@@ -618,7 +608,7 @@ async def _supervisor_turn(
 
 
 def _complete_checks(toolbox: SeoToolbox) -> None:
-    """Close a running checks agent: its work is done once the report starts."""
+    """Close a running checks agent: the run is over, so its work is done."""
     for entry in toolbox.repository.agents(toolbox.analysis_id):
         if entry["agent"] == CHECK_AGENT and entry["status"] == STATUS_RUNNING:
             toolbox.repository.upsert_agent(toolbox.analysis_id, CHECK_AGENT, STATUS_DONE)
@@ -646,13 +636,9 @@ def _handoff_task(toolbox: SeoToolbox, prompts: AgentPrompts, agent: str) -> Hum
     """Build the task message of one specialist visit.
 
     The system prompt of the visit is already part of its subgraph, so only the
-    user message is built here; the report agent additionally gets the
-    server-computed aggregates it explains and never recalculates.
+    user message is built here.
     """
-    if agent == "report":
-        metrics = toolbox.repository.snapshot(toolbox.analysis_id)["aggregates"]
-        _system, user = prompts.report(metrics)
-    elif agent in SPECIALIST_NODES:
+    if agent in SPECIALIST_NODES:
         _system, user = prompts.specialist(agent, toolbox.input)
     else:  # unreachable: `_control_decision` only returns declared specialists
         user = ""
@@ -704,7 +690,10 @@ def _toolbox_status(toolbox: SeoToolbox) -> dict[str, object]:
             "queries": len(snapshot["queries"]),
             "search_rows": snapshot["counters"]["search_rows"],
             "model_rows": snapshot["counters"]["model_rows"],
-            "report_ready": snapshot["readiness"]["report_ready"],
+            "data_ready": data_ready(
+                {entry["agent"]: entry["status"] for entry in snapshot["agents"]},
+                bool(snapshot["readiness"]["queries_ready"]),
+            ),
         },
         "finished": toolbox.finished,
         "exhausted": toolbox.exhausted,
@@ -1032,20 +1021,19 @@ class SeoAgentRuntime:
         """Publish the run: stopped by the limit, failed, or completed.
 
         The spec's fatal matrix is decided here, from stored rows only: the site
-        agent must have saved its facts and at least five valid queries must
-        exist. Candidateless runs, failed rows, a failed connection, and a
-        missing report agent are not fatal — the numbers are computed from the
-        stored rows, so the report is still publishable.
+        agent must have saved its facts and at least one generated query must
+        exist. Candidateless runs, failed rows, and a failed connection are not
+        fatal — the numbers are computed from the stored rows, so the report is
+        still publishable.
         """
         if toolbox.exhausted:
             self._publish_exhausted(analysis_id)
             return
         snapshot = self.repository.snapshot(analysis_id)
         agents = {str(entry["agent"]): str(entry["status"]) for entry in snapshot["agents"]}
-        facts_ready = agents.get(SITE_AGENT) == STATUS_DONE
         queries_ready = bool(snapshot["readiness"].get("queries_ready"))
         self._close_agents(analysis_id, completed=True)
-        if not (facts_ready and queries_ready):
+        if not data_ready(agents, queries_ready):
             self.repository.upsert_agent(
                 analysis_id, SUPERVISOR_NODE, STATUS_ERROR, error=FATAL_DATA_MISSING,
             )

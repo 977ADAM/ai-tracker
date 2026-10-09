@@ -9,8 +9,7 @@ const agents: SeoAgent[] = [
   { agent: 'site', status: 'error', error: 'Сайт недоступен', updated_at: '2026-09-28T00:03:00Z' },
   { agent: 'competitors', status: 'waiting', error: null, updated_at: '2026-09-28T00:05:00Z' },
   { agent: 'queries', status: 'running', error: null, updated_at: '2026-09-28T00:06:00Z' },
-  { agent: 'checks', status: 'skipped', error: null, updated_at: '2026-09-28T00:07:00Z' },
-  { agent: 'report', status: 'pending', error: null, updated_at: null }
+  { agent: 'checks', status: 'skipped', error: null, updated_at: '2026-09-28T00:07:00Z' }
 ];
 
 function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnapshot {
@@ -28,7 +27,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
       agent_steps: { supervisor: 4, site: 3 }
     },
     budget_exhausted: false,
-    candidates: [], queries: [], summary: null, conclusions: null,
+    candidates: [], queries: [],
     counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 0, model_errors: 0 },
     readiness: {
       report_ready: false, summary_ready: false, queries_ready: true, has_submitted_search_rows: true,
@@ -52,17 +51,16 @@ function budget(key: string): string {
 }
 
 describe('SeoAgentPanel', () => {
-  it('renders the six agents with Russian labels, statuses, errors and step counts', () => {
+  it('renders the five agents with Russian labels, statuses, errors and step counts', () => {
     render(SeoAgentPanel, { props: { snapshot: snapshot() } });
     const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(5);
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining('Супервизор'),
       expect.stringContaining('Агент сайта'),
       expect.stringContaining('Агент конкурентов'),
       expect.stringContaining('Агент запросов'),
-      expect.stringContaining('Агент проверок'),
-      expect.stringContaining('Агент отчёта')
+      expect.stringContaining('Агент проверок')
     ]);
 
     expect(status('supervisor')).toBe('Готово');
@@ -70,19 +68,17 @@ describe('SeoAgentPanel', () => {
     expect(status('competitors')).toBe('Ждёт');
     expect(status('queries')).toBe('Выполняется');
     expect(status('checks')).toBe('Пропущен');
-    expect(status('report')).toBe('Ожидает');
 
     expect(agent('supervisor').textContent).toContain('Шагов: 4');
     expect(agent('site').textContent).toContain('Шагов: 3');
     expect(agent('site').textContent).toContain('Сайт недоступен');
-    expect(agent('report').textContent).toContain('Шагов: 0');
     expect(agent('site').querySelector('[data-agent-error]')?.textContent).toContain('Сайт недоступен');
   });
 
   it('shows every missing agent as pending instead of dropping it', () => {
     render(SeoAgentPanel, { props: { snapshot: snapshot({ agents: [] }) } });
-    expect(screen.getAllByRole('listitem')).toHaveLength(6);
-    for (const id of ['supervisor', 'site', 'competitors', 'queries', 'checks', 'report']) {
+    expect(screen.getAllByRole('listitem')).toHaveLength(5);
+    for (const id of ['supervisor', 'site', 'competitors', 'queries', 'checks']) {
       expect(status(id)).toBe('Ожидает');
     }
   });

@@ -8,8 +8,11 @@ every supported version and stays the only owner of `runs`, `model_rows`, and
 
 Revision 1 wrote the fixed six-stage tables at version 3. Version 4 keeps them
 untouched — already-saved analyses stay readable and the old pipeline keeps
-writing its stages — and adds the agent state, the agent trace, and the report
-conclusions of the multi-agent run.
+writing its stages — and adds the agent state and the agent trace of the
+multi-agent run. The report is numbers-only: there is no model-written
+conclusions block, so no table holds one. Files written by earlier revisions
+keep their `seo_conclusions` table and their `summary_text` column; nothing
+reads either of them any more.
 
 Durability rules of the SEO flow: an analysis exists before the first external
 call, every finished row is committed in its own `BEGIN IMMEDIATE` transaction,
@@ -130,7 +133,6 @@ CHILD_TABLES = (
     "seo_stages",
     "seo_agents",
     "seo_agent_steps",
-    "seo_conclusions",
     "seo_pages",
     "seo_candidates",
     "seo_queries",
@@ -269,14 +271,6 @@ CREATE TABLE IF NOT EXISTS seo_agent_steps (
     error TEXT,
     created_at TEXT NOT NULL,
     PRIMARY KEY (analysis_id, step_index)
-);
-CREATE TABLE IF NOT EXISTS seo_conclusions (
-    analysis_id TEXT NOT NULL REFERENCES seo_analyses(id) ON DELETE CASCADE,
-    summary TEXT NOT NULL,
-    recommendations TEXT NOT NULL,
-    model TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (analysis_id)
 );
 """
 
@@ -807,7 +801,7 @@ class SeoRepository:
                 (text, now, analysis_id),
             )
 
-    # -- agents, trace, and conclusions ----------------------------------
+    # -- agents and trace ------------------------------------------------
 
     def upsert_agent(
         self, analysis_id: str, agent: str, status: str, *, error: str | None = None,
@@ -888,26 +882,6 @@ class SeoRepository:
             )
             connection.execute("UPDATE seo_analyses SET updated_at=? WHERE id=?", (now, analysis_id))
         return step_index
-
-    def save_conclusions(
-        self, analysis_id: str, *, summary: str, recommendations: str, model: str,
-    ) -> None:
-        """Store the report agent's text block: model output beside server numbers."""
-        _require_text(summary)
-        _require_text(recommendations)
-        model_name = _required_str(model)
-        now = _now()
-        with self._connection(write=True) as connection:
-            self._require_analysis(connection, analysis_id)
-            connection.execute(
-                "INSERT INTO seo_conclusions (analysis_id, summary, recommendations, model, created_at) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(analysis_id) DO UPDATE SET summary=excluded.summary, "
-                "recommendations=excluded.recommendations, model=excluded.model, "
-                "created_at=excluded.created_at",
-                (analysis_id, summary, recommendations, model_name, now),
-            )
-            connection.execute("UPDATE seo_analyses SET updated_at=? WHERE id=?", (now, analysis_id))
 
     # -- lifecycle -------------------------------------------------------
 
@@ -1042,7 +1016,7 @@ class SeoRepository:
     # -- reads -----------------------------------------------------------
 
     def snapshot(self, analysis_id: str) -> dict:
-        """Return stages, agent state, budget, conclusions, facts, and aggregates.
+        """Return stages, agent state, budget, facts, and aggregates.
 
         Saved model answers and Yandex operation IDs are deliberately absent:
         the detail page reads them from `rows_page` instead, and the trace keeps
@@ -1094,12 +1068,6 @@ class SeoRepository:
             ]
         key: list | None = [page[-1]["step_index"]] if len(rows) > limit else None
         return {"items": items, "next_cursor": self._encode_cursor(key) if key else None}
-
-    def conclusions(self, analysis_id: str) -> dict | None:
-        """Return the stored model text block, or `None` while it is missing."""
-        with self._connection() as connection:
-            self._require_analysis(connection, analysis_id)
-            return self._conclusions_in(connection, analysis_id)
 
     def budget_state(self, analysis_id: str) -> dict:
         """Count the resources a run already spent, from its saved rows alone.
@@ -1392,10 +1360,11 @@ class SeoRepository:
                 name_mentioned=_optional_flag(item["name_mentioned"]),
                 host_mentioned=_optional_flag(item["host_mentioned"]),
                 error=item["error"],
+                seo_answer=_read_evidence(item["seo_answer"]),
             )
             for item in connection.execute(
                 "SELECT connection_id, query_index, status, answer, name_mentioned, host_mentioned, "
-                "error FROM seo_model_rows WHERE analysis_id=? ORDER BY query_index, connection_id",
+                "error, seo_answer FROM seo_model_rows WHERE analysis_id=? ORDER BY query_index, connection_id",
                 (analysis_id,),
             )
         )
@@ -1455,7 +1424,6 @@ class SeoRepository:
                 for index, item in enumerate(queries)
             ],
             "summary": row["summary_text"],
-            "conclusions": self._conclusions_in(connection, analysis_id),
             "counters": _row_counters(searches, models, len(queries)),
             "readiness": self._readiness(connection, row, queries, searches, models),
             "aggregates": _plain(aggregates),
@@ -1479,7 +1447,7 @@ class SeoRepository:
 
     @staticmethod
     def _agents_in(connection: sqlite3.Connection, analysis_id: str) -> tuple[dict, ...]:
-        """Project the stored agent rows onto the fixed six-agent order."""
+        """Project the stored agent rows onto the fixed five-agent order."""
         stored = {
             row["agent"]: row
             for row in connection.execute(
@@ -1496,22 +1464,6 @@ class SeoRepository:
             }
             for agent in AGENTS
         )
-
-    @staticmethod
-    def _conclusions_in(connection: sqlite3.Connection, analysis_id: str) -> dict | None:
-        row = connection.execute(
-            "SELECT summary, recommendations, model, created_at FROM seo_conclusions "
-            "WHERE analysis_id=?",
-            (analysis_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return {
-            "summary": row["summary"],
-            "recommendations": row["recommendations"],
-            "model": row["model"],
-            "created_at": row["created_at"],
-        }
 
     @staticmethod
     def _budget_state(connection: sqlite3.Connection, analysis_id: str) -> dict:
@@ -1613,13 +1565,6 @@ def _require_step_kind(kind: object) -> None:
 def _require_step_status(status: object) -> None:
     if status not in STEP_STATUSES:
         raise ValidationError(INVALID_STEP_STATUS)
-
-
-def _require_text(value: object) -> str:
-    """Accept any text, including an empty one, but never another type."""
-    if not isinstance(value, str):
-        raise ValidationError(INVALID_INPUT)
-    return value
 
 
 def _json_object(arguments: Mapping[str, object] | None) -> str:

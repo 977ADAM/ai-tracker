@@ -14,7 +14,7 @@ from app.domain.seo import (
     SearchRowValue,
     SeoInput,
 )
-from app.domain.seo_report import Metric, build_report, report_payload
+from app.domain.seo_report import Metric, build_report
 
 
 def seo_input(**overrides: object) -> SeoInput:
@@ -95,8 +95,9 @@ def empty_ai() -> dict[str, object]:
         "name": EMPTY,
         "host": EMPTY,
         "combined": EMPTY,
-        "branded": {"name": EMPTY, "host": EMPTY, "combined": EMPTY},
-        "unbranded": {"name": EMPTY, "host": EMPTY, "combined": EMPTY},
+        "citation": EMPTY,
+        "branded": {"name": EMPTY, "host": EMPTY, "combined": EMPTY, "citation": EMPTY},
+        "unbranded": {"name": EMPTY, "host": EMPTY, "combined": EMPTY, "citation": EMPTY},
     }
 
 
@@ -161,6 +162,7 @@ def test_site_ai_metrics_split_name_host_and_combined_per_connection():
         "name": Metric(1, 1, 1.0, None),
         "host": Metric(1, 1, 1.0, None),
         "combined": Metric(1, 1, 1.0, None),
+        "citation": EMPTY,
     }
     assert ai["conn-1"]["unbranded"]["combined"] == Metric(2, 1, 0.5, None)
     assert ai["conn-2"]["combined"] == Metric(0, 0, None, None)
@@ -286,7 +288,7 @@ def test_competitor_metrics_use_candidate_hits_and_saved_model_answers():
     assert rival["search"]["overall"] == Metric(3, 2, 0.6667, 2.5)
     assert rival["search"]["branded"] == Metric(1, 1, 1.0, 2.0)
     assert rival["search"]["unbranded"] == Metric(2, 1, 0.5, 3.0)
-    assert rival["ai"] == {"conn-1": {"host": Metric(3, 2, 0.6667, None)}}
+    assert rival["ai"] == {"conn-1": {"host": Metric(3, 2, 0.6667, None), "citation": EMPTY}}
 
 
 def test_candidate_hits_of_an_error_row_are_not_counted():
@@ -304,7 +306,7 @@ def test_candidate_hits_of_an_error_row_are_not_counted():
         candidate_hits=hits,
     )
     assert report["competitors"][0]["search"]["overall"] == Metric(0, 0, None, None)
-    assert report["competitors"][0]["ai"] == {"conn-1": {"host": Metric(0, 0, None, None)}}
+    assert report["competitors"][0]["ai"] == {"conn-1": {"host": Metric(0, 0, None, None), "citation": EMPTY}}
 
 
 def test_counts_report_queries_rows_and_errors():
@@ -366,44 +368,3 @@ def computed_report() -> dict[str, object]:
         models,
         candidate_hits={0: (CandidateHit(host="rival.ru", position=2, url="https://rival.ru/a"),)},
     )
-
-
-def metrics_only(payload: dict[str, object]) -> dict[str, object]:
-    """Return the payload without its conclusions block."""
-    return {key: value for key, value in payload.items() if key != "conclusions"}
-
-
-def test_report_payload_keeps_every_metric_and_adds_the_conclusions_block():
-    report = computed_report()
-    conclusions = {"summary": "Сводка", "recommendations": "Выводы", "model": "model-1"}
-    payload = report_payload(report, conclusions=conclusions)
-    assert payload["conclusions"] == conclusions
-    assert metrics_only(payload) == report
-    assert set(payload) == set(report) | {"conclusions"}
-    # The computed report itself is never mutated, and the block is copied.
-    assert "conclusions" not in report
-    assert payload["conclusions"] is not conclusions
-
-
-def test_report_payload_without_conclusions_keeps_every_metric():
-    report = computed_report()
-    payload = report_payload(report)
-    assert payload["conclusions"] is None
-    assert metrics_only(payload) == report
-    assert set(payload) == set(report) | {"conclusions"}
-
-
-@pytest.mark.parametrize(
-    "conclusions",
-    [None, {}, {"summary": ""}, "мусор", 42, [], {"summary": 42, "model": None}, {"unknown": {"a": 1}}],
-)
-def test_a_missing_empty_or_nonsense_conclusions_block_never_changes_a_metric(conclusions):
-    report = computed_report()
-    payload = report_payload(report, conclusions=conclusions)  # type: ignore[arg-type]
-    assert metrics_only(payload) == report
-
-
-@pytest.mark.parametrize("conclusions", [None, {}, "мусор", 42, [], ()])
-def test_an_unusable_conclusions_block_is_reported_as_absent(conclusions):
-    payload = report_payload(computed_report(), conclusions=conclusions)  # type: ignore[arg-type]
-    assert payload["conclusions"] is None
