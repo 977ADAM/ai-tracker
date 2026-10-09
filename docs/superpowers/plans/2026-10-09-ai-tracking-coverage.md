@@ -240,13 +240,23 @@ git commit -m "Rank the external domains the models cite"
 `frontend/src/lib/server/python-api.test.ts`:
 
 ```ts
-it('projects the citation, position, sources and the answer mode of a row', () => {
+it('projects the citation, position and sources of a snapshot', () => {
   const projected = publicSeoSnapshot(seoSnapshot);
   expect(projected.aggregates.site.ai.p1.citation?.share).toBe(0.5);
   expect(projected.aggregates.site.ai.p1.position?.first.successes).toBe(1);
   expect(projected.aggregates.sources[0]).toEqual({ domain: 'habr.com', answers: 2, citations: 3 });
-  expect(projected.rows?.model[0].answer_mode).toBe('deepseek_web');
-  expect(projected.rows?.model[0].citations[0].url).toBe('https://habr.com/a');
+});
+
+it('projects the answer mode and the citations of a model row', () => {
+  const page = publicSeoRows(
+    { items: [{ ...modelRow, answer_mode: 'deepseek_web', search_status: 'completed',
+      citations: [{ url: 'https://habr.com/a', title: 'A' }] }], next_cursor: null },
+    'model',
+  );
+  const row = page.items[0] as SeoModelRow;
+  expect(row.answer_mode).toBe('deepseek_web');
+  expect(row.search_status).toBe('completed');
+  expect(row.citations[0].url).toBe('https://habr.com/a');
 });
 ```
 
@@ -257,7 +267,7 @@ Expected: FAIL — `citation`/`position`/`sources` отсутствуют в п�
 
 - [ ] **Step 3: Реализовать типы и проекции**
 
-`types.ts`: добавить `SeoBrandPosition`, `SeoSourceCount`, `SeoCitation`, расширить `SeoSiteAiMetrics` (`citation`, `position`), `SeoModelRow`, `SeoAggregates`. `python-api.ts`: `seoSiteAiMetrics` читает `citation` и `position` (nullable), `seoAggregates` — массив `sources` (обязательный, как `competitors`), `seoModelRow` — `answer_mode`/`search_status` через `oneOf`, `citations` через `optionalArray`, `model`/`search_calls` как `optionalString`/`optionalInteger`. `seo-categories.ts`: словарь ключей из `QUERY_CATEGORIES` в русские лейблы.
+`types.ts`: добавить `SeoBrandPosition`, `SeoSourceCount`, `SeoCitation`, расширить `SeoSiteAiMetrics` (`citation`, `position`), `SeoModelRow`, `SeoAggregates`. `python-api.ts`: `seoSiteAiMetrics` читает `citation` и `position` (nullable), `seoAggregates` — массив `sources` (обязательный, как `competitors`), `seoModelRow` — `answer_mode`/`search_status` через `oneOf`, `citations` — новый `seoCitation` (массив проверяется `Array.isArray`, элемент через `record`), `model`/`search_calls` как `optionalString`/`optionalInteger`. `seo-categories.ts`: словарь ключей из `QUERY_CATEGORIES` в русские лейблы.
 
 - [ ] **Step 4: Обновить фикстуры снапшотов**
 
