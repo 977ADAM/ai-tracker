@@ -169,6 +169,8 @@ def test_create_answers_202_with_the_upper_estimate_and_finishes_in_the_backgrou
         assert body["status"] == "running"
         assert body["estimate"] == {
             "search_upper": 5, "model_upper": 5, "generated_limit": 2, "connections": 2,
+            # Both connections answer in text mode, so no DeepSeek search is paid for.
+            "deepseek_search_upper": 0,
         }
 
         snapshot = wait_terminal(client, body["id"])
@@ -365,6 +367,9 @@ def test_rows_are_filtered_and_paginated_without_operation_ids(make_client, sett
             "status": "found", "answer": "ответ 0", "name_mentioned": True,
             "host_mentioned": False, "error": None, "query": "запрос 0",
             "category": "commercial", "service": "Букеты",
+            # A text-mode row carries no search evidence of its own.
+            "answer_mode": "text", "search_status": "not_requested",
+            "search_results": [], "citations": [], "model": None, "search_calls": None,
         }
 
         second = client.get(

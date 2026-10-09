@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { statusLabel } from '$lib/chat';
   import type { ChatSummary } from '$lib/types';
 
   let {
@@ -24,17 +25,6 @@
 
   function confirmDelete(chat: ChatSummary) {
     if (window.confirm(`Удалить чат «${chat.title}» и его сообщения?`)) onDelete(chat.id);
-  }
-
-  function dateLabel(value: string): string {
-    return new Date(value).toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Europe/Moscow',
-    });
   }
 </script>
 
@@ -72,7 +62,12 @@
                 : 'border-line hover:border-accent/60'
             }`}
           >
-            <span class="block truncate font-semibold text-ink">{chat.title}</span>
+            <span class="flex items-baseline justify-between gap-2">
+              <span class="truncate font-semibold text-ink">{chat.title}</span>
+              <span data-chat-status class="shrink-0 text-[11px] font-semibold text-muted"
+                >{statusLabel(chat)}</span
+              >
+            </span>
           </button>
           <button
             type="button"

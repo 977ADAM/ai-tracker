@@ -155,7 +155,13 @@ def test_a_message_carries_exactly_the_documented_fields(client, chat_id):
     assert set(proposal["payload"]) == {
         "status", "url", "sphere", "seeds", "services", "connection_ids",
         "search_upper", "model_upper", "generated_limit",
+        "connection_modes", "deepseek_search_upper",
     }
+    # Every chosen connection of this fixture answers in text mode.
+    assert proposal["payload"]["connection_modes"] == {
+        connection_id: "text" for connection_id in proposal["payload"]["connection_ids"]
+    }
+    assert proposal["payload"]["deepseek_search_upper"] == 0
 
 
 def test_the_first_message_sets_the_title(client, chat_id):
