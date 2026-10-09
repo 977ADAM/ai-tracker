@@ -3,8 +3,8 @@
 from dataclasses import asdict
 
 from app.domain.matching import mentions_phrase
-from app.domain.projects import comparison_key
-from app.domain.search import SearchDocument, first_matching_result
+from app.domain.projects import comparison_key, project_host_matches
+from app.domain.search import SearchDocument, first_matching_result, result_url_host
 from app.domain.seo import ModelRowValue
 from app.domain.seo_answer import answer_from_dict
 from app.domain.seo_report import (
@@ -75,17 +75,33 @@ def build_measurement_report(snapshot, model_rows, search_rows):
                         c["connection_id"],
                         p["brand"],
                         host,
-                        [canonical_host(r["site_url"]) for r in p["competitors"]],
+                        [
+                            (
+                                canonical_host(r["site_url"])
+                                if r["site_url"]
+                                else r["brand"]
+                            )
+                            for r in p["competitors"]
+                        ],
                         p.get("brand_aliases", []),
+                        p.get("include_subdomains", True),
                     ).items()
                 },
-                "citation": asdict(citation_metric(values, c["connection_id"], host)),
+                "citation": asdict(
+                    citation_metric(
+                        values,
+                        c["connection_id"],
+                        host,
+                        p.get("include_subdomains", True),
+                    )
+                ),
             }
         )
     result["queries"] = [
         {
             "text": q["text"],
             "category": q.get("category"),
+            "group": q.get("group"),
             **_metric(
                 [r for r in model_rows if r["query_index"] == i],
                 p["brand"],
@@ -95,12 +111,31 @@ def build_measurement_report(snapshot, model_rows, search_rows):
         }
         for i, q in enumerate(p["queries"])
     ]
-    result["sources"] = source_counts(values, host)
+    groups = {}
+    for i, q in enumerate(p["queries"]):
+        groups.setdefault(q.get("group") or "Без группы", []).append(i)
+    result["groups"] = [
+        {
+            "name": name,
+            **_metric(
+                [r for r in model_rows if r["query_index"] in indexes],
+                p["brand"],
+                host,
+                p.get("brand_aliases", []),
+            ),
+        }
+        for name, indexes in groups.items()
+    ]
+    result["sources"] = source_counts(values, host, p.get("include_subdomains", True))
     result["competitors"] = [
         {
             "brand": c["brand"],
             "site_url": c["site_url"],
-            **_metric(model_rows, c["brand"], canonical_host(c["site_url"])),
+            **_metric(
+                model_rows,
+                c["brand"],
+                canonical_host(c["site_url"]) if c["site_url"] else "",
+            ),
         }
         for c in p["competitors"]
     ]
@@ -131,12 +166,26 @@ def build_measurement_report(snapshot, model_rows, search_rows):
             {"brand": p["brand"], "site_url": p["site_url"]},
             *p["competitors"],
         ]:
+            if not site["site_url"]:
+                continue
             positions = []
             for r in good:
                 match = first_matching_result(
                     canonical_host(site["site_url"]),
                     tuple(SearchDocument(**d) for d in r["documents"]),
                 )
+                if site["site_url"] == p["site_url"] and not p.get(
+                    "include_subdomains", True
+                ):
+                    match = next(
+                        (
+                            (index, doc["url"])
+                            for index, doc in enumerate(r["documents"][:10], 1)
+                            if result_url_host(doc["url"])
+                            and project_host_matches(p, doc["url"])
+                        ),
+                        None,
+                    )
                 if match:
                     positions.append(match[0])
             result["search"].append(
