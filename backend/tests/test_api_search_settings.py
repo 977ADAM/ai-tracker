@@ -71,9 +71,10 @@ def test_delete_noop_reports_no_environment_sources(make_client):
         }}
 
 
-def _assert_model_configuration_and_model_only_run_work(client):
+def _assert_model_configuration_and_model_only_run_work(client, database_dsn):
     import time
 
+    from app.db.projects import ProjectRepository
     from tests.fakes import ENDPOINT
 
     created = client.post("/api/providers", json={
@@ -82,7 +83,9 @@ def _assert_model_configuration_and_model_only_run_work(client):
     })
     assert created.status_code == 200
     provider_id = created.json()["id"]
+    project = ProjectRepository(database_dsn).create({"domain": "example.ru"})
     response = client.post("/api/runs", json={
+        "project_id": project["id"],
         "brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
         "provider_ids": [provider_id], "regions": [],
     })
@@ -102,7 +105,7 @@ def _assert_model_configuration_and_model_only_run_work(client):
 
 @pytest.mark.parametrize("broken_file", ["malformed", "unreadable"])
 def test_bad_search_metadata_does_not_block_model_configuration_or_runs(
-    make_client, config_dir, settings, secrets, broken_file,
+    make_client, config_dir, settings, secrets, database_dsn, broken_file,
 ):
     from app.api.deps import get_container
     from tests.fakes import ProviderFactorySpy
@@ -128,7 +131,7 @@ def test_bad_search_metadata_does_not_block_model_configuration_or_runs(
         assert client.post("/api/search", json={
             "domain": "example.ru", "prompts_text": "цветы", "regions": [1],
         }).status_code == 400
-        _assert_model_configuration_and_model_only_run_work(client)
+        _assert_model_configuration_and_model_only_run_work(client, database_dsn)
         if path.is_dir():
             path.rmdir()
         path.write_text('{"enabled": true}', encoding="utf-8")
@@ -137,7 +140,7 @@ def test_bad_search_metadata_does_not_block_model_configuration_or_runs(
 
 
 def test_search_keyring_read_failure_does_not_block_models_and_recovers(
-    make_client, settings, secrets,
+    make_client, settings, secrets, database_dsn,
 ):
     from app.api.deps import get_container
     from tests.fakes import ProviderFactorySpy
@@ -163,7 +166,7 @@ def test_search_keyring_read_failure_does_not_block_models_and_recovers(
         assert failure.status_code == 400
         assert failure.json() == {"detail": "Системное хранилище ключей недоступно"}
         assert "private keyring path" not in failure.text
-        _assert_model_configuration_and_model_only_run_work(client)
+        _assert_model_configuration_and_model_only_run_work(client, database_dsn)
         secrets.get_password = original_get
         restored = client.put("/api/search/settings", json={
             "api_key": "search-key", "folder_id": "search-folder",
