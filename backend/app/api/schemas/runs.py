@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 
 class RunRequest(BaseModel):
+    project_id: str = ""
     brand: str = ""
     domain: str = ""
     prompts: list[str] | None = None
@@ -61,6 +62,7 @@ class SummaryRunRow(BaseModel):
 
 class RunSnapshotResponse(BaseModel):
     id: str
+    project_id: str
     created_at: str
     finished_at: str | None
     status: Literal["pending", "done", "interrupted"]
