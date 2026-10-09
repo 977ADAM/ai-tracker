@@ -15,55 +15,9 @@ import type {
   RunModelRow,
   RunSearchRow,
   YandexSearchSettings,
-  ChatCreated,
-  ChatList,
-  ChatMessage,
-  ChatMessageKind,
-  ChatMessages,
-  ChatPage,
-  ChatPayload,
-  ChatProposal,
-  ChatProposalStatus,
-  ChatProposalUpdated,
-  ChatSummary,
-  SeoAggregates,
-  SeoAgent,
-  SeoAgentStatus,
-  SeoAnalysisCreated,
-  SeoAnalysisSnapshot,
-  SeoAnalysisStatus,
-  SeoBudgetItem,
-  SeoBudgetView,
-  SeoBrandPosition,
-  SeoCategoryAggregates,
-  SeoCandidate,
-  SeoCitation,
-  SeoCompetitorAggregates,
-  SeoCounts,
-  SeoEstimate,
-  SeoHistoryPage,
-  SeoMetric,
-  SeoModelRow,
-  SeoQuery,
-  SeoQueryFlags,
-  SeoReadiness,
-  SeoRow,
-  SeoRowsKind,
-  SeoRowsPage,
-  SeoRowStatus,
-  SeoSearchMetrics,
-  SeoSearchRow,
   SeoSettings,
   SeoSettingsTest,
-  SeoSiteAggregates,
-  SeoSiteAiBlock,
-  SeoSiteAiMetrics,
   SeoSource,
-  SeoSourceCount,
-  SeoStage,
-  SeoStageStatus,
-  SeoTracePage,
-  SeoTraceStep,
 } from '$lib/types';
 
 const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8000';
@@ -73,8 +27,6 @@ const MAX_CSV_BYTES = 5 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 10_000;
 /** `POST /api/seo/settings/test` waits for one real chat completion. */
 export const SEO_SETTINGS_TEST_TIMEOUT_MS = 120_000;
-/** One chat turn is one real chat completion as well, so it needs the same budget. */
-export const SEO_CHAT_MESSAGE_TIMEOUT_MS = 120_000;
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -140,24 +92,6 @@ function requiredBoolean(value: unknown): boolean {
 function optionalBoolean(value: unknown): boolean | null {
   if (value === null || value === undefined) return null;
   return requiredBoolean(value);
-}
-
-function optionalNumber(value: unknown): number | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Invalid API response');
-  return value;
-}
-
-function requiredNumber(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Invalid API response');
-  return value;
-}
-
-function integerRecord(value: unknown): Record<string, number> {
-  const item = record(value);
-  return Object.fromEntries(
-    Object.entries(item).map(([key, entry]) => [key, requiredInteger(entry)]),
-  );
 }
 
 /** Hosts the BFF may call without being told: the API of a local run. */
@@ -245,63 +179,6 @@ export function runListPath(cursor: string | null): ApiPath {
   return `/api/runs?cursor=${cursor}`;
 }
 
-function seoCursor(cursor: string): string {
-  if (!/^[A-Za-z0-9_-]{1,256}$/.test(cursor)) throw new Error('Invalid cursor');
-  return cursor;
-}
-
-export function seoAnalysisPath(id: string): ApiPath {
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid SEO analysis ID');
-  return `/api/seo/analyses/${encodeURIComponent(id)}`;
-}
-
-export function seoAnalysisCancelPath(id: string): ApiPath {
-  return `${seoAnalysisPath(id)}/cancel` as ApiPath;
-}
-
-export function seoAnalysisRowsPath(id: string, kind: SeoRowsKind, cursor: string | null): ApiPath {
-  if (kind !== 'model' && kind !== 'search') throw new Error('Invalid rows kind');
-  const query = cursor === null ? `kind=${kind}` : `kind=${kind}&cursor=${seoCursor(cursor)}`;
-  return `${seoAnalysisPath(id)}/rows?${query}` as ApiPath;
-}
-
-export function seoAnalysisTracePath(id: string, cursor: string | null): ApiPath {
-  const suffix = cursor === null ? '' : `?cursor=${seoCursor(cursor)}`;
-  return `${seoAnalysisPath(id)}/trace${suffix}` as ApiPath;
-}
-
-export function seoAnalysisListPath(cursor: string | null): ApiPath {
-  if (cursor === null) return '/api/seo/analyses';
-  return `/api/seo/analyses?cursor=${seoCursor(cursor)}`;
-}
-
-export function seoChatPath(id: string): ApiPath {
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid SEO chat ID');
-  return `/api/seo/chats/${encodeURIComponent(id)}`;
-}
-
-/** `before` asks for the page of messages older than that sequence number. */
-export function seoChatDetailPath(id: string, before: number | null): ApiPath {
-  if (before !== null && (!Number.isInteger(before) || before < 1))
-    throw new Error('Invalid chat cursor');
-  const suffix = before === null ? '' : `?before=${before}`;
-  return `${seoChatPath(id)}${suffix}` as ApiPath;
-}
-
-export function seoChatMessagesPath(id: string): ApiPath {
-  return `${seoChatPath(id)}/messages` as ApiPath;
-}
-
-export function seoChatProposalPath(id: string): ApiPath {
-  return `${seoChatPath(id)}/proposal` as ApiPath;
-}
-
-const SEO_ROWS_SUFFIX = /^([^/]+)\/rows\?kind=(model|search)(?:&cursor=([A-Za-z0-9_-]{1,256}))?$/;
-const SEO_TRACE_SUFFIX = /^([^/]+)\/trace(?:\?cursor=([A-Za-z0-9_-]{1,256}))?$/;
-const SEO_CHAT_MESSAGES_SUFFIX = /^([^/]+)\/messages$/;
-const SEO_CHAT_PROPOSAL_SUFFIX = /^([^/]+)\/proposal$/;
-const SEO_CHAT_DETAIL_SUFFIX = /^([^/?]+)\?before=([1-9]\d{0,15})$/;
-
 function validPath(path: ApiPath): boolean {
   if (path === '/api/runs') return true;
   if (path.startsWith('/api/runs?cursor=')) {
@@ -326,94 +203,13 @@ function validPath(path: ApiPath): boolean {
       return false;
     }
   }
-  // The static SEO settings paths come before the dynamic analysis route.
+  // The service-LLM settings of the measurements and project generation.
   if (
     path === '/api/seo/settings' ||
     path === '/api/seo/settings/credentials' ||
     path === '/api/seo/settings/test'
   )
     return true;
-  // The chat collection is static; the dynamic chat routes come after it. The
-  // action suffixes are matched with their leading slash, so the chat named
-  // `messages` stays the bare ID `/api/seo/chats/messages` and never the feed.
-  if (path === '/api/seo/chats') return true;
-  if (path.startsWith('/api/seo/chats/')) {
-    const suffix = path.slice('/api/seo/chats/'.length);
-    const messages = SEO_CHAT_MESSAGES_SUFFIX.exec(suffix);
-    if (messages) {
-      try {
-        return seoChatMessagesPath(decodeURIComponent(messages[1])) === path;
-      } catch {
-        return false;
-      }
-    }
-    const proposal = SEO_CHAT_PROPOSAL_SUFFIX.exec(suffix);
-    if (proposal) {
-      try {
-        return seoChatProposalPath(decodeURIComponent(proposal[1])) === path;
-      } catch {
-        return false;
-      }
-    }
-    const detail = SEO_CHAT_DETAIL_SUFFIX.exec(suffix);
-    if (detail) {
-      try {
-        return seoChatDetailPath(decodeURIComponent(detail[1]), Number(detail[2])) === path;
-      } catch {
-        return false;
-      }
-    }
-    try {
-      return seoChatPath(suffix) === path;
-    } catch {
-      return false;
-    }
-  }
-  if (path === '/api/seo/analyses') return true;
-  if (path.startsWith('/api/seo/analyses?cursor=')) {
-    try {
-      return seoAnalysisListPath(path.slice('/api/seo/analyses?cursor='.length)) === path;
-    } catch {
-      return false;
-    }
-  }
-  if (path.startsWith('/api/seo/analyses/')) {
-    const suffix = path.slice('/api/seo/analyses/'.length);
-    if (suffix.endsWith('/cancel')) {
-      try {
-        return seoAnalysisCancelPath(suffix.slice(0, -'/cancel'.length)) === path;
-      } catch {
-        return false;
-      }
-    }
-    const rows = SEO_ROWS_SUFFIX.exec(suffix);
-    if (rows) {
-      try {
-        return (
-          seoAnalysisRowsPath(
-            decodeURIComponent(rows[1]),
-            rows[2] as SeoRowsKind,
-            rows[3] ?? null,
-          ) === path
-        );
-      } catch {
-        return false;
-      }
-    }
-    const trace = SEO_TRACE_SUFFIX.exec(suffix);
-    if (trace) {
-      try {
-        return seoAnalysisTracePath(decodeURIComponent(trace[1]), trace[2] ?? null) === path;
-      } catch {
-        return false;
-      }
-    }
-    try {
-      return seoAnalysisPath(suffix) === path;
-    } catch {
-      return false;
-    }
-  }
   if (path === '/api/config') return true;
   if (
     path === '/api/providers' ||
@@ -758,48 +554,6 @@ export function publicSearchSnapshot(value: unknown): SearchSnapshot {
 }
 
 const SEO_SOURCES: readonly SeoSource[] = ['ui', 'env', 'none'];
-const SEO_ANALYSIS_STATUSES: readonly SeoAnalysisStatus[] = [
-  'running',
-  'completed',
-  'failed',
-  'interrupted',
-  'cancelled',
-];
-const SEO_STAGE_STATUSES: readonly SeoStageStatus[] = [
-  'pending',
-  'running',
-  'done',
-  'error',
-  'skipped',
-];
-const SEO_ROW_STATUSES: readonly SeoRowStatus[] = [
-  'pending',
-  'submitting',
-  'waiting',
-  'found',
-  'absent',
-  'error',
-  'interrupted',
-  'cancelled',
-];
-const SEO_ANSWER_MODES = ['text', 'deepseek_web'] as const;
-const SEO_SEARCH_STATUSES = ['not_requested', 'completed', 'error'] as const;
-const SEO_AGENT_STATUSES: readonly SeoAgentStatus[] = [
-  'pending',
-  'running',
-  'waiting',
-  'done',
-  'error',
-  'skipped',
-];
-const SEO_TRACE_KINDS = ['model', 'tool', 'handoff', 'system'] as const;
-const SEO_TRACE_STATUSES = ['pending', 'running', 'done', 'error', 'rejected', 'skipped'] as const;
-const CHAT_MESSAGE_KINDS: readonly ChatMessageKind[] = ['text', 'proposal', 'run'];
-const CHAT_PROPOSAL_STATUSES: readonly ChatProposalStatus[] = [
-  'pending',
-  'confirmed',
-  'superseded',
-];
 
 /**
  * Project the public service-LLM settings.
@@ -831,489 +585,6 @@ export function publicSeoSettingsTest(value: unknown): SeoSettingsTest {
   };
 }
 
-export function publicSeoAnalysisCreated(value: unknown): SeoAnalysisCreated {
-  const item = record(value);
-  const id = requiredString(item.id);
-  seoAnalysisPath(id);
-  return {
-    id,
-    status: oneOf(item.status, ['running'] as const),
-    estimate: seoEstimate(item.estimate),
-  };
-}
-
-function seoEstimate(value: unknown): SeoEstimate {
-  const item = record(value);
-  return {
-    search_upper: requiredInteger(item.search_upper),
-    model_upper: requiredInteger(item.model_upper),
-    generated_limit: requiredInteger(item.generated_limit),
-    connections: requiredInteger(item.connections),
-  };
-}
-
-function seoCounts(value: unknown): SeoCounts {
-  const item = record(value);
-  return {
-    queries: requiredInteger(item.queries),
-    search_rows: requiredInteger(item.search_rows),
-    model_rows: requiredInteger(item.model_rows),
-    search_errors: requiredInteger(item.search_errors),
-    model_errors: requiredInteger(item.model_errors),
-  };
-}
-
-function seoMetric(value: unknown): SeoMetric {
-  const item = record(value);
-  return {
-    denominator: requiredInteger(item.denominator),
-    successes: requiredInteger(item.successes),
-    share: optionalNumber(item.share),
-    average_position: optionalNumber(item.average_position),
-  };
-}
-
-function seoSearchMetrics(value: unknown): SeoSearchMetrics {
-  const item = record(value);
-  return {
-    overall: seoMetric(item.overall),
-    branded: seoMetric(item.branded),
-    unbranded: seoMetric(item.unbranded),
-  };
-}
-
-function seoBrandPosition(value: unknown): SeoBrandPosition {
-  const item = record(value);
-  return {
-    first: seoMetric(item.first),
-    early: seoMetric(item.early),
-    late: seoMetric(item.late),
-    absent: seoMetric(item.absent),
-    ahead: seoMetric(item.ahead),
-  };
-}
-
-function optionalSeoMetric(value: unknown): SeoMetric | null {
-  if (value === null || value === undefined) return null;
-  return seoMetric(value);
-}
-
-function optionalSeoBrandPosition(value: unknown): SeoBrandPosition | null {
-  if (value === null || value === undefined) return null;
-  return seoBrandPosition(value);
-}
-
-function seoSiteAiMetrics(value: unknown): SeoSiteAiMetrics {
-  const item = record(value);
-  return {
-    name: seoMetric(item.name),
-    host: seoMetric(item.host),
-    combined: seoMetric(item.combined),
-    citation: optionalSeoMetric(item.citation),
-    position: optionalSeoBrandPosition(item.position),
-  };
-}
-
-function seoSiteAiBlock(value: unknown): SeoSiteAiBlock {
-  const item = record(value);
-  return {
-    ...seoSiteAiMetrics(item),
-    branded: seoSiteAiMetrics(item.branded),
-    unbranded: seoSiteAiMetrics(item.unbranded),
-  };
-}
-
-function seoMetricRecord(value: unknown): Record<string, SeoMetric> {
-  return Object.fromEntries(
-    Object.entries(record(value)).map(([key, entry]) => [key, seoMetric(entry)]),
-  );
-}
-
-function seoNestedMetricRecord(value: unknown): Record<string, Record<string, SeoMetric>> {
-  return Object.fromEntries(
-    Object.entries(record(value)).map(([key, entry]) => [key, seoMetricRecord(entry)]),
-  );
-}
-
-function seoSourceCount(value: unknown): SeoSourceCount {
-  const item = record(value);
-  return {
-    domain: requiredString(item.domain),
-    answers: requiredInteger(item.answers),
-    citations: requiredInteger(item.citations),
-  };
-}
-
-function seoAggregates(value: unknown): SeoAggregates {
-  const item = record(value);
-  if (!Array.isArray(item.competitors)) throw new Error('Invalid SEO aggregates');
-  if (!Array.isArray(item.sources)) throw new Error('Invalid SEO aggregates');
-  const siteRaw = record(item.site);
-  const site: SeoSiteAggregates = {
-    search: seoSearchMetrics(siteRaw.search),
-    ai: Object.fromEntries(
-      Object.entries(record(siteRaw.ai)).map(([key, entry]) => [key, seoSiteAiBlock(entry)]),
-    ),
-  };
-  const competitors: SeoCompetitorAggregates[] = item.competitors.map((raw) => {
-    const competitor = record(raw);
-    return {
-      host: requiredString(competitor.host),
-      title: stringValue(competitor.title),
-      occurrences: requiredInteger(competitor.occurrences),
-      average_position: requiredNumber(competitor.average_position),
-      seed_indexes: integers(competitor.seed_indexes),
-      search: seoSearchMetrics(competitor.search),
-      ai: seoNestedMetricRecord(competitor.ai),
-    };
-  });
-  const groups = (raw: unknown): Record<string, SeoCategoryAggregates> =>
-    Object.fromEntries(
-      Object.entries(record(raw)).map(([key, entry]) => {
-        const group = record(entry);
-        return [key, { search: seoMetric(group.search), ai: seoMetricRecord(group.ai) }];
-      }),
-    );
-  return {
-    site,
-    competitors,
-    categories: groups(item.categories),
-    services: groups(item.services),
-    sources: item.sources.map(seoSourceCount),
-    counts: seoCounts(item.counts),
-  };
-}
-
-function seoStage(value: unknown): SeoStage {
-  const item = record(value);
-  return {
-    stage: requiredInteger(item.stage),
-    status: oneOf(item.status, SEO_STAGE_STATUSES),
-    error: optionalString(item.error),
-    counters: integerRecord(item.counters),
-    updated_at: requiredString(item.updated_at),
-  };
-}
-
-function seoCandidate(value: unknown): SeoCandidate {
-  const item = record(value);
-  return {
-    host: requiredString(item.host),
-    title: stringValue(item.title),
-    occurrences: requiredInteger(item.occurrences),
-    average_position: requiredNumber(item.average_position),
-    seed_indexes: integers(item.seed_indexes),
-    recurring: requiredBoolean(item.recurring),
-  };
-}
-
-function seoQueryFlags(value: unknown): SeoQueryFlags {
-  const item = record(value);
-  return {
-    mentions_company_name: requiredBoolean(item.mentions_company_name),
-    mentions_company_host: requiredBoolean(item.mentions_company_host),
-    mentions_candidate_host: requiredBoolean(item.mentions_candidate_host),
-    branded: requiredBoolean(item.branded),
-  };
-}
-
-function seoQuery(value: unknown): SeoQuery {
-  const item = record(value);
-  return {
-    index: requiredInteger(item.index),
-    text: requiredString(item.text),
-    category: requiredString(item.category),
-    service: optionalString(item.service),
-    flags: seoQueryFlags(item.flags),
-  };
-}
-
-function seoReadiness(value: unknown): SeoReadiness {
-  const item = record(value);
-  return {
-    report_ready: requiredBoolean(item.report_ready),
-    summary_ready: requiredBoolean(item.summary_ready),
-    queries_ready: requiredBoolean(item.queries_ready),
-    has_submitted_search_rows: requiredBoolean(item.has_submitted_search_rows),
-    has_unsubmitted_search_rows: requiredBoolean(item.has_unsubmitted_search_rows),
-    has_unfinished_model_rows: requiredBoolean(item.has_unfinished_model_rows),
-    search_rows: requiredInteger(item.search_rows),
-    model_rows: requiredInteger(item.model_rows),
-  };
-}
-
-/** One agent of the run: only its name, status, safe error and timestamp. */
-function seoAgent(value: unknown): SeoAgent {
-  const item = record(value);
-  return {
-    agent: requiredString(item.agent),
-    status: oneOf(item.status, SEO_AGENT_STATUSES),
-    error: optionalString(item.error),
-    updated_at: optionalString(item.updated_at),
-  };
-}
-
-function seoBudgetItem(value: unknown): SeoBudgetItem {
-  const item = record(value);
-  return { used: requiredInteger(item.used), limit: requiredInteger(item.limit) };
-}
-
-function seoBudget(value: unknown): SeoBudgetView {
-  const item = record(value);
-  return {
-    pages: seoBudgetItem(item.pages),
-    searches: seoBudgetItem(item.searches),
-    model_answers: seoBudgetItem(item.model_answers),
-    tool_calls: seoBudgetItem(item.tool_calls),
-    handoffs: seoBudgetItem(item.handoffs),
-    seed_searches: requiredInteger(item.seed_searches),
-    model_rows: requiredInteger(item.model_rows),
-    steps: requiredInteger(item.steps),
-    agent_steps: integerRecord(item.agent_steps),
-  };
-}
-
-/** One trace step: safe arguments and a short result, never a secret. */
-function seoTraceStep(value: unknown): SeoTraceStep {
-  const item = record(value);
-  return {
-    step_index: requiredInteger(item.step_index),
-    agent: requiredString(item.agent),
-    kind: oneOf(item.kind, SEO_TRACE_KINDS),
-    name: requiredString(item.name),
-    arguments: record(item.arguments),
-    result_summary: optionalString(item.result_summary),
-    status: oneOf(item.status, SEO_TRACE_STATUSES),
-    error: optionalString(item.error),
-    created_at: requiredString(item.created_at),
-  };
-}
-
-/** Project the saved analysis; model answers and operation IDs never appear here. */
-export function publicSeoSnapshot(value: unknown): SeoAnalysisSnapshot {
-  const item = record(value);
-  const id = requiredString(item.id);
-  seoAnalysisPath(id);
-  const input = record(item.input);
-  if (
-    !Array.isArray(item.services) ||
-    !Array.isArray(item.pages) ||
-    !Array.isArray(item.stages) ||
-    !Array.isArray(item.agents) ||
-    !Array.isArray(item.candidates) ||
-    !Array.isArray(item.queries)
-  )
-    throw new Error('Invalid SEO snapshot');
-  return {
-    id,
-    status: oneOf(item.status, SEO_ANALYSIS_STATUSES),
-    created_at: requiredString(item.created_at),
-    updated_at: requiredString(item.updated_at),
-    finished_at: optionalString(item.finished_at),
-    input: {
-      url: requiredString(input.url),
-      host: requiredString(input.host),
-      sphere: stringValue(input.sphere),
-      seeds: strings(input.seeds),
-      services: strings(input.services),
-      connection_ids: strings(input.connection_ids),
-    },
-    estimate: seoEstimate(item.estimate),
-    company_name: stringValue(item.company_name),
-    services: strings(item.services),
-    pages: item.pages.map((raw) => {
-      const page = record(raw);
-      return { url: requiredString(page.url), title: stringValue(page.title) };
-    }),
-    stages: item.stages.map(seoStage),
-    agents: item.agents.map(seoAgent),
-    budget: seoBudget(item.budget),
-    budget_exhausted: requiredBoolean(item.budget_exhausted),
-    candidates: item.candidates.map(seoCandidate),
-    queries: item.queries.map(seoQuery),
-    counters: seoCounts(item.counters),
-    readiness: seoReadiness(item.readiness),
-    aggregates: seoAggregates(item.aggregates),
-  };
-}
-
-export function publicSeoHistory(value: unknown): SeoHistoryPage {
-  const page = record(value);
-  if (!Array.isArray(page.items)) throw new Error('Invalid SEO history');
-  const next_cursor = optionalString(page.next_cursor);
-  if (next_cursor !== null) seoCursor(next_cursor);
-  return {
-    items: page.items.map((raw) => {
-      const item = record(raw);
-      const id = requiredString(item.id);
-      seoAnalysisPath(id);
-      return {
-        id,
-        created_at: requiredString(item.created_at),
-        finished_at: optionalString(item.finished_at),
-        status: oneOf(item.status, SEO_ANALYSIS_STATUSES),
-        sphere: stringValue(item.sphere),
-        host: requiredString(item.host),
-        company_name: stringValue(item.company_name),
-        counters: seoCounts(item.counters),
-      };
-    }),
-    next_cursor,
-  };
-}
-
-function seoSearchRow(value: unknown): SeoSearchRow {
-  const item = record(value);
-  return {
-    query_index: requiredInteger(item.query_index),
-    query: optionalString(item.query),
-    category: optionalString(item.category),
-    service: optionalString(item.service),
-    status: oneOf(item.status, SEO_ROW_STATUSES),
-    site_position: optionalInteger(item.site_position),
-    site_url: optionalString(item.site_url),
-    error: optionalString(item.error),
-  };
-}
-
-function seoCitation(value: unknown): SeoCitation {
-  const item = record(value);
-  return { url: requiredString(item.url), title: optionalString(item.title) };
-}
-
-function seoCitations(value: unknown): SeoCitation[] {
-  if (!Array.isArray(value)) throw new Error('Invalid API response');
-  return value.map(seoCitation);
-}
-
-function seoModelRow(value: unknown): SeoModelRow {
-  const item = record(value);
-  return {
-    query_index: requiredInteger(item.query_index),
-    connection_id: requiredString(item.connection_id),
-    provider_name: requiredString(item.provider_name),
-    status: oneOf(item.status, SEO_ROW_STATUSES),
-    answer: optionalString(item.answer),
-    name_mentioned: optionalBoolean(item.name_mentioned),
-    host_mentioned: optionalBoolean(item.host_mentioned),
-    error: optionalString(item.error),
-    query: optionalString(item.query),
-    category: optionalString(item.category),
-    service: optionalString(item.service),
-    answer_mode: oneOf(item.answer_mode, SEO_ANSWER_MODES),
-    search_status: oneOf(item.search_status, SEO_SEARCH_STATUSES),
-    citations: seoCitations(item.citations),
-    model: optionalString(item.model),
-    search_calls: optionalInteger(item.search_calls),
-  };
-}
-
-/** Project one page of the detail resource; the shape depends on the row kind. */
-export function publicSeoRows(value: unknown, kind: SeoRowsKind): SeoRowsPage {
-  const page = record(value);
-  if (!Array.isArray(page.items)) throw new Error('Invalid SEO rows');
-  const next_cursor = optionalString(page.next_cursor);
-  if (next_cursor !== null) seoCursor(next_cursor);
-  const project = (raw: unknown): SeoRow =>
-    kind === 'model' ? seoModelRow(raw) : seoSearchRow(raw);
-  return { items: page.items.map(project), next_cursor };
-}
-
-/** Project one page of the agent trace; secrets and operation IDs never appear here. */
-export function publicSeoTracePage(value: unknown): SeoTracePage {
-  const page = record(value);
-  if (!Array.isArray(page.items)) throw new Error('Invalid SEO trace');
-  const next_cursor = optionalString(page.next_cursor);
-  if (next_cursor !== null) seoCursor(next_cursor);
-  return { items: page.items.map(seoTraceStep), next_cursor };
-}
-
-/**
- * Project a message payload by the kind of its message.
- *
- * A proposal carries exactly the run parameters, the estimate and the status;
- * a run carries only the analysis it started; a text message carries nothing.
- * Any other key of a stored payload is dropped instead of being forwarded.
- */
-function chatPayload(kind: ChatMessageKind, value: unknown): ChatPayload | null {
-  if (value === null || value === undefined) return null;
-  const item = record(value);
-  if (kind === 'proposal') {
-    const proposal: ChatProposal = {
-      status: oneOf(item.status, CHAT_PROPOSAL_STATUSES),
-      url: stringValue(item.url),
-      sphere: stringValue(item.sphere),
-      seeds: strings(item.seeds),
-      services: strings(item.services),
-      connection_ids: strings(item.connection_ids),
-      search_upper: requiredInteger(item.search_upper),
-      model_upper: requiredInteger(item.model_upper),
-      generated_limit: requiredInteger(item.generated_limit),
-    };
-    return proposal;
-  }
-  if (kind === 'run') return { analysis_id: requiredString(item.analysis_id) };
-  return null;
-}
-
-function publicChatMessage(value: unknown): ChatMessage {
-  const item = record(value);
-  const kind = oneOf(item.kind, CHAT_MESSAGE_KINDS);
-  return {
-    id: requiredString(item.id),
-    seq: requiredInteger(item.seq),
-    role: requiredString(item.role),
-    kind,
-    text: optionalString(item.text),
-    payload: chatPayload(kind, item.payload),
-    created_at: requiredString(item.created_at),
-  };
-}
-
-/** The list view of one chat: its title, its age and its live run flag. */
-export function publicChatSummary(value: unknown): ChatSummary {
-  const item = record(value);
-  const id = requiredString(item.id);
-  seoChatPath(id);
-  return {
-    id,
-    title: requiredString(item.title),
-    updated_at: requiredString(item.updated_at),
-    running: requiredBoolean(item.running),
-  };
-}
-
-export function publicChatList(value: unknown): ChatList {
-  const item = record(value);
-  if (!Array.isArray(item.items)) throw new Error('Invalid chat list');
-  return { items: item.items.map(publicChatSummary) };
-}
-
-export function publicChatPage(value: unknown): ChatPage {
-  const item = record(value);
-  if (!Array.isArray(item.messages)) throw new Error('Invalid chat page');
-  return {
-    chat: publicChatSummary(item.chat),
-    messages: item.messages.map(publicChatMessage),
-    next_cursor: optionalInteger(item.next_cursor),
-  };
-}
-
-export function publicChatMessages(value: unknown): ChatMessages {
-  const item = record(value);
-  if (!Array.isArray(item.messages)) throw new Error('Invalid chat messages');
-  return { chat: publicChatSummary(item.chat), messages: item.messages.map(publicChatMessage) };
-}
-
-function publicChatCreated(value: unknown): ChatCreated {
-  return { chat: publicChatSummary(record(value).chat) };
-}
-
-function publicChatProposalUpdated(value: unknown): ChatProposalUpdated {
-  const item = record(value);
-  return { chat: publicChatSummary(item.chat), message: publicChatMessage(item.message) };
-}
-
 export function publicForm(value: unknown): Record<string, unknown> {
   const item = record(value);
   const limits = record(item.limits);
@@ -1336,18 +607,11 @@ export function publicForm(value: unknown): Record<string, unknown> {
  * The request budget for one upstream path.
  *
  * `/api/check` is streamed without a shared deadline, the SEO connection test
- * and the chat message call wait for a real LLM completion, and every other
- * call keeps the short budget.
+ * waits for a real LLM completion, and every other call keeps the short budget.
  */
 export function apiTimeoutMs(path: ApiPath): number | undefined {
   if (path === '/api/check') return undefined;
   if (path === '/api/seo/settings/test') return SEO_SETTINGS_TEST_TIMEOUT_MS;
-  // Only the turn that calls the service LLM is long; every other chat read stays short.
-  if (
-    path.startsWith('/api/seo/chats/') &&
-    SEO_CHAT_MESSAGES_SUFFIX.test(path.slice('/api/seo/chats/'.length))
-  )
-    return SEO_CHAT_MESSAGE_TIMEOUT_MS;
   return DEFAULT_TIMEOUT_MS;
 }
 
@@ -1368,8 +632,6 @@ export async function loadPageData(): Promise<{
   searchSettingsError: string;
   seoSettings: SeoSettings | null;
   seoSettingsError: string;
-  chats: ChatSummary[];
-  chatsError: string;
   loadError: string;
 }> {
   // The region catalog is an independent request: a failure there must not stop
@@ -1379,9 +641,6 @@ export async function loadPageData(): Promise<{
   // The SEO service-LLM settings are independent as well: an unavailable SEO
   // resource must never take the model configuration down with it.
   const { settings: seoSettings, error: seoSettingsError } = await loadSeoSettings();
-  // The chat list is one more independent resource: an empty or unavailable chat
-  // list must not take the model configuration down with it.
-  const { chats, error: chatsError } = await loadChats();
   try {
     const [providerResponse, formResponse, settingsResponse] = await Promise.all([
       pythonApi('/api/providers'),
@@ -1411,8 +670,6 @@ export async function loadPageData(): Promise<{
       searchSettingsError,
       seoSettings,
       seoSettingsError,
-      chats,
-      chatsError,
       loadError: '',
     };
   } catch {
@@ -1426,24 +683,8 @@ export async function loadPageData(): Promise<{
       searchSettingsError,
       seoSettings,
       seoSettingsError,
-      chats,
-      chatsError,
       loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.',
     };
-  }
-}
-
-async function loadChats(): Promise<{ chats: ChatSummary[]; error: string }> {
-  try {
-    const response = await pythonApi('/api/seo/chats');
-    if (
-      !response.ok ||
-      !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')
-    )
-      throw new Error('Invalid chats');
-    return { chats: publicChatList(await response.json()).items, error: '' };
-  } catch {
-    return { chats: [], error: 'Список чатов недоступен' };
   }
 }
 
@@ -1520,31 +761,9 @@ export async function proxyJson(
           : ['POST'];
     if (!allowed.includes(method)) return json({ detail: 'Недопустимый метод' }, 405);
   }
-  // Each chat path has exactly the methods the screen uses: the collection is
-  // read and created, a chat is read and deleted, and the two actions are one
-  // write each. Anything else never reaches Python.
-  const chatMessagesPath =
-    path.startsWith('/api/seo/chats/') &&
-    SEO_CHAT_MESSAGES_SUFFIX.test(path.slice('/api/seo/chats/'.length));
-  const chatProposalPath =
-    path.startsWith('/api/seo/chats/') &&
-    SEO_CHAT_PROPOSAL_SUFFIX.test(path.slice('/api/seo/chats/'.length));
-  if (path === '/api/seo/chats' && !['GET', 'POST'].includes(method))
-    return json({ detail: 'Недопустимый метод' }, 405);
-  if (chatMessagesPath && method !== 'POST') return json({ detail: 'Недопустимый метод' }, 405);
-  if (chatProposalPath && method !== 'PUT') return json({ detail: 'Недопустимый метод' }, 405);
-  if (
-    path.startsWith('/api/seo/chats/') &&
-    !chatMessagesPath &&
-    !chatProposalPath &&
-    !['GET', 'DELETE'].includes(method)
-  )
-    return json({ detail: 'Недопустимый метод' }, 405);
-  // The connection probe and the cancel action are bodyless POSTs: neither
-  // carries a payload, and the probe triggers one upstream chat call.
-  const bodylessPost =
-    path === '/api/seo/settings/test' ||
-    (path.startsWith('/api/seo/analyses/') && path.endsWith('/cancel'));
+  // The connection probe is a bodyless POST: it carries no payload and triggers
+  // one upstream chat call.
+  const bodylessPost = path === '/api/seo/settings/test';
   let body: string | undefined;
   if (method !== 'GET') {
     if (!sameOriginRequest(request)) return json({ detail: 'Недопустимый источник запроса' }, 403);
@@ -1603,34 +822,6 @@ export async function proxyJson(
       return json(publicSeoSettings(value), upstream.status);
     if (path === '/api/seo/settings/test')
       return json(publicSeoSettingsTest(value), upstream.status);
-    // The chat responses are projected field by field: the draft, the open
-    // proposal pointer and the active run of a chat stay in the server.
-    if (path === '/api/seo/chats' && method === 'GET')
-      return json(publicChatList(value), upstream.status);
-    if (path === '/api/seo/chats' && method === 'POST')
-      return json(publicChatCreated(value), upstream.status);
-    if (chatMessagesPath && method === 'POST')
-      return json(publicChatMessages(value), upstream.status);
-    if (chatProposalPath && method === 'PUT')
-      return json(publicChatProposalUpdated(value), upstream.status);
-    if (path.startsWith('/api/seo/chats/') && method === 'GET')
-      return json(publicChatPage(value), upstream.status);
-    if (path === '/api/seo/analyses' && method === 'POST')
-      return json(publicSeoAnalysisCreated(value), upstream.status);
-    if (
-      (path === '/api/seo/analyses' || path.startsWith('/api/seo/analyses?cursor=')) &&
-      method === 'GET'
-    )
-      return json(publicSeoHistory(value), upstream.status);
-    const seoRows = /^\/api\/seo\/analyses\/[^/]+\/rows\?kind=(model|search)/.exec(path);
-    if (seoRows && method === 'GET')
-      return json(publicSeoRows(value, seoRows[1] as SeoRowsKind), upstream.status);
-    if (/^\/api\/seo\/analyses\/[^/]+\/trace(?:\?|$)/.test(path) && method === 'GET')
-      return json(publicSeoTracePage(value), upstream.status);
-    if (path.startsWith('/api/seo/analyses/') && method === 'GET')
-      return json(publicSeoSnapshot(value), upstream.status);
-    if (path.endsWith('/cancel') && method === 'POST')
-      return json(publicSeoSnapshot(value), upstream.status);
     if (path === '/api/search' && method === 'POST')
       return json(publicSearchCreated(value), upstream.status);
     if (path === '/api/search/regions' && method === 'GET')
