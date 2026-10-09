@@ -139,8 +139,8 @@ make migrate-down                     # alembic downgrade -1
 
 ## Запуск в Docker
 
-Три службы: интерфейс, API и PostgreSQL (образ `postgres:18-bookworm`); ничего кроме
-Docker и compose не требуется:
+Четыре службы: PostgreSQL (образ `postgres:18-bookworm`), одноразовая служба миграций,
+API и интерфейс; ничего кроме Docker и compose не требуется:
 
 ```bash
 docker compose up -d --build      # секреты не нужны: их вводят в интерфейсе
@@ -150,9 +150,13 @@ open http://localhost:3001/clustering/tracker/
 - `frontend` — собранный SvelteKit (adapter-node) на порту **3001**. Он же проксирует
   `/api/*` в серверную часть на своей стороне, поэтому браузер обращается только к нему,
   и CORS не нужен.
+- `migrate` — тот же образ backend, но одна команда: `alembic upgrade head`. Служба
+  применяет миграции и завершается; `backend` стартует только после её успешного
+  завершения (`service_completed_successfully`). Так N реплик не гоняются за одну и ту
+  же схему.
 - `backend` — FastAPI на порту **8000**, опубликован только на `127.0.0.1`. Интерфейс
-  ходит в него по внутренней сети compose (`http://backend:8000`). Контейнер сам
-  выполняет `alembic upgrade head` перед стартом сервера.
+  ходит в него по внутренней сети compose (`http://backend:8000`). Свои миграции он не
+  выполняет: схему приводит в порядок служба `migrate`.
 - `postgres` — PostgreSQL 18 (Debian bookworm) на порту **5433** хоста, чтобы не
   конфликтовать с локальным Postgres.app на 5432. Пароль и база — из
   `docker-compose.yml`; менять их для локального запуска не нужно.
@@ -168,6 +172,7 @@ open http://localhost:3001/clustering/tracker/
 | --- | --- |
 | `AI_TRACKER_ORIGIN` | Публичный origin для абсолютных ссылок и перенаправлений adapter-node; Docker Compose передаёт его как `ORIGIN` (по умолчанию `http://localhost:3001`) |
 | `AI_TRACKER_DATABASE_URL` | Адрес PostgreSQL. Локально по умолчанию `postgresql://adam977@localhost:5432/ai-tracker` (Postgres.app); в compose — сервис `postgres` |
+| `AI_TRACKER_DB_POOL_MAX_SIZE` | Верхняя граница пула соединений на процесс (по умолчанию `8`). Итог по серверу — `воркеры × реплики × это значение`, он должен укладываться в `max_connections` PostgreSQL |
 | `AI_TRACKER_ALLOWED_HOSTS` | Имена, по которым принимается API, через запятую (по умолчанию `localhost,127.0.0.1`; в compose добавлено `backend`) |
 | `AI_TRACKER_API_HOSTS` | Хосты, к которым BFF вправе обращаться с сервера, через запятую; loopback разрешён всегда |
 
