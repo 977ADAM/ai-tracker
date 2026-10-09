@@ -357,10 +357,10 @@ def create_legacy_database(path: Path) -> None:
 # -- step 1: migration -------------------------------------------------------
 
 
-def test_initialize_creates_seo_tables_and_reaches_version_four(tmp_path):
+def test_initialize_creates_seo_tables_and_reaches_version_six(tmp_path):
     repository = seo_repo(tmp_path)
 
-    assert user_version(tmp_path / DB_FILE) == 4
+    assert user_version(tmp_path / DB_FILE) == 6
     assert table_names(tmp_path / DB_FILE) == SEO_TABLES
     assert (tmp_path / DB_FILE).stat().st_mode & 0o777 == 0o600
     assert tmp_path.stat().st_mode & 0o077 == 0
@@ -373,7 +373,7 @@ def test_initialize_creates_seo_tables_and_reaches_version_four(tmp_path):
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     repository.initialize()
-    assert user_version(tmp_path / DB_FILE) == 4
+    assert user_version(tmp_path / DB_FILE) == 6
 
 
 def test_initialize_adds_a_missing_seo_table_to_an_existing_version_three_file(tmp_path):
@@ -390,7 +390,7 @@ def test_initialize_adds_a_missing_seo_table_to_an_existing_version_three_file(t
     repository = seo_repo(tmp_path)
 
     assert "seo_seed_rows" in table_names(path)
-    assert user_version(path) == 4
+    assert user_version(path) == 6
     analysis_id = create(repository)
     repository.save_seed_row(analysis_id, 0, status="waiting", operation_id="op-0")
     assert repository.resume_plan(analysis_id).submitted_seeds == ((0, "op-0"),)
@@ -403,7 +403,7 @@ def test_migration_from_a_populated_version_three_database_keeps_every_row(tmp_p
 
     repository = seo_repo(tmp_path)
 
-    assert user_version(path) == 4
+    assert user_version(path) == 6
     # Every revision-1 row is still there, including the ones outside the new tables.
     assert table_counts(path, LEGACY_SEO_TABLES) == before
     assert all(count > 0 for count in before.values())
@@ -433,7 +433,7 @@ def test_migration_from_populated_version_two_keeps_runs_and_adds_seo(tmp_path):
 
     seo = seo_repo(tmp_path)
 
-    assert user_version(path) == 4
+    assert user_version(path) == 6
     assert LEGACY_TABLES <= table_names(path)
     assert SEO_TABLES <= table_names(path)
     # The migrated file carries both stacks: an SEO run can start right away.
@@ -462,21 +462,21 @@ def test_a_version_five_file_from_the_chat_migration_is_not_downgraded(tmp_path)
 
     repository = seo_repo(tmp_path)
 
-    assert user_version(path) == 5
+    assert user_version(path) == 6
     assert create(repository)
 
 
 def test_newer_schema_version_is_refused_without_leaking_the_path(tmp_path):
     path = tmp_path / DB_FILE
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA user_version=6")
+    connection.execute("PRAGMA user_version=7")
     connection.commit()
     connection.close()
 
     with pytest.raises(StorageError) as raised:
         SeoRepository(tmp_path).initialize()
     assert str(path) not in str(raised.value)
-    assert user_version(path) == 6
+    assert user_version(path) == 7
 
 
 def test_unusable_database_file_fails_safely(tmp_path):
@@ -784,6 +784,8 @@ def test_model_rows_page_filters_orders_and_pages(tmp_path):
         "query_index": 0, "connection_id": "chatgpt", "provider_name": "CHATGPT", "status": "found",
         "answer": "ответ chatgpt 0", "name_mentioned": True, "host_mentioned": False, "error": None,
         "query": "запрос 0", "category": "commercial", "service": "Букеты",
+        "answer_mode": "text", "search_status": "not_requested", "search_results": [],
+        "citations": [], "model": None, "search_calls": None,
     }
     second = repository.rows_page(analysis_id, "model", cursor=first["next_cursor"], limit=3)
     assert [(row["query_index"], row["connection_id"]) for row in second["items"]] == [

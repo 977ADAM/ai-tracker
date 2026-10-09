@@ -11,6 +11,7 @@ class SettingsWriteRequest(BaseModel):
     endpoint: str | None = None
     api_key: str | None = None
     models: list[dict] | None = None
+    answer_mode: str | None = None
 
 
 class SettingsModelResponse(BaseModel):
@@ -26,3 +27,4 @@ class SettingsProviderResponse(BaseModel):
     endpoint: str
     configured: bool
     models: list[SettingsModelResponse]
+    answer_mode: str = "text"

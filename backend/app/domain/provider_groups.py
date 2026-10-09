@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from app.core.errors import ValidationError
 from app.domain.endpoints import validate_endpoint
 from app.domain.limits import MAX_MODEL_LENGTH, MAX_NAME_LENGTH
+from app.domain.seo_answer import AnswerMode
 
 
 @dataclass(frozen=True)
@@ -28,11 +30,13 @@ class ProviderGroup:
     endpoint: str
     models: tuple[ProviderModel, ...]
     kind: str = "openai"
+    answer_mode: AnswerMode = "text"
 
     def metadata(self) -> dict[str, Any]:
         return {
             "id": self.id, "name": self.name, "kind": self.kind,
             "endpoint": self.endpoint, "models": [model.metadata() for model in self.models],
+            "answer_mode": self.answer_mode,
         }
 
 
@@ -52,6 +56,7 @@ def build_group(
         raise ValidationError("Некорректные настройки провайдера")
     name = _short_text(payload.get("name"), MAX_NAME_LENGTH, "Укажите название до 100 символов")
     endpoint = validate_endpoint(payload.get("endpoint"))
+    answer_mode = validate_answer_mode(payload.get("answer_mode", previous.answer_mode if previous else "text"), endpoint)
     raw_models = payload.get("models")
     if not isinstance(raw_models, list) or not raw_models or len(raw_models) > 50:
         raise ValidationError("Добавьте от 1 до 50 моделей")
@@ -74,4 +79,14 @@ def build_group(
             name=_short_text(raw.get("name"), MAX_NAME_LENGTH, "Укажите название модели до 100 символов"),
         ))
     return ProviderGroup(id=previous.id if previous else str(uuid4()), name=name, endpoint=endpoint,
-                         models=tuple(models))
+                         models=tuple(models), answer_mode=answer_mode)
+
+
+def validate_answer_mode(value: object, endpoint: str) -> AnswerMode:
+    if value not in ("text", "deepseek_web"):
+        raise ValidationError("Неизвестный режим ответа модели")
+    if value == "deepseek_web":
+        url = urlsplit(endpoint)
+        if url.scheme != "https" or url.hostname != "api.deepseek.com" or url.port is not None or url.path not in ("/chat/completions", "/v1/chat/completions"):
+            raise ValidationError("Веб-поиск DeepSeek доступен только для прямого подключения api.deepseek.com")
+    return value

@@ -14,6 +14,7 @@ from app.domain.limits import (
     MAX_NAME_LENGTH,
 )
 from app.domain.models import KIND_OPENAI, Connection
+from app.domain.provider_groups import validate_answer_mode
 
 CUSTOM_FIELDS = ("name", "endpoint", "model", "api_key")
 NEW_PROVIDER_FIELDS = ["name", "endpoint", "model", "api_key"]
@@ -71,6 +72,7 @@ def public_view(connection: Connection, configured: bool) -> dict[str, Any]:
         "kind": connection.kind,
         "endpoint": connection.endpoint,
         "model": connection.model,
+        "answer_mode": connection.answer_mode,
         "configured": configured,
         "editable_fields": editable_fields(connection),
         "can_reset": can_reset(connection),
@@ -115,6 +117,7 @@ def new_custom_connection(payload: dict[str, Any], connection_id: str | None = N
         name=_validated_name(payload.get("name")),
         kind=KIND_OPENAI,
         endpoint=validate_endpoint(payload.get("endpoint")),
+        answer_mode=validate_answer_mode(payload.get("answer_mode", "text"), validate_endpoint(payload.get("endpoint"))),
         model=_validated_model(payload.get("model")),
     )
 
@@ -130,6 +133,7 @@ def updated_custom_connection(previous: Connection, payload: dict[str, Any]) -> 
         name=_validated_name(merged.get("name")),
         kind=KIND_OPENAI,
         endpoint=validate_endpoint(merged.get("endpoint")),
+        answer_mode=validate_answer_mode(merged.get("answer_mode", "text"), validate_endpoint(merged.get("endpoint"))),
         model=_validated_model(merged.get("model")),
     )
 

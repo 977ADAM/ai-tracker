@@ -30,6 +30,7 @@ from app.core.errors import ChatNotFound, StorageError, ValidationError
 
 FILE_NAME = "runs.sqlite3"
 SCHEMA_VERSION = 5
+MAX_FILE_VERSION = 6
 BUSY_TIMEOUT_MS = 5000
 
 STORAGE_FAILED = "Не удалось сохранить или прочитать чат"
@@ -93,7 +94,7 @@ class ChatRepository:
         except OSError as exc:
             raise StorageError(STORAGE_FAILED) from exc
         version = self._read_version()
-        if version > SCHEMA_VERSION:
+        if version > MAX_FILE_VERSION:
             # A database written by a newer application version stays untouched.
             raise StorageError(STORAGE_FAILED)
         self._enable_wal()

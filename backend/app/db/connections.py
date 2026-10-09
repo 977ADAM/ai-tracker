@@ -56,7 +56,7 @@ class ConnectionRepository:
             for group in self.groups():
                 connections.extend(
                     Connection(id=model.id, name=f"{group.name} · {model.name}", kind=group.kind,
-                               model=model.model, endpoint=group.endpoint)
+                               model=model.model, endpoint=group.endpoint, answer_mode=group.answer_mode)
                     for model in group.models
                 )
         else:
@@ -122,7 +122,7 @@ class ConnectionRepository:
             if group is not None:
                 models = tuple(replace(model, model=connection.model) if model.id == connection.id else model
                                for model in group.models)
-                self.save_group(replace(group, endpoint=connection.endpoint or group.endpoint, models=models), api_key)
+                self.save_group(replace(group, endpoint=connection.endpoint or group.endpoint, models=models, answer_mode=connection.answer_mode), api_key)
                 return
         previous_key = self._saved_key(connection.id)
         if api_key is not None:
@@ -252,7 +252,7 @@ class ConnectionRepository:
                 raise StorageError("Не удалось прочитать настройки подключений")
             parsed.append(ProviderModel(id=model["id"], model=model["model"], name=model["name"]))
         return ProviderGroup(id=item["id"], name=item["name"], endpoint=item["endpoint"],
-                             models=tuple(parsed), kind=item.get("kind", "openai"))
+                             models=tuple(parsed), kind=item.get("kind", "openai"), answer_mode=item.get("answer_mode", "text"))
 
     def _write(self, data: dict[str, Any]) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -291,6 +291,7 @@ class ConnectionRepository:
             kind=item.get("kind", "openai"),
             model=model,
             endpoint=endpoint if isinstance(endpoint, str) else None,
+            answer_mode=item.get("answer_mode", "text"),
         )
 
     def _with_connection(self, data: dict[str, Any], connection: Connection) -> dict[str, Any]:

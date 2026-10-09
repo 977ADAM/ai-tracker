@@ -44,11 +44,11 @@ def test_initialize_creates_chat_tables(tmp_path):
     assert repository.chat(chat_id)["title"] == "Первый чат"
 
 
-def test_initialize_raises_version_to_five(tmp_path):
+def test_initialize_keeps_newer_seo_version(tmp_path):
     RunRepository(tmp_path).initialize()
     SeoRepository(tmp_path).initialize()
     ChatRepository(tmp_path).initialize()
-    assert _user_version(tmp_path) == 5
+    assert _user_version(tmp_path) == 6
 
 
 def test_messages_keep_sequence_and_cursor(tmp_path):

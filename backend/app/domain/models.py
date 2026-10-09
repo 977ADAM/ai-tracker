@@ -26,6 +26,7 @@ class Connection:
     endpoint: str | None = None
     thinking_disabled: bool = False
     preset: bool = False
+    answer_mode: Literal["text", "deepseek_web"] = "text"
 
     def metadata(self) -> dict[str, Any]:
         """The non-secret part that is persisted to disk."""
@@ -35,6 +36,7 @@ class Connection:
             "kind": self.kind,
             "endpoint": self.endpoint,
             "model": self.model,
+            "answer_mode": self.answer_mode,
         }
 
 

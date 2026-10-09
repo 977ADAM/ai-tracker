@@ -71,6 +71,7 @@ class ProviderResponse(BaseModel):
     kind: str
     endpoint: str | None = Field(description="Адрес API; у встроенных подключений может отсутствовать")
     model: str
+    answer_mode: str = "text"
     configured: bool = Field(description="Найден ли API-ключ: сохранённый или из переменной среды")
     editable_fields: list[str] = Field(description="Поля, которые можно менять у этого подключения")
     can_reset: bool = Field(description="Встроенное подключение: ключ можно сбросить, но не удалить")

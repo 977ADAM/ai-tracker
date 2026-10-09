@@ -63,6 +63,32 @@ class SeoAnswerProvider(Protocol):
     def close(self) -> None: ...
 
 
+def answer_from_dict(value: object) -> SeoAnswer:
+    """Validate persisted evidence rather than treating corruption as no citations."""
+    if not isinstance(value, dict):
+        raise ValidationError("Некорректные данные источников")
+    try:
+        result = SeoAnswer(**{**value,
+            "search_results": tuple(SearchResult(**item) for item in value["search_results"]),
+            "citations": tuple(Citation(**item) for item in value["citations"]),
+        })
+        if (result.answer_mode not in ("text", "deepseek_web")
+            or result.search_status not in ("not_requested", "completed", "error")
+            or not isinstance(result.text, str) or not isinstance(result.model, str)
+            or (result.search_calls is not None and (type(result.search_calls) is not int or result.search_calls < 0))):
+            raise ValueError
+        for item in (*result.search_results, *result.citations):
+            if normalize_source_url(item.url) is None or (item.title is not None and not isinstance(item.title, str)):
+                raise ValueError
+        for item in result.citations:
+            if (type(item.block_index) is not int or item.block_index < 0 or type(item.order) is not int or item.order < 1
+                or (item.cited_text is not None and not isinstance(item.cited_text, str))):
+                raise ValueError
+        return result
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValidationError("Некорректные данные источников") from exc
+
+
 def normalize_source_url(value: object) -> str | None:
     """Validate a public-looking URL without resolving or fetching its host.
 
