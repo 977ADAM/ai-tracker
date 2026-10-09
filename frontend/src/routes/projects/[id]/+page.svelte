@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
+  import ProjectHeader from '$lib/components/ProjectHeader.svelte';
   import { onMount, untrack } from 'svelte';
   import type { Project, Measurement, ModelRow, SearchRow, Page } from '$lib/project-types';
   import { projectRequest, measurementLabels, percent } from '$lib/project-client';
@@ -21,6 +24,9 @@
     busy = $state(false),
     error = $state('');
   let deleteRun = $state<string | null>(null);
+  let deleteProject = $state(false);
+  let view = $state<'mentions' | 'sources'>('mentions');
+  let loadedProject = untrack(() => data.project);
   let epoch = 0,
     disposed = false;
   let active = $derived(history.find((r) => r.status === 'running'));
@@ -129,6 +135,39 @@
       busy = false;
     }
   }
+  async function renameProject(name: string) {
+    busy = true;
+    try {
+      const payload = {
+        name,
+        brand: project.brand,
+        site_url: project.site_url,
+        include_subdomains: project.include_subdomains,
+        brand_description: project.brand_description,
+        brand_aliases: project.brand_aliases,
+        queries: project.queries,
+        competitors: project.competitors,
+        connection_ids: project.connection_ids,
+        yandex_enabled: project.yandex_enabled,
+        yandex_region: project.yandex_region,
+      };
+      project = await projectRequest<Project>(`/api/projects/${project.id}`, 'PUT', payload);
+    } finally {
+      busy = false;
+    }
+  }
+  async function removeProject() {
+    busy = true;
+    try {
+      await projectRequest(`/api/projects/${project.id}`, 'DELETE');
+      await goto(resolve('/'));
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Не удалось удалить проект';
+      deleteProject = false;
+    } finally {
+      busy = false;
+    }
+  }
   async function moreHistory() {
     if (!historyCursor) return;
     const page = await projectRequest<Page<Measurement>>(
@@ -138,7 +177,9 @@
     historyCursor = page.cursor;
   }
   $effect(() => {
-    if (data.project.id !== project.id || data.project.revision !== project.revision) {
+    const incoming = data.project;
+    if (incoming !== loadedProject) {
+      loadedProject = incoming;
       epoch++;
       project = data.project;
       history = data.history.items;
@@ -182,41 +223,27 @@
 </script>
 
 <svelte:head><title>{project.name} · ИИ-трекинг</title></svelte:head>
-<main class="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-  <a href="/" class="text-sm text-muted">← Проекты</a>
-  <div class="mt-4 flex flex-wrap items-start justify-between gap-4">
-    <div>
-      <h1 class="text-3xl font-semibold">{project.name}</h1>
-      <p class="mt-2 text-sm text-muted">
-        Бренд: {project.brand} ·
-        <a href={project.site_url} target="_blank" rel="noopener noreferrer">{project.site_url}</a>
-      </p>
-    </div>
-    <div class="flex gap-3">
-      <a
-        href={`/projects/${project.id}/setup`}
-        class="rounded-xl border border-line bg-white px-4 py-3 text-sm font-medium"
-        >Мастер настройки</a
-      >
-      <a
-        href={`/projects/${project.id}/settings`}
-        class="rounded-xl border border-line bg-white px-4 py-3 text-sm font-medium"
-        >Настройки проекта</a
-      ><button
-        disabled={busy || !!active || !ready}
-        onclick={start}
-        class="rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white disabled:opacity-40"
-        >Запустить замер</button
-      >
-    </div>
+<main class="mx-auto max-w-[1920px] px-4 py-5 sm:px-6">
+  <ProjectHeader
+    {project}
+    bind:view
+    {ready}
+    active={!!active}
+    {busy}
+    onStart={start}
+    onDelete={() => (deleteProject = true)}
+    onRename={renameProject}
+  />
+  <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+    <p class="text-xs text-muted">
+      {project.queries.length} запросов × {project.connection_ids.length} моделей = {project.queries
+        .length * project.connection_ids.length} ответов; до {project.queries.length *
+        project.connection_ids.length} оценок тональности{project.yandex_enabled
+        ? `; ${project.queries.length} поисков Яндекса`
+        : ''}.
+    </p>
+    <a href={`/projects/${project.id}/setup`} class="text-xs text-accent">Мастер настройки</a>
   </div>
-  <p class="mt-4 text-xs text-muted">
-    {project.queries.length} запросов × {project.connection_ids.length} моделей = {project.queries
-      .length * project.connection_ids.length} ответов; до {project.queries.length *
-      project.connection_ids.length} оценок тональности{project.yandex_enabled
-      ? `; ${project.queries.length} поисков Яндекса`
-      : ''}.
-  </p>
   {#if !ready}<div class="mt-6 rounded-xl border border-line bg-white p-6">
       <h2 class="font-semibold">Проект создан</h2>
       <p class="mt-2 text-sm text-muted">
@@ -289,6 +316,7 @@
         </div>
         <MeasurementReport
           snapshot={selected}
+          {view}
           {modelRows}
           {searchRows}
           {modelCursor}
@@ -308,5 +336,12 @@
       {busy}
       onConfirm={remove}
       onClose={() => (deleteRun = null)}
+    />{/if}
+  {#if deleteProject}<ConfirmDialog
+      title="Удалить проект?"
+      description="Проект и все его замеры будут удалены."
+      {busy}
+      onConfirm={removeProject}
+      onClose={() => (deleteProject = false)}
     />{/if}
 </main>
