@@ -7,12 +7,13 @@ class ProjectQuerySchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str
     category: str | None = None
+    group: str | None = None
 
 
 class CompetitorSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
     brand: str
-    site_url: str
+    site_url: str = ""
 
 
 class ProjectRequest(BaseModel):
@@ -20,6 +21,7 @@ class ProjectRequest(BaseModel):
     name: str = ""
     brand: str
     site_url: str
+    include_subdomains: bool = True
     brand_description: str = ""
     brand_aliases: list[str] = []
     competitors: list[CompetitorSchema] = []
