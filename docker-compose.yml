@@ -1,6 +1,25 @@
 name: ai-tracker
 
 services:
+  postgres:
+    # Debian bookworm based image, as requested: `postgres:<major>-bookworm`.
+    # The major version matches the local Postgres.app server.
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_USER: ai_tracker
+      POSTGRES_PASSWORD: ai_tracker
+      POSTGRES_DB: ai-tracker
+    volumes:
+      - ai-tracker-postgres:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_tracker -d ai-tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -8,10 +27,15 @@ services:
     environment:
       AI_TRACKER_CONFIG_DIR: /data
       AI_TRACKER_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      # The container talks to the `postgres` service, not to Postgres.app.
+      AI_TRACKER_DATABASE_URL: postgresql://ai_tracker:ai_tracker@postgres:5432/ai-tracker
     volumes:
       - ai-tracker-data:/data
     ports:
       - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -32,3 +56,4 @@ services:
 
 volumes:
   ai-tracker-data:
+  ai-tracker-postgres:
