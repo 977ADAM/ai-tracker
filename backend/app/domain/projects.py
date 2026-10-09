@@ -1,0 +1,138 @@
+"""Validated project settings and order-independent measurement identity."""
+
+import hashlib
+import json
+from copy import deepcopy
+
+from app.core.errors import ValidationError
+from app.domain.matching import normalize_text
+from app.domain.search import KNOWN_REGION_IDS
+from app.domain.seo import QUERY_CATEGORIES, url_problem
+from app.domain.seo_answer import normalize_source_url
+
+
+def _text(value, label, limit=100):
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
+        raise ValidationError(f"{label}: укажите от 1 до {limit} символов")
+    return value.strip()
+
+
+def _url(value):
+    if url_problem(value) or normalize_source_url(value) is None:
+        raise ValidationError("Укажите публичный адрес сайта http(s) с доменным именем")
+    return value.strip()
+
+
+def normalize_project(payload: object) -> dict:
+    fields = {
+        "name",
+        "brand",
+        "site_url",
+        "competitors",
+        "queries",
+        "connection_ids",
+        "yandex_enabled",
+        "yandex_region",
+    }
+    if not isinstance(payload, dict) or set(payload) - fields:
+        raise ValidationError("Некорректные настройки проекта")
+    queries = payload.get("queries", [])
+    if not isinstance(queries, list) or not 0 <= len(queries) <= 20:
+        raise ValidationError("Добавьте не более 20 запросов")
+    normalized = []
+    seen = set()
+    for q in queries:
+        if not isinstance(q, dict) or set(q) - {"text", "category"}:
+            raise ValidationError("Некорректный запрос")
+        text = _text(q.get("text"), "Запрос", 400)
+        category = q.get("category")
+        if len(text.split()) > 40 or normalize_text(text) in seen:
+            raise ValidationError(
+                "Запросы должны различаться и содержать не более 40 слов"
+            )
+        if category is not None and category not in QUERY_CATEGORIES:
+            raise ValidationError("Неизвестная категория запроса")
+        seen.add(normalize_text(text))
+        normalized.append({"text": text, "category": category})
+    ids = payload.get("connection_ids", [])
+    if (
+        not isinstance(ids, list)
+        or not 0 <= len(ids) <= 5
+        or any(not isinstance(i, str) or not i or len(i) > 100 for i in ids)
+        or len(set(ids)) != len(ids)
+    ):
+        raise ValidationError("Выберите от 1 до 5 разных моделей")
+    competitors = payload.get("competitors", [])
+    if not isinstance(competitors, list) or len(competitors) > 10:
+        raise ValidationError("Добавьте не более 10 конкурентов")
+    rivals = []
+    for c in competitors:
+        if not isinstance(c, dict) or set(c) != {"brand", "site_url"}:
+            raise ValidationError("Укажите бренд и сайт конкурента")
+        rival = {
+            "brand": _text(c.get("brand"), "Бренд конкурента"),
+            "site_url": _url(c.get("site_url")),
+        }
+        if rival in rivals:
+            raise ValidationError("Конкуренты не должны повторяться")
+        rivals.append(rival)
+    enabled = payload.get("yandex_enabled", False)
+    region = payload.get("yandex_region", 213)
+    if (
+        type(enabled) is not bool
+        or type(region) is not int
+        or region not in KNOWN_REGION_IDS
+    ):
+        raise ValidationError("Некорректные настройки Яндекса")
+    return {
+        "name": _text(payload.get("name") or payload.get("brand"), "Название проекта"),
+        "brand": _text(payload.get("brand"), "Бренд"),
+        "site_url": _url(payload.get("site_url")),
+        "competitors": rivals,
+        "queries": normalized,
+        "connection_ids": ids,
+        "yandex_enabled": enabled,
+        "yandex_region": region,
+    }
+
+
+def comparison_key(snapshot: dict) -> str:
+    from app.domain.site_fetch import canonical_host
+
+    value = deepcopy(snapshot)
+    p = value["project"]
+    p.pop("name", None)
+    p.pop("connection_ids", None)
+    p["brand"] = normalize_text(p["brand"])
+    p["site_url"] = canonical_host(p["site_url"])
+    p["queries"] = sorted(
+        (
+            {"text": normalize_text(q["text"]), "category": q.get("category")}
+            for q in p["queries"]
+        ),
+        key=lambda q: (q["text"], q["category"] or ""),
+    )
+    p["competitors"] = sorted(
+        (
+            {
+                "brand": normalize_text(c["brand"]),
+                "site_url": canonical_host(c["site_url"]),
+            }
+            for c in p["competitors"]
+        ),
+        key=lambda c: (c["brand"], c["site_url"]),
+    )
+    if not p.get("yandex_enabled"):
+        p.pop("yandex_region", None)
+        value["yandex"] = None
+    connections = []
+    for c in value["connections"]:
+        connections.append(
+            {k: v for k, v in c.items() if k not in ("connection_id", "name")}
+        )
+    value["connections"] = sorted(
+        connections, key=lambda c: json.dumps(c, sort_keys=True)
+    )
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()

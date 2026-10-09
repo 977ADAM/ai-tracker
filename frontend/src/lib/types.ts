@@ -50,6 +50,7 @@ export type FormConfig = {
 };
 
 export type PublicProvider = {
+  answer_mode?: string;
   id: string;
   name: string;
   kind: string;

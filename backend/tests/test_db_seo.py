@@ -467,14 +467,14 @@ def test_a_version_five_file_from_the_chat_migration_is_not_downgraded(tmp_path)
 def test_newer_schema_version_is_refused_without_leaking_the_path(tmp_path):
     path = tmp_path / DB_FILE
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA user_version=7")
+    connection.execute("PRAGMA user_version=8")
     connection.commit()
     connection.close()
 
     with pytest.raises(StorageError) as raised:
         SeoRepository(tmp_path).initialize()
     assert str(path) not in str(raised.value)
-    assert user_version(path) == 7
+    assert user_version(path) == 8
 
 
 def test_unusable_database_file_fails_safely(tmp_path):

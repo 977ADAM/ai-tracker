@@ -10,10 +10,17 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-09-projects-and-measurements-design.md`
 
+## User refinements during execution
+
+- Work directly on main, no worktree. Minimal regression tests first, then code.
+- Create project with only brand and site; default name=brand. Queries/models are
+  configured inside project. Empty collections may be saved; start requires both.
+- Documentation explicitly calls out multi-company support through separate projects.
+
 ## Global Constraints
 
 - One project: one brand and site, competitors, saved queries, selected models and measurement history; no chat or scheduling in the new interface.
-- Brand/name: 1..100 characters; competitors: 0..10; queries: 1..20 unique strings, ≤400 characters and ≤40 words; models: 1..5 unique connections.
+- Brand/name: 1..100 characters; competitors: 0..10; queries: 0..20 unique strings, ≤400 characters and ≤40 words; models: 0..5 unique connections. Start requires ≥1 query and model.
 - Competitor record: brand + public site URL. Optional query category: one of the four existing intents. Optional Yandex defaults to disabled.
 - Every query × model pair runs once: ≤100 checked-model calls and ≤100 sentiment calls; optional Yandex: ≤20 searches. Existing SEO resource limits stay unchanged.
 - One active measurement per project; durable non-secret snapshots; sequential execution; ≤120 seconds per external call; no automatically repeated paid work after restart.

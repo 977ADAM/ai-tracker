@@ -21,6 +21,8 @@ from app.api.deps.fallbacks import UnconfiguredAgentModel
 from app.core.config import Settings
 from app.db.chat import ChatRepository
 from app.db.connections import ConnectionRepository
+from app.db.measurements import MeasurementRepository
+from app.db.projects import ProjectRepository
 from app.db.runs import RunRepository
 from app.db.search_settings import SearchSettingsRepository
 from app.db.secrets import KeyringSecrets, SecretStore
@@ -41,6 +43,8 @@ from app.service.checks import CheckService
 from app.service.config import ConfigService
 from app.service.connections import ConnectionService
 from app.service.form import FormService
+from app.service.measurements import MeasurementService
+from app.service.projects import ProjectService
 from app.service.provider_settings import ProviderSettingsService
 from app.service.runs import RunService
 from app.service.search import SearchService
@@ -74,6 +78,8 @@ class Container:
     seo_settings: SeoSettingsService
     chats: ChatRepository
     chat_service: ChatService
+    projects: ProjectService
+    measurements: MeasurementService
 
 
 def make_seo_toolbox_factory(
@@ -234,6 +240,15 @@ def build_container(
             chats, seo_service, connections, form,
             client_factory=seo_settings_service.build_client,
         )
+    project_repository = ProjectRepository(Path(settings.config_dir))
+    project_repository.initialize()
+    measurement_repository = MeasurementRepository(Path(settings.config_dir))
+    measurement_repository.recover_unfinished()
+    measurements = MeasurementService(
+        measurement_repository, project_repository, connections, seo_settings_service,
+        search_settings, lambda snapshot, key: build_seo_answer_provider(snapshot, key, settings, text_factory=factory),
+    )
+    projects = ProjectService(project_repository, measurement_repository, connections)
     return Container(
         settings=settings,
         repository=repository,
@@ -251,4 +266,6 @@ def build_container(
         seo_settings=seo_settings_service,
         chats=chats,
         chat_service=chat_service,
+        projects=projects,
+        measurements=measurements,
     )

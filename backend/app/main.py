@@ -47,6 +47,7 @@ async def lifespan(application: FastAPI):
     # kept the resumable SEO analyses aside; start them now.
     container.seo_service.resume_pending()
     yield
+    await container.measurements.close()
     await container.runs.close()
     await container.search.close()
     await container.seo_service.close()

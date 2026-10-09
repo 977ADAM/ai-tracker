@@ -32,7 +32,7 @@ REGION_NAMES = dict(REGIONS)
 # the SEO agent state and trace, and 5 adds the chat tables. The
 # repositories that own the later tables never touch the run tables below, so a
 # file at the newest version is still opened here without a downgrade.
-SUPPORTED_VERSIONS = (0, 1, 2, 3, 4, 5, 6)
+SUPPORTED_VERSIONS = (0, 1, 2, 3, 4, 5, 6, 7)
 
 
 class RunRepository:

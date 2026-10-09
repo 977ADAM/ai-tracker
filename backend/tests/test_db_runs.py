@@ -371,7 +371,7 @@ def test_a_newer_database_version_is_refused(tmp_path):
 
     path = tmp_path / "runs.sqlite3"
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA user_version=7")
+    connection.execute("PRAGMA user_version=8")
     connection.commit()
     connection.close()
 
@@ -381,6 +381,6 @@ def test_a_newer_database_version_is_refused(tmp_path):
 
     fresh = sqlite3.connect(path)
     try:
-        assert fresh.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert fresh.execute("PRAGMA user_version").fetchone()[0] == 8
     finally:
         fresh.close()

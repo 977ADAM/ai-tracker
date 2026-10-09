@@ -3,6 +3,7 @@
 import sqlite3
 
 import pytest
+
 from app.core.errors import ValidationError
 from app.db.chat import ChatRepository
 from app.db.connections import ConnectionRepository
@@ -15,7 +16,6 @@ from app.domain.seo_answer import (
     SeoAnswer,
     SeoConnectionSnapshot,
 )
-
 from tests.fakes import MemorySecrets
 from tests.test_db_seo import seo_input
 

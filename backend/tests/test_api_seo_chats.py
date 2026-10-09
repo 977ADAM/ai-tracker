@@ -60,7 +60,7 @@ def _user_version(path: Path) -> int:
 def test_container_starts_twice_over_the_migrated_file(settings, secrets):
     build_container(settings, secrets=secrets).chats.initialize()
     build_container(settings, secrets=secrets)  # второй старт не должен падать
-    assert _user_version(settings.config_dir / "runs.sqlite3") == 6
+    assert _user_version(settings.config_dir / "runs.sqlite3") == 7
 
 
 @pytest.fixture

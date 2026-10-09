@@ -30,7 +30,7 @@ from app.core.errors import ChatNotFound, StorageError, ValidationError
 
 FILE_NAME = "runs.sqlite3"
 SCHEMA_VERSION = 5
-MAX_FILE_VERSION = 6
+MAX_FILE_VERSION = 7
 BUSY_TIMEOUT_MS = 5000
 
 STORAGE_FAILED = "Не удалось сохранить или прочитать чат"

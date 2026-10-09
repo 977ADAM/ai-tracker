@@ -8,6 +8,8 @@ from app.api.routers import (
     checks,
     config,
     form,
+    measurements,
+    projects,
     provider_settings,
     providers,
     runs,
@@ -32,3 +34,7 @@ api_router.include_router(seo_settings.router)
 api_router.include_router(seo.router)
 # The chat resource can start an analysis, so it is registered after it.
 api_router.include_router(seo_chats.router)
+
+
+api_router.include_router(projects.router)
+api_router.include_router(measurements.router)

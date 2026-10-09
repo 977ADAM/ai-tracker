@@ -50,8 +50,11 @@ def application() -> Application:
     return configured_application()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def require_running_services(application: Application) -> None:
+@pytest.fixture(autouse=True)
+def require_running_services(request: pytest.FixtureRequest) -> None:
+    if request.node.get_closest_marker("isolated_projects"):
+        return
+    application = request.getfixturevalue("application")
     """Warn and skip when there is nothing to check, rather than test nothing quietly."""
     missing = missing_services(application)
     if not missing:
@@ -66,13 +69,17 @@ def require_running_services(application: Application) -> None:
 
 
 @pytest.fixture(autouse=True)
-def no_connection_survives_a_test(application: Application) -> Iterator[None]:
+def no_connection_survives_a_test(request: pytest.FixtureRequest) -> Iterator[None]:
     """Delete only what this test created, so no test key stays in the store.
 
     The suite talks to a real instance backed by a real credential store, so
     the cleanup is scoped to the difference: connections that already existed
     before the test are left untouched.
     """
+    if request.node.get_closest_marker("isolated_projects"):
+        yield
+        return
+    application = request.getfixturevalue("application")
     before = {str(item["id"]) for item in _safe_connections(application)}
     yield
     for connection in _safe_connections(application):

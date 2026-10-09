@@ -32,7 +32,7 @@ def test_the_lifespan_resumes_deferred_seo_analyses_and_closes_them():
         state=SimpleNamespace(
             settings=SimpleNamespace(config_dir="/tmp/ai-tracker-test"),
             container=SimpleNamespace(
-                runs=Closer(), search=Closer(), search_client=None, seo_service=seo,
+                runs=Closer(), measurements=Closer(), search=Closer(), search_client=None, seo_service=seo,
             ),
         ),
     )

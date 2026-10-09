@@ -1,4 +1,3 @@
 import type { PageServerLoad } from './$types';
-import { loadPageData } from '$lib/server/python-api';
-
-export const load = (() => loadPageData()) satisfies PageServerLoad;
+import { loadProjectsData } from '$lib/server/projects-api';
+export const load: PageServerLoad = ({ url }) => loadProjectsData(url.searchParams.get('cursor'));

@@ -620,6 +620,7 @@ export function publicProvider(value: unknown): Record<string, unknown> {
     'endpoint',
     'model',
     'configured',
+    'answer_mode',
     'editable_fields',
     'can_reset',
     'can_delete',

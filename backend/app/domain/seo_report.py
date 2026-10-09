@@ -547,3 +547,8 @@ def _metric(denominator: int, successes: int, positions: Sequence[int] = ()) -> 
         share=share,
         average_position=average,
     )
+
+# Public pure helpers shared by fixed-query measurements and legacy SEO reports.
+brand_position = _brand_position
+citation_metric = _citation_metric
+source_counts = _source_counts

@@ -80,7 +80,7 @@ SCHEMA_VERSION = 6
 # A later owner of the shared file — the chat repository — raises `user_version`
 # to 5. This repository opens such a file and only writes its own version when
 # the file is older, so version 5 is never downgraded back to 4.
-MAX_FILE_VERSION = 6
+MAX_FILE_VERSION = 7
 BUSY_TIMEOUT_MS = 5000
 STAGE_COUNT = 6
 

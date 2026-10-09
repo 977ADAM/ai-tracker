@@ -18,3 +18,5 @@ package = false
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q --tracing=retain-on-failure --screenshot=only-on-failure"
+
+markers = ["isolated_projects: isolated project backend and frontend, no live user configuration"]
