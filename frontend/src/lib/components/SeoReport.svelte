@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { markdownHtml, plainText } from '$lib/markdown';
+  import { SEO_CATEGORY_LABELS } from '$lib/seo-categories';
   import type {
     SeoAnalysisSnapshot,
     SeoCompetitorAggregates,
@@ -34,7 +35,12 @@
   // text opens in a dialog on click and is rendered there as Markdown.
   const ANSWER_PREVIEW_CHARS = 160;
 
-  let openAnswer = $state<{ query: string; provider: string; text: string } | null>(null);
+  let openAnswer = $state<{
+    query: string;
+    provider: string;
+    text: string;
+    citations: SeoModelRow['citations'];
+  } | null>(null);
   let answerClose = $state<HTMLButtonElement | null>(null);
   let answerButton = $state<HTMLButtonElement | null>(null);
 
@@ -54,6 +60,7 @@
       query: row.query ?? 'Ответ модели',
       provider: row.provider_name || connectionLabel(row.connection_id),
       text: row.answer ?? '',
+      citations: row.citations ?? [],
     };
     answerButton = trigger;
     await tick();
@@ -97,7 +104,18 @@
   const siteSearch = $derived(snapshot.aggregates?.site?.search ?? null);
   const siteAi = $derived(snapshot.aggregates?.site?.ai ?? {});
   const competitors = $derived(snapshot.aggregates?.competitors ?? []);
+  const sources = $derived(snapshot.aggregates?.sources ?? []);
   const connections = $derived(Object.keys(siteAi));
+
+  /**
+   * The saved part of the poll: how many `query × connection` pairs the run has
+   * an answer for. M is the planned number of pairs, N the saved model rows.
+   */
+  const modelCoverage = $derived.by(() => {
+    const pairs = (snapshot.queries?.length ?? 0) * (snapshot.input.connection_ids?.length ?? 0);
+    if (pairs === 0) return '—';
+    return `${snapshot.counters?.model_rows ?? 0} из ${pairs}`;
+  });
 
   function connectionLabel(connectionId: string): string {
     return connectionNames[connectionId] ?? connectionId;
@@ -148,6 +166,21 @@
 
   function rowStatus(status: SeoRowStatus): string {
     return ROW_STATUS_LABELS[status] ?? status;
+  }
+
+  function answerMode(mode: SeoModelRow['answer_mode']): string {
+    return mode === 'deepseek_web' ? 'веб-поиск' : 'текст';
+  }
+
+  /** The cited sources of one answer; an answer without sources is «—», never «0». */
+  function sourceCount(citations: SeoModelRow['citations']): string {
+    const count = citations?.length ?? 0;
+    return count === 0 ? '—' : String(count);
+  }
+
+  function categoryLabel(category: string | null): string {
+    if (!category) return '—';
+    return SEO_CATEGORY_LABELS[category] ?? category;
   }
 
   function mention(value: boolean | null): string {
@@ -231,13 +264,18 @@
 
   <section class={section} aria-labelledby="seo-ai-title">
     <h3 id="seo-ai-title" class={title}>Упоминания в ответах ИИ</h3>
+    <p class="mt-1 text-xs text-muted">
+      Опрос моделей: <span class="font-medium text-ink" data-model-coverage>{modelCoverage}</span
+      >{#if modelCoverage !== '—'}
+        пар{/if}
+    </p>
     {#if connections.length === 0}
       <p class="mt-2 text-xs text-muted">Ответы моделей не сохранены.</p>
     {:else}
       {#each connections as connectionId (connectionId)}
         <div class="mt-2 overflow-x-auto rounded-lg border border-line">
           <table
-            class={`${table} min-w-160`}
+            class={`${table} min-w-200`}
             aria-label={`Упоминания: ${connectionLabel(connectionId)}`}
           >
             <caption class="bg-canvas px-3 py-1.5 text-left text-xs font-semibold text-ink"
@@ -249,6 +287,8 @@
                 <th scope="col" class={th}>Название</th>
                 <th scope="col" class={th}>Домен</th>
                 <th scope="col" class={th}>Название или домен</th>
+                <th scope="col" class={th}>В источниках</th>
+                <th scope="col" class={th}>Позиция домена</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-line">
@@ -268,6 +308,14 @@
                   <td class={td} data-metric={`ai-${connectionId}-${group}-combined`}
                     >{percent(block?.combined, !snapshot.company_name)}</td
                   >
+                  <td class={td} data-metric={`ai-${connectionId}-${group}-citation`}
+                    >{percent(block?.citation)}</td
+                  >
+                  <td
+                    class={`${td} text-muted`}
+                    data-position={`ai-${connectionId}-${group}-citation`}
+                    >{metricPosition(block?.citation)}</td
+                  >
                 </tr>
               {/each}
             </tbody>
@@ -276,6 +324,80 @@
       {/each}
     {/if}
   </section>
+
+  <section class={section} aria-labelledby="seo-brand-position-title">
+    <h3 id="seo-brand-position-title" class={title}>Позиция бренда</h3>
+    <p class="mt-1 text-xs text-muted">
+      Эвристика по абзацам ответа: где название компании или домен впервые встречаются в тексте.
+    </p>
+    <div class="mt-2 overflow-x-auto rounded-lg border border-line">
+      <table class={`${table} min-w-200`} aria-label="Позиция бренда">
+        <thead class="bg-canvas">
+          <tr>
+            <th scope="col" class={th}>Подключение</th>
+            <th scope="col" class={th}>В первом абзаце</th>
+            <th scope="col" class={th}>Во 2–3 абзацах</th>
+            <th scope="col" class={th}>Ниже</th>
+            <th scope="col" class={th}>Не назван</th>
+            <th scope="col" class={th}>Раньше конкурентов</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-line">
+          {#each connections as connectionId (connectionId)}
+            {@const brand = siteAi[connectionId]?.position ?? null}
+            <tr>
+              <th scope="row" class={rowHead}>{connectionLabel(connectionId)}</th>
+              <td class={td} data-brand-position="first">{percent(brand?.first)}</td>
+              <td class={td} data-brand-position="early">{percent(brand?.early)}</td>
+              <td class={td} data-brand-position="late">{percent(brand?.late)}</td>
+              <td class={td} data-brand-position="absent">{percent(brand?.absent)}</td>
+              <td class={td} data-brand-position="ahead">{percent(brand?.ahead)}</td>
+            </tr>
+          {:else}
+            <tr>
+              <th scope="row" class={rowHead}>—</th>
+              <td class={td} data-brand-position="first">—</td>
+              <td class={td} data-brand-position="early">—</td>
+              <td class={td} data-brand-position="late">—</td>
+              <td class={td} data-brand-position="absent">—</td>
+              <td class={td} data-brand-position="ahead">—</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {#if sources.length > 0}
+    <section class={section} aria-labelledby="seo-sources-title">
+      <h3 id="seo-sources-title" class={title}>Источники</h3>
+      <p class="mt-1 text-xs text-muted">
+        Домены, которые модели цитируют; источники есть только у подключений с веб-поиском.
+      </p>
+      <div class="mt-2 overflow-x-auto rounded-lg border border-line">
+        <table class={table} aria-label="Источники">
+          <thead class="bg-canvas">
+            <tr>
+              <th scope="col" class={th}>Домен</th>
+              <th scope="col" class={th}>Ответов</th>
+              <th scope="col" class={th}>Цитат</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-line">
+            {#each sources as source (source.domain)}
+              <tr data-source-row>
+                <th scope="row" class={rowHead} data-source-domain={source.domain}
+                  >{source.domain}</th
+                >
+                <td class={`${td} text-muted`} data-source-answers>{source.answers}</td>
+                <td class={`${td} text-muted`} data-source-citations>{source.citations}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {/if}
 
   <section class={section} aria-labelledby="seo-competitors-title">
     <h3 id="seo-competitors-title" class={title}>Повторяющиеся кандидаты</h3>
@@ -347,11 +469,12 @@
                   <tr>
                     <th scope="col" class={th}>Подключение</th>
                     <th scope="col" class={th}>Доля ответов с доменом</th>
+                    <th scope="col" class={th}>В источниках</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-line">
                   {#if connections.length === 0}
-                    <tr><td class={td} colspan="2">—</td></tr>
+                    <tr><td class={td} colspan="3">—</td></tr>
                   {:else}
                     {#each connections as connectionId (connectionId)}
                       <tr>
@@ -360,6 +483,11 @@
                           class={td}
                           data-metric={`candidate-${candidate.host}-ai-${connectionId}`}
                           >{aiHostShare(candidate, connectionId)}</td
+                        >
+                        <td
+                          class={td}
+                          data-metric={`candidate-${candidate.host}-citation-${connectionId}`}
+                          >{percent(candidate.ai?.[connectionId]?.citation)}</td
                         >
                       </tr>
                     {/each}
@@ -396,7 +524,7 @@
           {#each rows.search as row (row.query_index)}
             <tr data-search-detail data-status={row.status}>
               <th scope="row" class={`${rowHead} max-w-80`}>{row.query ?? '—'}</th>
-              <td class={`${td} text-muted`}>{row.category ?? '—'}</td>
+              <td class={`${td} text-muted`}>{categoryLabel(row.category)}</td>
               <td class={`${td} text-muted`}>{row.service ?? '—'}</td>
               <td class={td}>{rowStatus(row.status)}</td>
               <td class={`${td} text-muted`}>{row.site_position ?? '—'}</td>
@@ -434,7 +562,7 @@
     </div>
 
     <div class="mt-2 overflow-x-auto rounded-lg border border-line">
-      <table class={`${table} min-w-225`} aria-label="Ответы моделей">
+      <table class={`${table} min-w-250`} aria-label="Ответы моделей">
         <caption class="bg-canvas px-3 py-1.5 text-left text-xs font-semibold text-ink"
           >Ответы моделей</caption
         >
@@ -443,6 +571,8 @@
             <th scope="col" class={th}>Запрос</th>
             <th scope="col" class={th}>Подключение</th>
             <th scope="col" class={th}>Статус</th>
+            <th scope="col" class={th}>Режим</th>
+            <th scope="col" class={th}>Источников</th>
             <th scope="col" class={th}>Название</th>
             <th scope="col" class={th}>Домен</th>
             <th scope="col" class={th}>Ответ</th>
@@ -457,6 +587,10 @@
                 >{row.provider_name || connectionLabel(row.connection_id)}</td
               >
               <td class={td}>{rowStatus(row.status)}</td>
+              <td class={`${td} text-muted`} data-answer-mode>{answerMode(row.answer_mode)}</td>
+              <td class={`${td} text-muted`} data-answer-sources-count
+                >{sourceCount(row.citations)}</td
+              >
               <td class={`${td} text-muted`}>{mention(row.name_mentioned)}</td>
               <td class={`${td} text-muted`}>{mention(row.host_mentioned)}</td>
               <td class={`${td} max-w-96`}>
@@ -481,7 +615,7 @@
               <td class={`${td} text-rose-700`}>{row.error ?? '—'}</td>
             </tr>
           {:else}
-            <tr><td class={td} colspan="7">Сохранённых ответов моделей нет.</td></tr>
+            <tr><td class={td} colspan="9">Сохранённых ответов моделей нет.</td></tr>
           {/each}
         </tbody>
       </table>
@@ -546,6 +680,25 @@
           data-answer-full
         >
           {@html markdownHtml(openAnswer.text)}
+          {#if openAnswer.citations.length > 0}
+            <div class="not-prose mt-4 border-t border-line pt-3" data-answer-sources>
+              <h4 class="text-[11px] font-semibold tracking-wide text-muted uppercase">
+                Источники ответа
+              </h4>
+              <ul class="mt-1.5 space-y-1 text-xs" data-answer-sources-list>
+                {#each openAnswer.citations as citation (citation.url)}
+                  <li>
+                    <a
+                      class="break-all text-accent hover:underline"
+                      href={citation.url}
+                      target="_blank"
+                      rel="noopener noreferrer">{citation.title || citation.url}</a
+                    >
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
         </div>
       </div>
     </div>

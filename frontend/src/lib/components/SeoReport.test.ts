@@ -34,7 +34,21 @@ const competitor: SeoCompetitorAggregates = {
   average_position: 2.5,
   seed_indexes: [0, 1],
   search: { overall: metric(4, 1, 2), branded: empty, unbranded: metric(3, 1, 2) },
-  ai: { 'model-1': { host: metric(4, 1) } },
+  ai: { 'model-1': { host: metric(4, 1), citation: metric(4, 2) } },
+};
+
+/**
+ * The citation share and the brand position of the site in `model-1`:
+ * half of the answers cite the domain, it stands second among the sources,
+ * and the brand opens a third of the answers.
+ */
+const citation = metric(4, 2, 2);
+const brandPosition = {
+  first: metric(10, 3),
+  early: metric(10, 2),
+  late: metric(10, 1),
+  absent: metric(10, 4),
+  ahead: empty,
 };
 
 const modelRow: SeoModelRow = {
@@ -49,9 +63,12 @@ const modelRow: SeoModelRow = {
   query: 'купить цветы',
   category: 'commercial',
   service: 'Доставка цветов',
-  answer_mode: 'text',
-  search_status: 'not_requested',
-  citations: [],
+  answer_mode: 'deepseek_web',
+  search_status: 'completed',
+  citations: [
+    { url: 'https://habr.com/ru/articles/1', title: 'Разбор доставки' },
+    { url: 'https://vc.ru/marketing/2', title: null },
+  ],
   model: null,
   search_calls: null,
 };
@@ -95,14 +112,25 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
       tool_calls: { used: 9, limit: 120 },
       handoffs: { used: 5, limit: 15 },
       seed_searches: 3,
-      model_rows: 4,
+      model_rows: 7,
       steps: 12,
       agent_steps: {},
     },
     budget_exhausted: false,
     candidates: [],
-    queries: [],
-    counters: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 1, model_errors: 0 },
+    queries: Array.from({ length: 7 }, (_, index) => ({
+      index,
+      text: `запрос ${index + 1}`,
+      category: 'commercial',
+      service: null,
+      flags: {
+        mentions_company_name: false,
+        mentions_company_host: false,
+        mentions_candidate_host: false,
+        branded: false,
+      },
+    })),
+    counters: { queries: 7, search_rows: 4, model_rows: 7, search_errors: 1, model_errors: 0 },
     readiness: {
       report_ready: true,
       summary_ready: true,
@@ -111,7 +139,7 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
       has_unsubmitted_search_rows: false,
       has_unfinished_model_rows: false,
       search_rows: 4,
-      model_rows: 4,
+      model_rows: 7,
     },
     aggregates: {
       site: {
@@ -121,20 +149,20 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
             name: metric(4, 2),
             host: metric(4, 1),
             combined: metric(4, 3),
-            citation: null,
-            position: null,
+            citation,
+            position: brandPosition,
             branded: {
               name: metric(1, 1),
               host: metric(1, 0),
               combined: metric(1, 1),
-              citation: null,
+              citation,
               position: null,
             },
             unbranded: {
               name: metric(3, 1),
               host: metric(3, 1),
               combined: metric(3, 2),
-              citation: null,
+              citation,
               position: null,
             },
           },
@@ -150,8 +178,8 @@ function snapshot(overrides: Partial<SeoAnalysisSnapshot> = {}): SeoAnalysisSnap
         'Доставка цветов': { search: metric(2, 1, 4), ai: { 'model-1': metric(2, 1) } },
         '': { search: metric(2, 1), ai: { 'model-1': metric(2, 1) } },
       },
-      sources: [],
-      counts: { queries: 4, search_rows: 4, model_rows: 4, search_errors: 1, model_errors: 0 },
+      sources: [{ domain: 'habr.com', answers: 2, citations: 3 }],
+      counts: { queries: 7, search_rows: 4, model_rows: 7, search_errors: 1, model_errors: 0 },
     },
     ...overrides,
   };
@@ -188,6 +216,85 @@ describe('SeoReport', () => {
     expect(content('[data-metric="ai-model-1-all-combined"]')).toBe('75 %');
     expect(content('[data-metric="ai-model-1-branded-name"]')).toBe('100 %');
     expect(content('[data-metric="ai-model-1-unbranded-host"]')).toBe('33 %');
+  });
+
+  it('shows how often the domain is cited and where it stands among the sources', () => {
+    render(SeoReport, { props: { snapshot: snapshot() } });
+    expect(content('[data-metric="ai-model-1-all-citation"]')).toBe('50 %');
+    expect(content('[data-position="ai-model-1-all-citation"]')).toBe('2');
+  });
+
+  it('shows the brand position and skips it when there is no data', () => {
+    render(SeoReport, { props: { snapshot: snapshot() } });
+    expect(content('[data-brand-position="first"]')).toBe('30 %');
+    const empty = document.querySelector('[data-brand-position="ahead"]');
+    expect(empty?.textContent).toBe('—');
+    expect(screen.getByText(/эвристика по абзацам ответа/i)).toBeTruthy();
+  });
+
+  it('lists the top cited domains and the model coverage', () => {
+    render(SeoReport, { props: { snapshot: snapshot() } });
+    expect(document.querySelector('[data-source-domain]')?.textContent).toBe('habr.com');
+    expect(document.querySelector('[data-source-domain]')?.getAttribute('data-source-domain')).toBe(
+      'habr.com',
+    );
+    expect(content('[data-source-answers]')).toBe('2');
+    expect(content('[data-source-citations]')).toBe('3');
+    expect(screen.getByText(/только у подключений с веб-поиском/i)).toBeTruthy();
+    expect(content('[data-model-coverage]')).toBe('7 из 7');
+  });
+
+  it('hides the sources section when no answer cited a source', () => {
+    render(SeoReport, {
+      props: {
+        snapshot: snapshot({ aggregates: { ...snapshot().aggregates, sources: [] } }),
+      },
+    });
+    expect(document.querySelector('[data-source-row]')).toBeNull();
+    expect(screen.queryByRole('table', { name: 'Источники' })).toBeNull();
+  });
+
+  it('shows the candidate citation share next to its host share', () => {
+    render(SeoReport, { props: { snapshot: snapshot() } });
+    expect(content('[data-metric="candidate-flower-shop.example-citation-model-1"]')).toBe('50 %');
+  });
+
+  it('shows the answer mode and the number of sources in the detail row', () => {
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [modelRow], search: [] } } });
+    expect(content('[data-answer-mode]')).toBe('веб-поиск');
+    expect(content('[data-answer-sources-count]')).toBe('2');
+  });
+
+  it('renders «—» instead of zero sources for an answer without web search', () => {
+    const row: SeoModelRow = { ...modelRow, answer_mode: 'text', citations: [] };
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
+    expect(content('[data-answer-mode]')).toBe('текст');
+    expect(content('[data-answer-sources-count]')).toBe('—');
+  });
+
+  it('lists the answer citation links in the dialog and opens them in a new tab', async () => {
+    const row: SeoModelRow = { ...modelRow, answer: 'я'.repeat(400) };
+    render(SeoReport, { props: { snapshot: snapshot(), rows: { model: [row], search: [] } } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Читать полностью' }));
+
+    const list = document.querySelector('[data-answer-sources-list]');
+    const links = list?.querySelectorAll('a') ?? [];
+    expect(links).toHaveLength(2);
+    expect(links[0]?.getAttribute('href')).toBe('https://habr.com/ru/articles/1');
+    expect(links[0]?.getAttribute('target')).toBe('_blank');
+    expect(links[0]?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(links[0]?.textContent).toBe('Разбор доставки');
+    // A citation without a title falls back to its URL.
+    expect(links[1]?.textContent).toBe('https://vc.ru/marketing/2');
+  });
+
+  it('shows the detail category as its Russian label', () => {
+    render(SeoReport, {
+      props: { snapshot: snapshot(), rows: { model: [], search: [searchRow] } },
+    });
+    const table = screen.getByRole('table', { name: 'Проверки в Яндексе' });
+    expect(table.textContent).toContain('Сравнительные');
+    expect(table.textContent).not.toContain('comparative');
   });
 
   it('renders the recurring candidates with evidence, seeds and both metric families', () => {
