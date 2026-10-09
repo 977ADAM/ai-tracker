@@ -11,6 +11,7 @@ from app.domain.search import normalize_search_request
 
 @dataclass(frozen=True)
 class RunInput:
+    project_id: str
     brand: str
     domain: str
     prompts: tuple[str, ...]
@@ -24,12 +25,16 @@ def normalize_run_request(payload: object) -> RunInput:
     """Apply the selected branches' existing limits before creating paid work."""
     if not isinstance(payload, dict):
         raise ValidationError("Некорректный запрос")
+    project_id = payload.get("project_id")
+    if not isinstance(project_id, str) or not project_id.strip():
+        raise ValidationError("Выберите проект")
     ids, regions = payload.get("provider_ids", []), payload.get("regions", [])
     if not isinstance(ids, list) or not isinstance(regions, list) or not (ids or regions):
         raise ValidationError("Выберите модель или регион")
     check = normalize_check_request(payload) if ids else None
     search = normalize_search_request(payload) if regions else None
     return RunInput(
+        project_id=project_id.strip(),
         brand=check.brand if check else "",
         domain=search.domain if search else check.domain,
         prompts=search.prompts if search else check.prompts,
