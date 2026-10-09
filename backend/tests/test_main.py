@@ -11,39 +11,30 @@ from app.api.deps import get_check_service
 from app.main import API_PREFIX, TITLE, app, container, lifespan, settings
 
 
-def test_the_lifespan_resumes_deferred_seo_analyses_and_closes_them():
-    class SeoSpy:
+def test_the_lifespan_closes_every_background_worker():
+    class Closer:
         def __init__(self) -> None:
-            self.resumed = 0
             self.closed = 0
-
-        def resume_pending(self) -> None:
-            self.resumed += 1
 
         async def close(self) -> None:
             self.closed += 1
 
-    class Closer:
-        async def close(self) -> None:
-            return None
-
-    seo = SeoSpy()
+    runs, measurements, search = Closer(), Closer(), Closer()
     application = SimpleNamespace(
         state=SimpleNamespace(
             settings=SimpleNamespace(config_dir="/tmp/ai-tracker-test"),
             container=SimpleNamespace(
-                runs=Closer(), measurements=Closer(), search=Closer(), search_client=None, seo_service=seo,
+                runs=runs, measurements=measurements, search=search, search_client=None,
             ),
         ),
     )
 
     async def run() -> None:
         async with lifespan(application):
-            assert seo.resumed == 1
+            assert runs.closed == 0
 
     asyncio.run(run())
-    assert seo.resumed == 1
-    assert seo.closed == 1
+    assert (runs.closed, measurements.closed, search.closed) == (1, 1, 1)
 
 
 def test_the_module_level_app_is_ready_for_uvicorn():
