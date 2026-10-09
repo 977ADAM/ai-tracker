@@ -45,7 +45,7 @@ const competitor = (v: unknown) => {
 };
 const query = (v: unknown) => {
   const r = obj(v);
-  return { text: str(r.text), category: nullable(r.category) };
+  return { text: str(r.text), category: nullable(r.category), group: nullable(r.group) };
 };
 function publicInput(v: unknown): ProjectInput {
   const r = obj(v);
@@ -53,6 +53,7 @@ function publicInput(v: unknown): ProjectInput {
     name: str(r.name),
     brand: str(r.brand),
     site_url: str(r.site_url),
+    include_subdomains: r.include_subdomains === undefined ? true : bool(r.include_subdomains),
     brand_description: r.brand_description === undefined ? '' : str(r.brand_description),
     brand_aliases: r.brand_aliases === undefined ? [] : arr(r.brand_aliases, str),
     competitors: arr(r.competitors, competitor),
@@ -133,6 +134,10 @@ function report(v: unknown): Aggregates {
       };
     }),
     queries: arr(r.queries, (v) => ({ ...query(v), ...visibility(v) })),
+    groups: arr(r.groups ?? [], (v) => {
+      const g = obj(v);
+      return { name: str(g.name), ...visibility(g) };
+    }),
     competitors: arr(r.competitors, (v) => {
       const c = obj(v);
       return {
@@ -315,9 +320,10 @@ function validatePath(path: string, method: string) {
   const history = u.pathname.endsWith('/measurements');
   const cancel = u.pathname.endsWith('/cancel');
   const generate = u.pathname.endsWith('/generate');
+  const importPrompts = u.pathname === '/api/projects/import-prompts';
   const allowed = row
     ? ['GET']
-    : cancel || generate
+    : cancel || generate || importPrompts
       ? ['POST']
       : history || collection
         ? ['GET', 'POST']
@@ -329,6 +335,10 @@ function validatePath(path: string, method: string) {
 }
 function projection(path: string, value: unknown, method: string): unknown {
   const u = new URL(path, 'http://local');
+  if (u.pathname === '/api/projects/import-prompts') {
+    const r = obj(value);
+    return { queries: arr(r.queries, query) };
+  }
   if (u.pathname.endsWith('/generate')) {
     const r = obj(value),
       p = obj(r.proposal);
@@ -404,15 +414,16 @@ export async function proxyProjects(
     return json({ detail: 'Некорректный запрос' }, 400);
   }
   let body: string | undefined;
+  const maxBody = path === '/api/projects/import-prompts' ? 512 * 1024 : 65536;
   if (method !== 'GET') {
     if (!sameOriginRequest(request)) return json({ detail: 'Недопустимый источник запроса' }, 403);
     const bodyless =
       method === 'DELETE' ||
       (method === 'POST' && (path.endsWith('/measurements') || path.endsWith('/cancel')));
-    if (Number(request.headers.get('content-length')) > 65536)
+    if (Number(request.headers.get('content-length')) > maxBody)
       return json({ detail: 'Запрос слишком большой' }, 413);
     body = await request.text();
-    if (new TextEncoder().encode(body).length > 65536)
+    if (new TextEncoder().encode(body).length > maxBody)
       return json({ detail: 'Запрос слишком большой' }, 413);
     if (bodyless) {
       if (body) return json({ detail: 'Запрос не принимает тело' }, 400);
