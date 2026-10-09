@@ -17,6 +17,8 @@ class ProjectRepository(ProjectStorage):
     @staticmethod
     def public(row):
         return {
+            "brand_description": "",
+            "brand_aliases": [],
             **json.loads(row["input_json"]),
             "id": row["id"],
             "revision": row["revision"],

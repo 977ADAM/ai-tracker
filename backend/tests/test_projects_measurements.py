@@ -228,3 +228,57 @@ def test_cancelled_deleted_measurement_closes_unstarted_clients(tmp_path):
 
     asyncio.run(run())
     assert provider.closed
+
+
+def test_project_alias_is_counted_in_measurement(tmp_path):
+    projects = ProjectRepository(tmp_path)
+    projects.initialize()
+    runs = MeasurementRepository(tmp_path)
+    p = normalize_project(
+        project(brand_description="Сеть пиццерий", brand_aliases=["Додошка", "dodo"])
+    )
+    saved = projects.create(p)
+    s = snapshot(p)
+    id = runs.create(saved["id"], s, {})
+    runs.save_answer(
+        id,
+        (0, "m1"),
+        SeoAnswer(
+            "Додошка — хороший выбор", "text", "not_requested", (), (), "test", None
+        ),
+    )
+    row = runs.rows_page(id, "model")["items"][0]
+    assert row["brand_mentioned"]
+    assert runs.get(id)["aggregates"]["mentioned"] == 1
+
+
+def test_generation_proposes_fields_without_saving_or_starting(tmp_path):
+    from app.domain.site_fetch import FetchedPage
+    from app.service.project_generation import ProjectGenerationService
+
+    projects = ProjectRepository(tmp_path)
+    projects.initialize()
+    p = projects.create(normalize_project(project()))
+
+    class Fetcher:
+        async def fetch(self, host):
+            return (
+                FetchedPage("https://example.ru", "Пицца", "Сеть пиццерий Додопицца"),
+            )
+
+    class Client:
+        async def complete(self, system, user):
+            return '{"brand_description":"Сеть пиццерий","brand_aliases":["Додошка","dodo"]}'
+
+    class Settings:
+        def build_client(self):
+            return Client()
+
+    value = asyncio.run(
+        ProjectGenerationService(projects, Fetcher(), Settings()).generate(
+            p["id"], "description"
+        )
+    )
+    assert value["proposal"]["brand_aliases"] == ["Додошка", "dodo"]
+    assert projects.get(p["id"])["brand_description"] == ""
+    assert value["kind"] == "description"

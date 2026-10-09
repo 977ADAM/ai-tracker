@@ -214,3 +214,15 @@ using-git-worktrees as applicable. No implementation has been authorized by
 approval of the spec alone: user reviews this plan and selects the execution
 method. Recommended: native execution in this chat, because these nine tasks
 share contracts and most risk is in their integration.
+
+## Approved extension: six-step wizard
+
+- Add brand_description/brand_aliases with legacy defaults and include aliases
+  in matching, position and sentiment; snapshots/comparison capture the fields.
+- Add safe site-based ProjectGenerationService and POST project/{id}/generate;
+  one plain completion per requested step, no automatic persistence or launch.
+- Use ProjectWizard for new/setup pages with editable proposals, back navigation,
+  draft save and separate final launch; retain ordinary settings form.
+- Verify alias counting and proposal-only generation with minimal backend tests;
+  update isolated browser scenario to all six steps, confirm no launch before
+  final button; update multi-company and wizard documentation.

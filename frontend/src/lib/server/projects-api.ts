@@ -53,6 +53,8 @@ function publicInput(v: unknown): ProjectInput {
     name: str(r.name),
     brand: str(r.brand),
     site_url: str(r.site_url),
+    brand_description: r.brand_description === undefined ? '' : str(r.brand_description),
+    brand_aliases: r.brand_aliases === undefined ? [] : arr(r.brand_aliases, str),
     competitors: arr(r.competitors, competitor),
     queries: arr(r.queries, query),
     connection_ids: arr(r.connection_ids, str),
@@ -287,7 +289,7 @@ export function projectPath(id?: string): string {
   return '/api/projects' + (id ? '/' + id : '');
 }
 const pathPattern =
-  /^\/api\/(?:projects(?:\/[a-zA-Z0-9_-]{1,100}(?:\/measurements)?)?|measurements\/[a-zA-Z0-9_-]{1,100}(?:\/rows|\/cancel)?)(?:\?[^#]*)?$/;
+  /^\/api\/(?:projects(?:\/[a-zA-Z0-9_-]{1,100}(?:\/(?:measurements|generate))?)?|measurements\/[a-zA-Z0-9_-]{1,100}(?:\/rows|\/cancel)?)(?:\?[^#]*)?$/;
 function validatePath(path: string, method: string) {
   if (!pathPattern.test(path)) throw new Error('Некорректный путь');
   const u = new URL(path, 'http://local'),
@@ -312,9 +314,10 @@ function validatePath(path: string, method: string) {
   const collection = u.pathname === '/api/projects';
   const history = u.pathname.endsWith('/measurements');
   const cancel = u.pathname.endsWith('/cancel');
+  const generate = u.pathname.endsWith('/generate');
   const allowed = row
     ? ['GET']
-    : cancel
+    : cancel || generate
       ? ['POST']
       : history || collection
         ? ['GET', 'POST']
@@ -326,6 +329,23 @@ function validatePath(path: string, method: string) {
 }
 function projection(path: string, value: unknown, method: string): unknown {
   const u = new URL(path, 'http://local');
+  if (u.pathname.endsWith('/generate')) {
+    const r = obj(value),
+      p = obj(r.proposal);
+    const kind = str(r.kind);
+    if (kind === 'description')
+      return {
+        kind,
+        proposal: {
+          brand_description: str(p.brand_description),
+          brand_aliases: arr(p.brand_aliases, str),
+        },
+      };
+    if (kind === 'queries') return { kind, proposal: { queries: arr(p.queries, query) } };
+    if (kind === 'competitors')
+      return { kind, proposal: { competitors: arr(p.competitors, competitor) } };
+    throw new Error('Некорректное предложение');
+  }
   if (u.pathname.endsWith('/cancel')) return publicMeasurement(value);
   if (u.pathname.endsWith('/rows')) {
     const r = obj(value);
@@ -360,7 +380,7 @@ async function upstream(path: string, init: RequestInit = {}) {
   const response = await fetch(apiOrigin() + path, {
     ...init,
     redirect: 'error',
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(path.endsWith('/generate') ? 125000 : 10000),
   });
   if (response.status === 204) return { response, value: null };
   const text = await response.text();

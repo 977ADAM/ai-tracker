@@ -7,17 +7,27 @@ from app.domain.projects import comparison_key
 from app.domain.search import SearchDocument, first_matching_result
 from app.domain.seo import ModelRowValue
 from app.domain.seo_answer import answer_from_dict
-from app.domain.seo_report import brand_position, citation_metric, source_counts
+from app.domain.seo_report import (
+    brand_position_with_aliases,
+    citation_metric,
+    source_counts,
+)
 from app.domain.site_fetch import canonical_host
 
 
-def _metric(rows, brand, host):
+def _metric(rows, brand, host, aliases=()):
     answered = [r for r in rows if r["status"] == "success"]
     n = len(answered)
-    mentions = sum(mentions_phrase(r.get("answer") or "", brand) for r in answered)
+
+    def matched(row):
+        return any(
+            mentions_phrase(row.get("answer") or "", name) for name in (brand, *aliases)
+        )
+
+    mentions = sum(matched(r) for r in answered)
     sentiment = {k: 0 for k in ("positive", "neutral", "negative", "unknown")}
     for r in answered:
-        if mentions_phrase(r.get("answer") or "", brand):
+        if matched(r):
             sentiment[(r.get("sentiment") or {}).get("label", "unknown")] += 1
     return {
         "successful": n,
@@ -31,7 +41,10 @@ def build_measurement_report(snapshot, model_rows, search_rows):
     p = snapshot["project"]
     host = canonical_host(p["site_url"])
     planned = len(p["queries"]) * len(snapshot["connections"])
-    result = {**_metric(model_rows, p["brand"], host), "planned": planned}
+    result = {
+        **_metric(model_rows, p["brand"], host, p.get("brand_aliases", [])),
+        "planned": planned,
+    }
     successful = [r for r in model_rows if r["status"] == "success"]
     values = [
         ModelRowValue(
@@ -48,7 +61,7 @@ def build_measurement_report(snapshot, model_rows, search_rows):
     result["models"] = []
     for c in snapshot["connections"]:
         rows = [r for r in model_rows if r["connection_id"] == c["connection_id"]]
-        metric = _metric(rows, p["brand"], host)
+        metric = _metric(rows, p["brand"], host, p.get("brand_aliases", []))
         result["models"].append(
             {
                 **metric,
@@ -57,12 +70,13 @@ def build_measurement_report(snapshot, model_rows, search_rows):
                 "planned": len(p["queries"]),
                 "position": {
                     k: asdict(v)
-                    for k, v in brand_position(
+                    for k, v in brand_position_with_aliases(
                         values,
                         c["connection_id"],
                         p["brand"],
                         host,
                         [canonical_host(r["site_url"]) for r in p["competitors"]],
+                        p.get("brand_aliases", []),
                     ).items()
                 },
                 "citation": asdict(citation_metric(values, c["connection_id"], host)),
@@ -73,7 +87,10 @@ def build_measurement_report(snapshot, model_rows, search_rows):
             "text": q["text"],
             "category": q.get("category"),
             **_metric(
-                [r for r in model_rows if r["query_index"] == i], p["brand"], host
+                [r for r in model_rows if r["query_index"] == i],
+                p["brand"],
+                host,
+                p.get("brand_aliases", []),
             ),
         }
         for i, q in enumerate(p["queries"])

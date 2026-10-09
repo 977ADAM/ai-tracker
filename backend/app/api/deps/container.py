@@ -44,6 +44,7 @@ from app.service.config import ConfigService
 from app.service.connections import ConnectionService
 from app.service.form import FormService
 from app.service.measurements import MeasurementService
+from app.service.project_generation import ProjectGenerationService
 from app.service.projects import ProjectService
 from app.service.provider_settings import ProviderSettingsService
 from app.service.runs import RunService
@@ -79,6 +80,7 @@ class Container:
     chats: ChatRepository
     chat_service: ChatService
     projects: ProjectService
+    project_generation: ProjectGenerationService
     measurements: MeasurementService
 
 
@@ -267,5 +269,6 @@ def build_container(
         chats=chats,
         chat_service=chat_service,
         projects=projects,
+        project_generation=ProjectGenerationService(project_repository, resolved_fetcher, seo_settings_service),
         measurements=measurements,
     )

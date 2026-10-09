@@ -82,7 +82,7 @@ class MeasurementService:
             "yandex": {"region": p["yandex_region"], "mode": "async"}
             if gateway
             else None,
-            "metric_version": "project-metrics-v1",
+            "metric_version": "project-metrics-v2",
         }
         count = len(p["queries"]) * len(snapshots)
         estimate = {
@@ -106,7 +106,13 @@ class MeasurementService:
         self.events[id] = event
         task = asyncio.create_task(
             MeasurementWorker(self.repository).run(
-                id, event, providers, LlmSentimentClassifier(client), gateway
+                id,
+                event,
+                providers,
+                LlmSentimentClassifier(
+                    client, p.get("brand_aliases", []), p.get("brand_description", "")
+                ),
+                gateway,
             )
         )
         self.tasks[id] = task

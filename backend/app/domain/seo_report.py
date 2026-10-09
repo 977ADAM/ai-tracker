@@ -552,3 +552,18 @@ def _metric(denominator: int, successes: int, positions: Sequence[int] = ()) -> 
 brand_position = _brand_position
 citation_metric = _citation_metric
 source_counts = _source_counts
+
+
+def brand_position_with_aliases(rows, connection_id, company_name, host, candidate_hosts, aliases=()):
+    """Count saved brand aliases in position without changing original answers."""
+    from dataclasses import replace
+    normalized = []
+    for row in rows:
+        paragraphs = []
+        for paragraph in _paragraphs(row.answer or ""):
+            text = normalize_text(paragraph)
+            for alias in aliases:
+                text = re.sub(r"(?<!\w)" + re.escape(normalize_text(alias)) + r"(?!\w)", lambda _: normalize_text(company_name), text)
+            paragraphs.append(text)
+        normalized.append(replace(row, answer="\n\n".join(paragraphs)))
+    return _brand_position(normalized, connection_id, company_name, host, candidate_hosts)

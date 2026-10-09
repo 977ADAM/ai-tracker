@@ -27,6 +27,8 @@ def normalize_project(payload: object) -> dict:
     fields = {
         "name",
         "brand",
+        "brand_description",
+        "brand_aliases",
         "site_url",
         "competitors",
         "queries",
@@ -36,6 +38,19 @@ def normalize_project(payload: object) -> dict:
     }
     if not isinstance(payload, dict) or set(payload) - fields:
         raise ValidationError("Некорректные настройки проекта")
+    description = payload.get("brand_description", "")
+    if not isinstance(description, str) or len(description.strip()) > 500:
+        raise ValidationError("Описание бренда должно содержать не более 500 символов")
+    aliases = payload.get("brand_aliases", [])
+    if not isinstance(aliases, list) or len(aliases) > 20:
+        raise ValidationError("Добавьте не более 20 вариантов названия")
+    names = []
+    for alias in aliases:
+        name = _text(alias, "Вариант названия")
+        if normalize_text(name) not in {
+            normalize_text(a) for a in names
+        } and normalize_text(name) != normalize_text(payload.get("brand", "")):
+            names.append(name)
     queries = payload.get("queries", [])
     if not isinstance(queries, list) or not 0 <= len(queries) <= 20:
         raise ValidationError("Добавьте не более 20 запросов")
@@ -88,6 +103,8 @@ def normalize_project(payload: object) -> dict:
         "name": _text(payload.get("name") or payload.get("brand"), "Название проекта"),
         "brand": _text(payload.get("brand"), "Бренд"),
         "site_url": _url(payload.get("site_url")),
+        "brand_description": description.strip(),
+        "brand_aliases": names,
         "competitors": rivals,
         "queries": normalized,
         "connection_ids": ids,
@@ -104,6 +121,8 @@ def comparison_key(snapshot: dict) -> str:
     p.pop("name", None)
     p.pop("connection_ids", None)
     p["brand"] = normalize_text(p["brand"])
+    p["brand_description"] = normalize_text(p.get("brand_description", ""))
+    p["brand_aliases"] = sorted(normalize_text(a) for a in p.get("brand_aliases", []))
     p["site_url"] = canonical_host(p["site_url"])
     p["queries"] = sorted(
         (
@@ -136,3 +155,12 @@ def comparison_key(snapshot: dict) -> str:
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
     ).hexdigest()
+
+
+def mentions_project_brand(answer: str, project: dict) -> bool:
+    from app.domain.matching import mentions_phrase
+
+    return any(
+        mentions_phrase(answer, name)
+        for name in (project["brand"], *project.get("brand_aliases", []))
+    )

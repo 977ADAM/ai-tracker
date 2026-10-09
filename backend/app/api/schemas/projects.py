@@ -20,6 +20,8 @@ class ProjectRequest(BaseModel):
     name: str = ""
     brand: str
     site_url: str
+    brand_description: str = ""
+    brand_aliases: list[str] = []
     competitors: list[CompetitorSchema] = []
     queries: list[ProjectQuerySchema] = []
     connection_ids: list[str] = []

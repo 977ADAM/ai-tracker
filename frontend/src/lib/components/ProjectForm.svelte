@@ -17,6 +17,8 @@
   let ids = $state<string[]>(untrack(() => initial?.connection_ids.slice() ?? []));
   let yandex = $state(untrack(() => initial?.yandex_enabled ?? false));
   let region = $state(untrack(() => initial?.yandex_region ?? 213));
+  let description = $state(untrack(() => initial?.brand_description ?? ''));
+  let aliases = $state(untrack(() => initial?.brand_aliases?.join('\n') ?? ''));
   let saving = $state(false);
   let error = $state('');
   let fieldErrors = $state<Record<string, string>>({});
@@ -61,6 +63,11 @@
       const payload: ProjectInput = {
         name: initial ? name : brand,
         brand,
+        brand_description: description,
+        brand_aliases: aliases
+          .split('\n')
+          .map((a) => a.trim())
+          .filter(Boolean),
         site_url: site,
         queries: initial ? queries : [],
         competitors: initial ? competitors : [],
@@ -120,6 +127,22 @@
     </div>
   </section>
   {#if initial}
+    <section>
+      <h2 class="text-lg font-semibold">Описание и варианты названия</h2>
+      <label class="mt-4 block text-sm"
+        >Описание бренда<textarea
+          class={inputClass}
+          bind:value={description}
+          maxlength="500"
+          rows="3"></textarea></label
+      ><label class="mt-4 block text-sm"
+        >Варианты названия бренда<textarea
+          class={inputClass}
+          bind:value={aliases}
+          rows="3"
+          placeholder="Каждый вариант с новой строки"></textarea></label
+      >
+    </section>
     <section>
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold">

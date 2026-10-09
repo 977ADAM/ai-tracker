@@ -4,6 +4,8 @@ export type ProjectInput = {
   name: string;
   brand: string;
   site_url: string;
+  brand_description?: string;
+  brand_aliases?: string[];
   competitors: Competitor[];
   queries: ProjectQuery[];
   connection_ids: string[];

@@ -112,14 +112,26 @@ def test_project_creation_configuration_two_measurements_and_delete(
     expect(page.get_by_label("Запрос 1", exact=True)).to_have_count(0)
     page.get_by_label("Название бренда").fill("Додопицца")
     page.get_by_label("Сайт", exact=True).fill("https://example.ru")
-    page.get_by_role("button", name="Создать проект", exact=True).click()
-    expect(page.get_by_role("heading", name="Проект создан")).to_be_visible()
-    expect(page.get_by_role("button", name="Запустить замер")).to_be_disabled()
-    page.get_by_role("link", name="Добавить запросы и модели").click()
-    page.get_by_role("button", name="+ Добавить запрос").click()
-    page.get_by_label("Запрос 1", exact=True).fill("Где заказать пиццу?")
+    page.get_by_role("button", name="✓ Далее").click()
+    expect(page.get_by_role("heading", name="Описание", exact=True)).to_be_visible()
+    expect(page.get_by_label("Описание бренда")).to_have_value("Сеть пиццерий", timeout=15000)
+    expect(page.get_by_label("Варианты названия бренда")).to_have_value("Додошка\ndodo")
+    page.set_viewport_size({"width":1280,"height":900})
+    page.screenshot(path=str(tmp_path / "wizard-description.png"), full_page=True)
+    page.set_viewport_size({"width":375,"height":850})
+    page.get_by_label("Описание бренда").fill("Сеть пиццерий и доставки")
+    page.get_by_role("button", name="Продолжить позже").click()
+    page.get_by_role("link", name="Мастер настройки").click()
+    expect(page.get_by_label("Промпт 1", exact=True)).to_have_value("Где заказать пиццу?", timeout=15000)
+    page.get_by_role("button", name="✓ Далее").click()
+    expect(page.get_by_role("heading", name="Конкуренты", exact=True)).to_be_visible()
+    page.get_by_role("button", name="✓ Далее").click()
     page.get_by_label("QA модель").check()
-    page.get_by_role("button", name="Сохранить проект").click()
+    page.get_by_role("button", name="✓ Далее").click()
+    expect(page.get_by_role("heading", name="Запуск", exact=True)).to_be_visible()
+    # Confirming setup never launches a paid measurement by itself.
+    projects = page.request.get(project_instance+"/api/projects").json()["items"]
+    assert projects[0]["active_measurement"] is None and projects[0]["latest_measurement"] is None
     page.get_by_role("button", name="Запустить замер").click()
     expect(page.locator("[data-measurement-report]")).to_contain_text(
         "1 из 1", timeout=15000

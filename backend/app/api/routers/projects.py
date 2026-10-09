@@ -51,3 +51,27 @@ def measurement_history(
 @router.post("/{id}/measurements", status_code=202)
 async def start_measurement(id: str, container: ContainerDep) -> dict:
     return await container.measurements.start(id)
+
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
+
+
+class GenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["description", "queries", "competitors"]
+
+
+@router.post("/{id}/generate")
+async def generate_proposal(
+    id: str, payload: GenerationRequest, container: ContainerDep
+) -> dict:
+    try:
+        return await container.project_generation.generate(id, payload.kind)
+    except TimeoutError:
+        from app.core.errors import ProviderError
+
+        raise ProviderError(
+            "Генерация превысила 120 секунд. Можно заполнить поля вручную"
+        ) from None

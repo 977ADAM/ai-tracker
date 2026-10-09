@@ -13,8 +13,7 @@ from app.db.project_storage import (
     encode,
     stamp,
 )
-from app.domain.matching import mentions_phrase
-from app.domain.projects import comparison_key
+from app.domain.projects import comparison_key, mentions_project_brand
 from app.domain.seo import mentions_host
 from app.domain.seo_answer import answer_from_dict
 from app.domain.site_fetch import canonical_host
@@ -108,7 +107,7 @@ class MeasurementRepository(ProjectStorage):
             if answer is not None:
                 value = asdict(answer)
                 answer_from_dict(value)
-                name = mentions_phrase(answer.text, p["brand"])
+                name = mentions_project_brand(answer.text, p)
                 host = mentions_host(answer.text, canonical_host(p["site_url"]))
             else:
                 value, name, host = None, False, False

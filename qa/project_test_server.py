@@ -10,6 +10,7 @@ from app.main import app
 from app.api.deps import build_container
 from app.core.config import Settings
 from tests.fakes import MemorySecrets
+from app.domain.site_fetch import FetchedPage
 
 
 class Provider:
@@ -25,6 +26,12 @@ class ClassifierClient:
     model = "test-judge"
 
     async def complete(self, system, user):
+        if 'brand_description' in system:
+            return json.dumps({'brand_description':'Сеть пиццерий','brand_aliases':['Додошка','dodo']},ensure_ascii=False)
+        if '"queries"' in system:
+            return json.dumps({'queries':[{'text':'Где заказать пиццу?','category':'recommendation'}]},ensure_ascii=False)
+        if '"competitors"' in system:
+            return '{"competitors":[]}'
         return json.dumps(
             {"label": "positive", "evidence": "Додопицца — хороший выбор."},
             ensure_ascii=False,
@@ -52,3 +59,11 @@ container.connections.save(
 )
 container.measurements.seo_settings = ClassifierSettings()
 app.state.container = container
+
+
+class SiteFetcher:
+    async def fetch(self, host):
+        return (FetchedPage('https://example.ru','Додопицца','Додопицца — сеть пиццерий'),)
+
+container.project_generation.fetcher = SiteFetcher()
+container.project_generation.settings = ClassifierSettings()

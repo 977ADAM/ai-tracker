@@ -194,6 +194,11 @@
     </div>
     <div class="flex gap-3">
       <a
+        href={`/projects/${project.id}/setup`}
+        class="rounded-xl border border-line bg-white px-4 py-3 text-sm font-medium"
+        >Мастер настройки</a
+      >
+      <a
         href={`/projects/${project.id}/settings`}
         class="rounded-xl border border-line bg-white px-4 py-3 text-sm font-medium"
         >Настройки проекта</a
@@ -218,9 +223,9 @@
         Добавьте запросы и выберите модели внутри проекта, чтобы запустить первый замер.
       </p>
       <a
-        href={`/projects/${project.id}/settings`}
+        href={`/projects/${project.id}/setup`}
         class="mt-4 inline-flex rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white"
-        >Добавить запросы и модели</a
+        >Продолжить настройку</a
       >
     </div>{/if}
   {#if error}<p role="alert" class="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700">
