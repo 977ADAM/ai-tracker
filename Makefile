@@ -1,9 +1,12 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install ruff backend frontend frontend-prod build check types lint lint-fix format format-check docker-build docker-up docker-down docker-logs
+.PHONY: help install ruff backend frontend frontend-prod build check types lint lint-fix format format-check migrate migrate-down migration docker-build docker-up docker-down docker-logs
 
 help:
 	@echo "install  Install Python and Node.js dependencies"
+	@echo "migrate       Apply the database migrations with Alembic"
+	@echo "migration     Create an empty migration (name=...)"
+	@echo "migrate-down  Revert the last migration"
 	@echo "backend       Start the Python API"
 	@echo "frontend      Start the web interface for development"
 	@echo "frontend-prod Start the built web interface"
@@ -25,6 +28,14 @@ install:
 ruff:
 	cd backend && ruff check --fix .
 	
+migrate:
+	cd backend && uv run alembic upgrade head
+
+migrate-down:
+	cd backend && uv run alembic downgrade -1
+
+migration:
+	cd backend && uv run alembic revision -m "$(name)"
 backend:
 	@cd backend && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
