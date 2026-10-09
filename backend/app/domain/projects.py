@@ -18,6 +18,8 @@ def _text(value, label, limit=100):
 
 
 def _url(value):
+    if isinstance(value, str) and value.strip() and "://" not in value:
+        value = "https://" + value.strip()
     if url_problem(value) or normalize_source_url(value) is None:
         raise ValidationError("Укажите публичный адрес сайта http(s) с доменным именем")
     return value.strip()
@@ -30,6 +32,7 @@ def normalize_project(payload: object) -> dict:
         "brand_description",
         "brand_aliases",
         "site_url",
+        "include_subdomains",
         "competitors",
         "queries",
         "connection_ids",
@@ -57,7 +60,7 @@ def normalize_project(payload: object) -> dict:
     normalized = []
     seen = set()
     for q in queries:
-        if not isinstance(q, dict) or set(q) - {"text", "category"}:
+        if not isinstance(q, dict) or set(q) - {"text", "category", "group"}:
             raise ValidationError("Некорректный запрос")
         text = _text(q.get("text"), "Запрос", 400)
         category = q.get("category")
@@ -67,8 +70,15 @@ def normalize_project(payload: object) -> dict:
             )
         if category is not None and category not in QUERY_CATEGORIES:
             raise ValidationError("Неизвестная категория запроса")
+        group = q.get("group")
+        if group is not None:
+            if not isinstance(group, str) or len(group.strip()) > 100:
+                raise ValidationError(
+                    "Название группы должно содержать не более 100 символов"
+                )
+            group = group.strip() or None
         seen.add(normalize_text(text))
-        normalized.append({"text": text, "category": category})
+        normalized.append({"text": text, "category": category, "group": group})
     ids = payload.get("connection_ids", [])
     if (
         not isinstance(ids, list)
@@ -85,12 +95,15 @@ def normalize_project(payload: object) -> dict:
         if not isinstance(c, dict) or set(c) != {"brand", "site_url"}:
             raise ValidationError("Укажите бренд и сайт конкурента")
         rival = {
-            "brand": _text(c.get("brand"), "Бренд конкурента"),
-            "site_url": _url(c.get("site_url")),
+            "brand": _text(c.get("brand") or c.get("site_url"), "Бренд конкурента"),
+            "site_url": _url(c.get("site_url")) if c.get("site_url") else "",
         }
         if rival in rivals:
             raise ValidationError("Конкуренты не должны повторяться")
         rivals.append(rival)
+    subdomains = payload.get("include_subdomains", True)
+    if type(subdomains) is not bool:
+        raise ValidationError("Некорректный выбор поддоменов")
     enabled = payload.get("yandex_enabled", False)
     region = payload.get("yandex_region", 213)
     if (
@@ -103,6 +116,7 @@ def normalize_project(payload: object) -> dict:
         "name": _text(payload.get("name") or payload.get("brand"), "Название проекта"),
         "brand": _text(payload.get("brand"), "Бренд"),
         "site_url": _url(payload.get("site_url")),
+        "include_subdomains": subdomains,
         "brand_description": description.strip(),
         "brand_aliases": names,
         "competitors": rivals,
@@ -124,9 +138,14 @@ def comparison_key(snapshot: dict) -> str:
     p["brand_description"] = normalize_text(p.get("brand_description", ""))
     p["brand_aliases"] = sorted(normalize_text(a) for a in p.get("brand_aliases", []))
     p["site_url"] = canonical_host(p["site_url"])
+    p["include_subdomains"] = p.get("include_subdomains", True)
     p["queries"] = sorted(
         (
-            {"text": normalize_text(q["text"]), "category": q.get("category")}
+            {
+                "text": normalize_text(q["text"]),
+                "category": q.get("category"),
+                "group": normalize_text(q.get("group") or "") or None,
+            }
             for q in p["queries"]
         ),
         key=lambda q: (q["text"], q["category"] or ""),
@@ -135,7 +154,7 @@ def comparison_key(snapshot: dict) -> str:
         (
             {
                 "brand": normalize_text(c["brand"]),
-                "site_url": canonical_host(c["site_url"]),
+                "site_url": canonical_host(c["site_url"]) if c["site_url"] else "",
             }
             for c in p["competitors"]
         ),
@@ -163,4 +182,34 @@ def mentions_project_brand(answer: str, project: dict) -> bool:
     return any(
         mentions_phrase(answer, name)
         for name in (project["brand"], *project.get("brand_aliases", []))
+    )
+
+
+def project_host_matches(project: dict, other: str) -> bool:
+    from app.domain.site_fetch import canonical_host, same_site_host
+
+    target = canonical_host(project["site_url"])
+    host = canonical_host(other)
+    return (
+        same_site_host(target, host)
+        if project.get("include_subdomains", True)
+        else target == host
+    )
+
+
+def mentions_project_domain(text: str, project: dict) -> bool:
+    import re
+
+    from app.domain.seo import mentions_host
+    from app.domain.site_fetch import canonical_host
+
+    host = canonical_host(project["site_url"])
+    if project.get("include_subdomains", True):
+        return mentions_host(text, host)
+    return (
+        re.search(
+            r"(?<![\w.-])(?:www\.)?" + re.escape(host) + r"(?![\w-]|\.[\w-])",
+            normalize_text(text),
+        )
+        is not None
     )
