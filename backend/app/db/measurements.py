@@ -303,21 +303,29 @@ class MeasurementRepository(ProjectStorage):
         }
 
     def get(self, id):
+        with self.connection() as db:
+            return self._get(db, id)
+
+    def _get(self, db, id):
+        """One measurement with its comparison, on the caller's connection.
+
+        The history page builds a whole page of these, so the read takes the
+        connection it is given instead of opening one per row.
+        """
         from app.domain.measurement_report import compare_measurements
 
-        with self.connection() as db:
-            row = self.require(db, id)
-            result = self._snapshot(db, row)
-            previous = db.execute(
-                "SELECT * FROM project_measurements WHERE project_id=? AND comparison_key=? AND status='completed' AND (created_at,id)<(?,?) ORDER BY created_at DESC,id DESC LIMIT 1",
-                (row["project_id"], row["comparison_key"], row["created_at"], id),
-            ).fetchone()
-            result["comparison"] = compare_measurements(
-                result, self._snapshot(db, previous) if previous else None
-            )
-            if previous:
-                result["comparison"]["previous_id"] = previous["id"]
-            return result
+        row = self.require(db, id)
+        result = self._snapshot(db, row)
+        previous = db.execute(
+            "SELECT * FROM project_measurements WHERE project_id=? AND comparison_key=? AND status='completed' AND (created_at,id)<(?,?) ORDER BY created_at DESC,id DESC LIMIT 1",
+            (row["project_id"], row["comparison_key"], row["created_at"], id),
+        ).fetchone()
+        result["comparison"] = compare_measurements(
+            result, self._snapshot(db, previous) if previous else None
+        )
+        if previous:
+            result["comparison"]["previous_id"] = previous["id"]
+        return result
 
     def list_page(self, project_id, cursor=None, limit=20):
         if not 1 <= limit <= 100:
@@ -339,7 +347,7 @@ class MeasurementRepository(ProjectStorage):
                 f"SELECT * FROM project_measurements WHERE project_id=? {where} ORDER BY created_at DESC,id DESC LIMIT ?",
                 (*args, limit + 1),
             ).fetchall()
-        items = [self.get(r["id"]) for r in rows[:limit]]
+            items = [self._get(db, row["id"]) for row in rows[:limit]]
         return {
             "items": items,
             "cursor": cursor_encode([items[-1]["created_at"], items[-1]["id"]])
