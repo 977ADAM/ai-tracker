@@ -13,7 +13,6 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from app.api.deps.container import Container
-from app.service.chat import ChatService
 from app.service.checks import CheckService
 from app.service.config import ConfigService
 from app.service.connections import ConnectionService
@@ -22,7 +21,6 @@ from app.service.provider_settings import ProviderSettingsService
 from app.service.runs import RunService
 from app.service.search import SearchService
 from app.service.search_settings import SearchSettingsService
-from app.service.seo import SeoService
 from app.service.seo_settings import SeoSettingsService
 
 
@@ -62,16 +60,8 @@ def get_run_service(container: ContainerDep) -> RunService:
     return container.runs
 
 
-def get_seo_service(container: ContainerDep) -> SeoService:
-    return container.seo_service
-
-
 def get_seo_settings_service(container: ContainerDep) -> SeoSettingsService:
     return container.seo_settings
-
-
-def get_chat_service(container: ContainerDep) -> ChatService:
-    return container.chat_service
 
 
 ContainerDep = Annotated[Container, Depends(get_container)]
@@ -83,6 +73,4 @@ ConfigServiceDep = Annotated[ConfigService, Depends(get_config_service)]
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
 SearchSettingsServiceDep = Annotated[SearchSettingsService, Depends(get_search_settings_service)]
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]
-SeoServiceDep = Annotated[SeoService, Depends(get_seo_service)]
 SeoSettingsServiceDep = Annotated[SeoSettingsService, Depends(get_seo_settings_service)]
-ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
