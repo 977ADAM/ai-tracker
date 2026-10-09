@@ -18,7 +18,6 @@ import pytest
 from playwright.sync_api import Page
 
 from app import Application, configured_application, missing_services
-from pages.fake_api import ChatApi
 from pages.settings import SettingsPage
 
 # The browser window is visible by default; set QA_HEADLESS=1 for a headless run.
@@ -97,13 +96,3 @@ def _safe_connections(application: Application) -> list[dict]:
 @pytest.fixture
 def settings_page(page: Page, application: Application) -> SettingsPage:
     return SettingsPage(page, application.base_url).open()
-
-
-@pytest.fixture
-def api(page: Page) -> ChatApi:
-    """Answer the chat BFF locally: turns, the run decision, and its resources.
-
-    Every call the chat screen makes is served inside the browser, so no paid
-    call leaves it and nothing is written to the real database.
-    """
-    return ChatApi(page).install()
