@@ -126,14 +126,13 @@ def test_subdomain_switch_applies_to_citations_and_yandex():
     assert report["sources"][0]["domain"] == "shop.example.ru"
 
 
-def test_initialization_updates_legacy_comparison_keys(tmp_path):
+def test_comparison_links_measurements_with_the_same_comparison_key(database_dsn):
     from app.db.measurements import MeasurementRepository
     from app.db.projects import ProjectRepository
     from app.domain.seo_answer import SeoAnswer
 
-    projects = ProjectRepository(tmp_path)
-    projects.initialize()
-    runs = MeasurementRepository(tmp_path)
+    projects = ProjectRepository(database_dsn)
+    runs = MeasurementRepository(database_dsn)
     p = projects.create(normalize_project(project()))
     first = runs.create(p["id"], snapshot(), {})
     runs.save_answer(
@@ -142,12 +141,6 @@ def test_initialization_updates_legacy_comparison_keys(tmp_path):
         SeoAnswer("Додопицца", "text", "not_requested", (), (), "test", None),
     )
     runs.finish(first, "completed")
-    with runs.connection(True) as db:
-        db.execute(
-            "UPDATE project_measurements SET comparison_key=? WHERE id=?",
-            ("3edbee8b1c5fb8ecc617bf8980971553eca8dc20b6977b8c913cebc8593ca918", first),
-        )
-    projects.initialize()
     second = runs.create(p["id"], snapshot(), {})
     runs.save_answer(
         second,
@@ -156,3 +149,4 @@ def test_initialization_updates_legacy_comparison_keys(tmp_path):
     )
     runs.finish(second, "completed")
     assert runs.get(second)["comparison"]["visibility_delta"] == 0
+    assert runs.get(second)["comparison"]["previous_id"] == first
