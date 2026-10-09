@@ -1,9 +1,10 @@
-export type ProjectQuery = { text: string; category: string | null };
+export type ProjectQuery = { text: string; category: string | null; group?: string | null };
 export type Competitor = { brand: string; site_url: string };
 export type ProjectInput = {
   name: string;
   brand: string;
   site_url: string;
+  include_subdomains?: boolean;
   brand_description?: string;
   brand_aliases?: string[];
   competitors: Competitor[];
@@ -57,6 +58,7 @@ export type Aggregates = Visibility & {
     citation: Metric;
   })[];
   queries: (ProjectQuery & Visibility)[];
+  groups?: (Visibility & { name: string })[];
   competitors: (Competitor & Omit<Visibility, 'sentiment'>)[];
   sources: { domain: string; answers: number; citations: number }[];
   search: (Competitor & {
