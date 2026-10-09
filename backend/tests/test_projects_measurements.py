@@ -1,7 +1,6 @@
 """Minimum regression checks for project snapshots and repeatable paid work."""
 
 import asyncio
-import sqlite3
 
 import pytest
 
@@ -74,10 +73,9 @@ def test_validation_and_comparison_identity():
     assert comparison_key(left) != comparison_key(right)
 
 
-def test_storage_snapshot_cancel_and_legacy_migration(tmp_path):
-    projects = ProjectRepository(tmp_path)
-    projects.initialize()
-    runs = MeasurementRepository(tmp_path)
+def test_storage_snapshot_cancel_and_measurement_isolation(database_dsn):
+    projects = ProjectRepository(database_dsn)
+    runs = MeasurementRepository(database_dsn)
     p = projects.create(normalize_project(project()))
     run = runs.create(
         p["id"], snapshot(), {"model_calls": 1, "sentiment_calls": 1, "search_calls": 0}
@@ -96,18 +94,12 @@ def test_storage_snapshot_cancel_and_legacy_migration(tmp_path):
     )
     runs.finish(run, "completed")
     assert runs.get(run)["status"] == "cancelled"
-    from app.db.chat import ChatRepository
-    from app.db.runs import RunRepository
-    from app.db.seo import SeoRepository
 
-    for repo in (
-        RunRepository(tmp_path),
-        SeoRepository(tmp_path),
-        ChatRepository(tmp_path),
-    ):
-        repo.initialize()
-    with sqlite3.connect(tmp_path / "runs.sqlite3") as db:
-        assert db.execute("pragma user_version").fetchone()[0] == 7
+    # A second repository object over the same database reads the same rows.
+    second = MeasurementRepository(database_dsn)
+    stored = second.get(run)
+    assert stored["status"] == "cancelled"
+    assert stored["project_id"] == p["id"]
 
 
 def test_report_denominators_unknown_and_comparison():
@@ -138,10 +130,9 @@ def test_report_denominators_unknown_and_comparison():
     assert compare_measurements(current, current)["visibility_delta"] is None
 
 
-def test_worker_checks_cartesian_pairs_and_preserves_sentiment_failures(tmp_path):
-    projects = ProjectRepository(tmp_path)
-    projects.initialize()
-    runs = MeasurementRepository(tmp_path)
+def test_worker_checks_cartesian_pairs_and_preserves_sentiment_failures(database_dsn):
+    projects = ProjectRepository(database_dsn)
+    runs = MeasurementRepository(database_dsn)
     queries = [{"text": f"Запрос {i}", "category": None} for i in range(15)]
     p = project(queries=queries, connection_ids=[f"m{i}" for i in range(5)])
     saved = projects.create(normalize_project(p))
@@ -201,10 +192,9 @@ def test_create_brand_and_site_only(client):
     assert client.post(f"/api/projects/{p['id']}/measurements").status_code == 400
 
 
-def test_cancelled_deleted_measurement_closes_unstarted_clients(tmp_path):
-    projects = ProjectRepository(tmp_path)
-    projects.initialize()
-    runs = MeasurementRepository(tmp_path)
+def test_cancelled_deleted_measurement_closes_unstarted_clients(database_dsn):
+    projects = ProjectRepository(database_dsn)
+    runs = MeasurementRepository(database_dsn)
     p = projects.create(normalize_project(project()))
     id = runs.create(p["id"], snapshot(), {})
     runs.cancel(id)
@@ -230,10 +220,9 @@ def test_cancelled_deleted_measurement_closes_unstarted_clients(tmp_path):
     assert provider.closed
 
 
-def test_project_alias_is_counted_in_measurement(tmp_path):
-    projects = ProjectRepository(tmp_path)
-    projects.initialize()
-    runs = MeasurementRepository(tmp_path)
+def test_project_alias_is_counted_in_measurement(database_dsn):
+    projects = ProjectRepository(database_dsn)
+    runs = MeasurementRepository(database_dsn)
     p = normalize_project(
         project(brand_description="Сеть пиццерий", brand_aliases=["Додошка", "dodo"])
     )
@@ -252,12 +241,11 @@ def test_project_alias_is_counted_in_measurement(tmp_path):
     assert runs.get(id)["aggregates"]["mentioned"] == 1
 
 
-def test_generation_proposes_fields_without_saving_or_starting(tmp_path):
+def test_generation_proposes_fields_without_saving_or_starting(database_dsn):
     from app.domain.site_fetch import FetchedPage
     from app.service.project_generation import ProjectGenerationService
 
-    projects = ProjectRepository(tmp_path)
-    projects.initialize()
+    projects = ProjectRepository(database_dsn)
     p = projects.create(normalize_project(project()))
 
     class Fetcher:
