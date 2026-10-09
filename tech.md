@@ -68,7 +68,9 @@ mentions/sources, а полнотекстовые ответы и источни
 - `frontend/src/routes/projects`: создание, настройки и история; `/` — карточки.
 
 До 20 запросов × 5 моделей, до 100 оценок тональности, до 20 поисков.
-Яндекс по умолчанию выключен; регион задаётся в проекте (по умолчанию Москва 213).
+Ветка Яндекса внутри замера по умолчанию выключена (`yandex_enabled = false`), хотя
+глобальная интеграция Яндекса в `search-settings.json` включена по умолчанию
+(`SearchSettings.resolve`); регион задаётся в проекте (по умолчанию Москва 213).
 Числа отчёта считаются сервером по сохранённым строкам, а не служебной моделью.
 Ошибки классификации не стирают исходный ответ. При перезапуске новые замеры
 прерываются без автоматического повтора платных вызовов.
@@ -151,6 +153,22 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 Все маршруты — под префиксом `/api`; OpenAPI и Swagger UI — на `/docs`
 ([router.py](backend/app/api/router.py), [openapi.py](backend/app/api/openapi.py)).
 
+Основной сценарий — проекты и их замеры:
+
+| Метод и путь | Назначение |
+| --- | --- |
+| `GET`, `POST /api/projects` | Карточки проектов и создание проекта |
+| `GET`, `PUT`, `DELETE /api/projects/{id}` | Чтение, замена настроек и удаление проекта |
+| `POST /api/projects/import-prompts` | Разбор TXT/CSV/XLSX в список запросов |
+| `POST /api/projects/{id}/generate` | Предложение описания, запросов или конкурентов |
+| `GET`, `POST /api/projects/{id}/measurements` | История замеров и запуск нового (202) |
+| `GET /api/measurements/{id}` | Снимок замера: прогресс, агрегаты, сравнение |
+| `GET /api/measurements/{id}/rows` | Детализация строк по курсору |
+| `POST /api/measurements/{id}/cancel` | Отмена активного замера |
+| `DELETE /api/measurements/{id}` | Удаление завершённого замера |
+
+Общие настройки и справочники:
+
 | Метод и путь | Назначение |
 | --- | --- |
 | `GET /api/config` | Все сохранённые настройки одним документом, без ключей |
@@ -161,20 +179,26 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 | `DELETE /api/providers/{id}` | Удалить подключение или сбросить ключ |
 | `GET`, `POST /api/providers/settings` | Группы подключений: провайдер с несколькими моделями |
 | `PUT`, `DELETE /api/providers/settings/{group_id}` | Изменить или удалить группу |
-| `POST /api/check` | Проверить упоминания бренда |
 | `GET /api/search/regions` | Справочник регионов Яндекса |
-| `POST /api/search` | Запустить поиск сайта в Яндексе (202, задача асинхронная) |
-| `GET /api/search/{job_id}` | Состояние задачи поиска |
 | `GET`, `PUT /api/search/settings` | Настройки поисковой системы |
 | `DELETE /api/search/settings/credentials` | Сбросить учётные данные Яндекса |
+| `GET`, `PUT /api/seo/settings` | Настройки служебной LLM |
+| `DELETE /api/seo/settings/credentials` | Сбросить ключ служебной LLM |
+| `POST /api/seo/settings/test` | Проверить LLM и поддержку вызова инструментов |
+
+Совместимость: проверки, прямой поиск и сохранённые прогоны. Контракты и данные
+рабочие, но текущий интерфейс их не использует.
+
+| Метод и путь | Назначение |
+| --- | --- |
+| `POST /api/check` | Проверить упоминания бренда |
+| `POST /api/search` | Запустить поиск сайта в Яндексе (202, задача асинхронная) |
+| `GET /api/search/{job_id}` | Состояние задачи поиска |
 | `POST /api/runs` | Запустить прогон проверки (202) |
 | `GET /api/runs` | История прогонов постранично |
 | `GET /api/runs/{run_id}` | Снимок прогона |
 | `DELETE /api/runs/{run_id}` | Удалить завершённый прогон |
 | `GET /api/runs/{run_id}/export.csv` | Экспорт прогона в CSV |
-| `GET`, `PUT /api/seo/settings` | Настройки служебной LLM |
-| `DELETE /api/seo/settings/credentials` | Сбросить ключ служебной LLM |
-| `POST /api/seo/settings/test` | Проверить LLM и поддержку вызова инструментов |
 
 Замер (`GET /api/measurements/{id}`) отдаёт агрегаты: доля ответов подключения, где модель
 сослалась на домен сайта; доли `first/early/late/absent` по абзацу первого упоминания бренда
@@ -239,7 +263,9 @@ SEO-анализ сайта и конкурентов, чат и агентны�
   публичный origin задаётся `AI_TRACKER_ORIGIN`. Миграции контейнер backend применяет сам —
   `alembic upgrade head` перед `uvicorn`.
 - Backend-тесты: `cd backend && uv run pytest` — модули в [backend/tests](backend/tests) по слоям
-  (api, db, domain, integrations, service) на фейках, без внешних вызовов.
+  (api, db, domain, integrations, service); PostgreSQL в тестах живой (случайная схема,
+  мигрированная Alembic), а внешние HTTP-вызовы — модели, Яндекс, обход сайтов и
+  служебная LLM — замоканы фикстурами, поэтому платных запросов нет.
 - Frontend-тесты: `cd frontend && npx vitest run` — тесты лежат рядом с кодом (`*.test.ts`);
   отдельного скрипта `test` в `package.json` нет. Форматирование и правила заданы
   `frontend/.prettierrc.json` и `frontend/eslint.config.js`, команды — `npm run format`,
@@ -261,6 +287,7 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 | [backend/tests](backend/tests) | Модульные и API-тесты pytest |
 | [frontend/src/routes](frontend/src/routes) | Страницы и BFF-роуты `api/**/+server.ts` |
 | [frontend/src/lib](frontend/src/lib) | Компоненты Svelte, типы, клиентская валидация, серверный прокси |
+| [frontend/README.md](frontend/README.md) | Интерфейс: страницы, BFF, переменные окружения, проверки |
 | [frontend/src/lib/components](frontend/src/lib/components) | Компоненты интерфейса: карточки проектов, мастер, отчёт замера, настройки |
 | [qa](qa) | Сквозные проверки Playwright и page objects |
 | [docs/superpowers](docs/superpowers) | Спеки и планы прошлых итераций (в том числе удалённых SEO-сценариев) |
