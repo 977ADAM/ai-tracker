@@ -1,25 +1,28 @@
-"""Owner-only SQLite history for combined model and Yandex runs."""
+"""Durable history of combined model and Yandex runs.
+
+Every run belongs to one project: `runs.project_id` is `NOT NULL` and cascades,
+so a project owns its history and deleting the project removes it. Small
+transactions keep every received row independently durable, and a mutation takes
+the run's row lock first, which is what a single-writer store used to give.
+"""
 
 from __future__ import annotations
 
 import base64
 import json
-import os
 import re
-import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Literal
 
+from app.core import database
 from app.core.errors import RunConflict, RunNotFound, StorageError, ValidationError
 from app.domain.models import PromptResult
 from app.domain.runs import RunInput, summary_rows
 from app.domain.search import REGIONS
 from app.service.search import SearchRow
 
-FILE_NAME = "runs.sqlite3"
 STORAGE_FAILED = "Не удалось сохранить или прочитать историю проверок"
 RUN_NOT_FOUND = "Прогон не найден"
 RUN_ACTIVE = "Дождитесь завершения прогона"
@@ -28,89 +31,23 @@ PENDING_MODEL = frozenset({"pending"})
 PENDING_SEARCH = frozenset({"submitting", "waiting"})
 CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 REGION_NAMES = dict(REGIONS)
-# Versions this repository can open: 3 is added by the SEO repository, 4 adds
-# the SEO agent state and trace, and 5 adds the chat tables. The
-# repositories that own the later tables never touch the run tables below, so a
-# file at the newest version is still opened here without a downgrade.
-SUPPORTED_VERSIONS = (0, 1, 2, 3, 4, 5, 6, 7)
 
 
 class RunRepository:
     """Small transactions keep every received row independently durable."""
 
-    def __init__(self, config_dir: Path) -> None:
-        self.config_dir = Path(config_dir)
-        self.path = self.config_dir / FILE_NAME
-
-    def initialize(self) -> None:
-        try:
-            self.config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-            os.chmod(self.config_dir, 0o700)
-            descriptor = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
-            os.close(descriptor)
-            os.chmod(self.path, 0o600)
-        except OSError as exc:
-            raise StorageError(STORAGE_FAILED) from exc
-        with self._connection(write=True) as connection:
-            version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in SUPPORTED_VERSIONS:
-                raise StorageError(STORAGE_FAILED)
-            connection.executescript("""
-                CREATE TABLE IF NOT EXISTS runs (
-                    id TEXT PRIMARY KEY,
-                    created_at TEXT NOT NULL,
-                    finished_at TEXT,
-                    brand TEXT NOT NULL,
-                    domain TEXT NOT NULL,
-                    prompts_json TEXT NOT NULL,
-                    provider_ids_json TEXT NOT NULL,
-                    regions_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS model_rows (
-                    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-                    provider_id TEXT NOT NULL,
-                    prompt_index INTEGER NOT NULL,
-                    provider_name TEXT NOT NULL,
-                    prompt TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    answer TEXT,
-                    mentioned INTEGER,
-                    error TEXT,
-                    PRIMARY KEY (run_id, provider_id, prompt_index)
-                );
-                CREATE TABLE IF NOT EXISTS search_rows (
-                    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-                    search_index INTEGER NOT NULL,
-                    prompt_index INTEGER NOT NULL,
-                    region_index INTEGER NOT NULL,
-                    prompt TEXT NOT NULL,
-                    region_id INTEGER NOT NULL,
-                    region_name TEXT NOT NULL,
-                    engine TEXT NOT NULL DEFAULT 'yandex',
-                    status TEXT NOT NULL,
-                    position INTEGER,
-                    url TEXT,
-                    error TEXT,
-                    PRIMARY KEY (run_id, search_index)
-                );
-            """)
-            if version == 0:
-                connection.execute("PRAGMA user_version=2")
-            elif version == 1:
-                connection.execute("ALTER TABLE search_rows ADD COLUMN engine TEXT NOT NULL DEFAULT 'yandex'")
-                connection.execute("PRAGMA user_version=2")
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
 
     @contextmanager
-    def _connection(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
-        connection: sqlite3.Connection | None = None
+    def _connection(self, *, write: bool = False) -> Iterator[database.Connection]:
+        connection: database.Connection | None = None
         try:
-            connection = sqlite3.connect(self.path, timeout=5)
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            connection = database.connect(self.dsn)
+            connection.writing = write
             yield connection
             connection.commit()
-        except sqlite3.Error as exc:
+        except database.Error as exc:
             if connection is not None:
                 connection.rollback()
             raise StorageError(STORAGE_FAILED) from exc
@@ -124,14 +61,18 @@ class RunRepository:
 
     def create(self, run_id: str, request: RunInput, provider_names: dict[str, str], created_at: str) -> None:
         with self._connection(write=True) as connection:
+            database.require_project(connection, request.project_id)
             connection.execute(
-                "INSERT INTO runs VALUES (?, ?, NULL, ?, ?, ?, ?, ?)",
-                (run_id, created_at, request.brand, request.domain,
+                "INSERT INTO runs (id, project_id, created_at, finished_at, brand, domain, "
+                "prompts_json, provider_ids_json, regions_json) "
+                "VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)",
+                (run_id, request.project_id, created_at, request.brand, request.domain,
                  json.dumps(request.prompts, ensure_ascii=False),
                  json.dumps(request.provider_ids), json.dumps(request.regions)),
             )
             connection.executemany(
-                "INSERT INTO model_rows VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL)",
+                "INSERT INTO model_rows (run_id, provider_id, prompt_index, provider_name, prompt, "
+                "status, answer, mentioned, error) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL)",
                 [(run_id, provider_id, prompt_index, provider_names[provider_id], prompt)
                  for provider_id in request.provider_ids
                  for prompt_index, prompt in enumerate(request.prompts)],
@@ -148,6 +89,7 @@ class RunRepository:
 
     def save_model(self, run_id: str, provider_id: str, prompt_index: int, result: PromptResult) -> None:
         with self._connection(write=True) as connection:
+            self._require_run(connection, run_id)
             updated = connection.execute(
                 "UPDATE model_rows SET status=?, answer=?, mentioned=?, error=? "
                 "WHERE run_id=? AND provider_id=? AND prompt_index=? AND status='pending'",
@@ -161,6 +103,7 @@ class RunRepository:
         if row.status not in {"found", "absent", "error"}:
             raise ValueError("Only terminal search rows can be saved")
         with self._connection(write=True) as connection:
+            self._require_run(connection, run_id)
             updated = connection.execute(
                 "UPDATE search_rows SET status=?, position=?, url=?, error=? "
                 "WHERE run_id=? AND search_index=? AND status IN ('submitting','waiting')",
@@ -208,12 +151,12 @@ class RunRepository:
         with self._connection() as connection:
             return self._snapshot(connection, run_id)
 
-    def _snapshot(self, connection: sqlite3.Connection, run_id: str) -> dict:
+    def _snapshot(self, connection: database.Connection, run_id: str) -> dict:
         """Build one complete result from the caller's consistent transaction."""
         run = self._require_run(connection, run_id)
         models = [dict(row) for row in connection.execute(
                 "SELECT provider_id, prompt_index, provider_name, prompt, status, answer, mentioned, error "
-                "FROM model_rows WHERE run_id=? ORDER BY rowid", (run_id,),
+                "FROM model_rows WHERE run_id=? ORDER BY seq", (run_id,),
         )]
         for row in models:
             row["mentioned"] = bool(row["mentioned"]) if row["mentioned"] is not None else None
@@ -229,7 +172,8 @@ class RunRepository:
             interrupted = any(row["status"] == "interrupted" for row in (*models, *search))
             status = "pending" if run["finished_at"] is None else "interrupted" if interrupted else "done"
             return {
-                "id": run["id"], "created_at": run["created_at"], "finished_at": run["finished_at"],
+                "id": run["id"], "project_id": run["project_id"],
+                "created_at": run["created_at"], "finished_at": run["finished_at"],
                 "status": status, "brand": run["brand"], "domain": run["domain"],
                 "prompts": prompts, "provider_ids": list(provider_ids), "regions": list(regions),
                 "models": models, "search": search,
@@ -238,16 +182,24 @@ class RunRepository:
         except (ValueError, TypeError, KeyError) as exc:
             raise StorageError(STORAGE_FAILED) from exc
 
-    def list_page(self, cursor: str | None = None, limit: int = 20) -> dict:
+    def list_page(self, cursor: str | None = None, limit: int = 20, project_id: str | None = None) -> dict:
         if not 1 <= limit <= 100:
             raise ValidationError(INVALID_CURSOR)
         before = self._decode_cursor(cursor) if cursor is not None else None
-        where = "WHERE (created_at, id) < (?, ?)" if before else ""
-        params = (*before, limit + 1) if before else (limit + 1,)
+        filters: list[str] = []
+        params: list = []
+        if project_id is not None:
+            filters.append("project_id = ?")
+            params.append(project_id)
+        if before:
+            filters.append("(created_at, id) < (?, ?)")
+            params.extend(before)
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(limit + 1)
         with self._connection() as connection:
             rows = connection.execute(
                 f"SELECT id, created_at, finished_at, prompts_json FROM runs {where} "
-                "ORDER BY created_at DESC, id DESC LIMIT ?", params,
+                "ORDER BY created_at DESC, id DESC LIMIT ?", tuple(params),
             ).fetchall()
             page = rows[:limit]
             items = []
@@ -268,20 +220,21 @@ class RunRepository:
             connection.execute("DELETE FROM runs WHERE id=?", (run_id,))
 
     @staticmethod
-    def _require_run(connection: sqlite3.Connection, run_id: str) -> sqlite3.Row:
-        row = connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+    def _require_run(connection: database.Connection, run_id: str) -> database.Row:
+        statement = "SELECT * FROM runs WHERE id=?" + (" FOR UPDATE" if connection.writing else "")
+        row = connection.execute(statement, (run_id,)).fetchone()
         if row is None:
             raise RunNotFound(RUN_NOT_FOUND)
         return row
 
     @classmethod
-    def _require_updated(cls, connection: sqlite3.Connection, run_id: str, count: int) -> None:
+    def _require_updated(cls, connection: database.Connection, run_id: str, count: int) -> None:
         if count == 0:
             cls._require_run(connection, run_id)
             raise RunConflict("Результат прогона уже завершён")
 
     @staticmethod
-    def _finish_if_terminal(connection: sqlite3.Connection, run_id: str) -> None:
+    def _finish_if_terminal(connection: database.Connection, run_id: str) -> None:
         pending = connection.execute(
             "SELECT (SELECT count(*) FROM model_rows WHERE run_id=? AND status='pending') "
             "+ (SELECT count(*) FROM search_rows WHERE run_id=? AND status IN ('submitting','waiting'))",
