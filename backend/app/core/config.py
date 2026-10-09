@@ -9,6 +9,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# postgresql
+TADABASE_URL = "postgresql://adam977@localhost:5432/ai-tracker"
+
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "ai-tracker"
 DEFAULT_SERVICE_NAME = "ai-tracker"
 DEFAULT_ALLOWED_HOSTS = ("localhost", "127.0.0.1")
