@@ -310,6 +310,15 @@ def test_snapshot_projection_hides_model_answers_and_operation_ids(make_client, 
     assert snapshot["aggregates"]["counts"] == snapshot["counters"]
     assert snapshot["aggregates"]["site"]["search"]["overall"]["share"] == 1.0
     assert snapshot["aggregates"]["site"]["ai"]["conn-1"]["combined"]["share"] == 1.0
+    position = snapshot["aggregates"]["site"]["ai"]["conn-1"]["position"]
+    assert set(position) == {"first", "early", "late", "absent", "ahead"}
+    assert position["first"] == {
+        "denominator": 1, "successes": 1, "share": 1.0, "average_position": None,
+    }
+    assert position["ahead"]["denominator"] == 0
+    assert position["ahead"]["share"] is None
+    assert snapshot["aggregates"]["site"]["ai"]["conn-1"]["branded"]["position"] is None
+    assert snapshot["aggregates"]["site"]["ai"]["conn-1"]["unbranded"]["position"] is None
 
     assert MODEL_ANSWER not in response.text
     assert "yandex-operation-secret" not in response.text

@@ -59,11 +59,22 @@ class SeoSearchMetricsResponse(BaseModel):
     unbranded: SeoMetricResponse
 
 
+class SeoBrandPositionResponse(BaseModel):
+    """Where the brand is first named in the answered rows of one connection."""
+
+    first: SeoMetricResponse
+    early: SeoMetricResponse
+    late: SeoMetricResponse
+    absent: SeoMetricResponse
+    ahead: SeoMetricResponse
+
+
 class SeoSiteAiMetricsResponse(BaseModel):
     name: SeoMetricResponse
     host: SeoMetricResponse
     combined: SeoMetricResponse
     citation: SeoMetricResponse | None = None
+    position: SeoBrandPositionResponse | None = None
 
 
 class SeoSiteAiBlockResponse(SeoSiteAiMetricsResponse):

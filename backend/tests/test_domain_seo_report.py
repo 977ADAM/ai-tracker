@@ -90,12 +90,17 @@ def model_row(
 EMPTY = Metric(0, 0, None, None)
 
 
+def empty_position() -> dict[str, object]:
+    return {"first": EMPTY, "early": EMPTY, "late": EMPTY, "absent": EMPTY, "ahead": EMPTY}
+
+
 def empty_ai() -> dict[str, object]:
     return {
         "name": EMPTY,
         "host": EMPTY,
         "combined": EMPTY,
         "citation": EMPTY,
+        "position": empty_position(),
         "branded": {"name": EMPTY, "host": EMPTY, "combined": EMPTY, "citation": EMPTY},
         "unbranded": {"name": EMPTY, "host": EMPTY, "combined": EMPTY, "citation": EMPTY},
     }
@@ -307,6 +312,128 @@ def test_candidate_hits_of_an_error_row_are_not_counted():
     )
     assert report["competitors"][0]["search"]["overall"] == Metric(0, 0, None, None)
     assert report["competitors"][0]["ai"] == {"conn-1": {"host": Metric(0, 0, None, None), "citation": EMPTY}}
+
+
+# -- brand position -----------------------------------------------------------
+
+
+def test_the_brand_position_counts_the_paragraph_of_the_first_mention():
+    data = seo_input()
+    queries = (query(0), query(1), query(2))
+    report = build_report(
+        data, "Ромашка", data.services, (), queries,
+        (), (model_row("conn-1", 0, answer="Ромашка в первом абзаце.\n\nВторой."),
+             model_row("conn-1", 1, answer="Раз.\n\nДва.\n\nТри.\n\nРомашка тут."),
+             model_row("conn-1", 2, answer="Ничего про бренд.")),
+    )
+    position = report["site"]["ai"]["conn-1"]["position"]
+    assert position["first"].successes == 1
+    assert position["late"].successes == 1
+    assert position["absent"].successes == 1
+    assert position["first"].denominator == 3
+    assert position["early"].successes == 0
+    assert position["absent"].denominator == 3
+    assert position["first"] == Metric(3, 1, 0.3333, None)
+
+
+def test_a_single_paragraph_answer_is_the_first_paragraph():
+    data = seo_input()
+    report = build_report(data, "Ромашка", data.services, (), (query(0),), (),
+                          (model_row("conn-1", 0, answer="Ромашка упомянута сразу."),))
+    assert report["site"]["ai"]["conn-1"]["position"]["first"].successes == 1
+
+
+def test_the_brand_host_counts_as_a_brand_mention():
+    data = seo_input()
+    report = build_report(
+        data, "Ромашка", data.services, (), (query(0),), (),
+        (model_row("conn-1", 0, answer="Раз.\n\nСайт example.ru во втором абзаце."),),
+    )
+    assert report["site"]["ai"]["conn-1"]["position"]["early"] == Metric(1, 1, 1.0, None)
+
+
+def test_the_second_and_third_paragraphs_count_as_early():
+    data = seo_input()
+    report = build_report(
+        data, "Ромашка", data.services, (), (query(0), query(1)), (),
+        (model_row("conn-1", 0, answer="Раз.\n\nРомашка тут.\n\nТри."),
+         model_row("conn-1", 1, answer="Раз.\n\nДва.\n\nРомашка на третьем.")),
+    )
+    position = report["site"]["ai"]["conn-1"]["position"]
+    assert position["early"] == Metric(2, 2, 1.0, None)
+    assert position["first"].successes == 0
+    assert position["late"].successes == 0
+
+
+def test_position_ignores_error_absent_and_empty_answers():
+    data = seo_input()
+    queries = (query(0), query(1), query(2), query(3))
+    report = build_report(
+        data, "Ромашка", data.services, (), queries, (),
+        (model_row("conn-1", 0, answer="Ромашка в первом абзаце."),
+         model_row("conn-1", 1, "found", "   "),
+         model_row("conn-1", 2, "error", None, error="Сбой модели"),
+         model_row("conn-1", 3, "absent", "Ромашка тут")),
+    )
+    position = report["site"]["ai"]["conn-1"]["position"]
+    assert position["first"] == Metric(1, 1, 1.0, None)
+    assert position["absent"] == Metric(1, 0, 0.0, None)
+    assert position["early"] == Metric(1, 0, 0.0, None)
+
+
+def test_position_is_not_duplicated_into_the_branded_and_unbranded_splits():
+    data = seo_input()
+    queries = (query(0, branded=True), query(1))
+    report = build_report(
+        data, "Ромашка", data.services, (), queries, (),
+        (model_row("conn-1", 0, answer="Ромашка в первом абзаце."),
+         model_row("conn-1", 1, answer="Раз.\n\nРомашка во втором.")),
+    )
+    ai = report["site"]["ai"]["conn-1"]
+    assert "position" not in ai["branded"]
+    assert "position" not in ai["unbranded"]
+    assert ai["position"]["first"].denominator == 2
+
+
+def test_the_brand_is_ahead_when_no_candidate_is_mentioned_earlier():
+    # candidate host: rival.ru; the brand in paragraph 1, the candidate in paragraph 2
+    data = seo_input()
+    report = build_report(
+        data, "Ромашка", data.services, candidates(), (query(0),), (),
+        (model_row("conn-1", 0, answer="Ромашка в первом абзаце.\n\nВторой абзац про rival.ru."),),
+    )
+    ahead = report["site"]["ai"]["conn-1"]["position"]["ahead"]
+    assert ahead.denominator == 1
+    assert ahead.successes == 1
+    assert ahead.share == 1.0
+
+
+def test_a_candidate_named_earlier_keeps_the_brand_behind():
+    data = seo_input()
+    report = build_report(
+        data, "Ромашка", data.services, candidates(), (query(0),), (),
+        (model_row("conn-1", 0, answer="Сначала rival.ru.\n\nПотом Ромашка."),),
+    )
+    assert report["site"]["ai"]["conn-1"]["position"]["ahead"] == Metric(1, 0, 0.0, None)
+
+
+def test_a_candidate_in_the_same_paragraph_does_not_put_the_brand_ahead():
+    data = seo_input()
+    report = build_report(
+        data, "Ромашка", data.services, candidates(), (query(0),), (),
+        (model_row("conn-1", 0, answer="Ромашка и rival.ru в одном абзаце.\n\nЕщё абзац."),),
+    )
+    assert report["site"]["ai"]["conn-1"]["position"]["ahead"] == Metric(1, 0, 0.0, None)
+
+
+def test_the_ahead_metric_has_an_empty_denominator_without_candidates():
+    data = seo_input()
+    report = build_report(data, "Ромашка", data.services, (), (query(0),), (),
+                          (model_row("conn-1", 0, answer="Ромашка в первом абзаце."),))
+    ahead = report["site"]["ai"]["conn-1"]["position"]["ahead"]
+    assert ahead.denominator == 0
+    assert ahead.successes == 0
+    assert ahead.share is None
 
 
 def test_counts_report_queries_rows_and_errors():

@@ -9,6 +9,8 @@ The exact aggregate structure, consumed by the frontend in Task 9:
     "ai": {
       "<connection_id>": {
         "name": Metric, "host": Metric, "combined": Metric,
+        "position": {"first": Metric, "early": Metric, "late": Metric,
+                     "absent": Metric, "ahead": Metric},
         "branded":   {"name": Metric, "host": Metric, "combined": Metric},
         "unbranded": {"name": Metric, "host": Metric, "combined": Metric},
       }
@@ -41,12 +43,17 @@ corresponding flag. Candidate metrics are computed by host: hits come from
 `candidate_hits` (query index to top-ten hits) and candidate AI mentions are
 re-matched in the saved answer text, never on the SERP title.
 
+`position` is the paragraph heuristic of one connection (first/early/late/absent
+for the brand, plus `ahead` against the mentioned candidate hosts); it is
+connection-level only and is never duplicated into the branded/unbranded splits.
+
 The report is numbers-only: every aggregate here is computed by the server from
 the stored rows, and no model-written text is attached to it.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -115,6 +122,7 @@ def build_report(
     known_indexes = set(range(len(query_list)))
     branded_indexes = {index for index, query in enumerate(query_list) if query.flags.branded}
     connections = _connections(input, models)
+    candidate_hosts = tuple(candidate.host for candidate in candidates)
 
     site = {
         "search": {
@@ -127,7 +135,15 @@ def build_report(
             ),
         },
         "ai": {
-            connection_id: _site_ai_block(connection_id, models, branded_indexes, known_indexes, input.host)
+            connection_id: _site_ai_block(
+                connection_id,
+                models,
+                branded_indexes,
+                known_indexes,
+                input.host,
+                company_name,
+                candidate_hosts,
+            )
             for connection_id in connections
         },
     }
@@ -229,6 +245,8 @@ def _site_ai_block(
     branded_indexes: set[int],
     known_indexes: set[int],
     host: str,
+    company_name: str,
+    candidate_hosts: Sequence[str],
 ) -> dict[str, object]:
     """Name, host, and combined AI shares of one connection plus both splits."""
     rows = [row for row in models if row.connection_id == connection_id]
@@ -243,6 +261,7 @@ def _site_ai_block(
         HOST: _ai_metric(rows, connection_id, HOST),
         COMBINED: _ai_metric(rows, connection_id, COMBINED),
         "citation": _citation_metric(rows, connection_id, host),
+        "position": _brand_position(rows, connection_id, company_name, host, candidate_hosts),
         "branded": _ai_group(branded, connection_id, host),
         "unbranded": _ai_group(unbranded, connection_id, host),
     }
@@ -330,6 +349,85 @@ def _competitor_block(
 def _answered(row: ModelRowValue) -> bool:
     """An empty or missing answer is never a mention."""
     return isinstance(row.answer, str) and bool(row.answer.strip())
+
+
+_PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
+
+
+def _paragraphs(text: str) -> tuple[str, ...]:
+    """Split an answer into its non-empty paragraphs on blank lines."""
+    return tuple(part for part in _PARAGRAPH_BREAK.split(text) if part.strip())
+
+
+def _paragraph_mentions(paragraph: str, company_name: str, host: str) -> bool:
+    """Whether one paragraph names the company (folded name or host)."""
+    name = normalize_text(company_name)
+    if name and name in normalize_text(paragraph):
+        return True
+    return mentions_host(paragraph, host)
+
+
+def _first_mention_paragraph(text: str, company_name: str, host: str) -> int | None:
+    """The 1-based number of the first paragraph that mentions the company."""
+    for number, paragraph in enumerate(_paragraphs(text), 1):
+        if _paragraph_mentions(paragraph, company_name, host):
+            return number
+    return None
+
+
+def _brand_position(
+    rows: Sequence[ModelRowValue],
+    connection_id: str,
+    company_name: str,
+    host: str,
+    candidate_hosts: Sequence[str],
+) -> dict[str, Metric]:
+    """Where the brand is first named in the answered rows of one connection.
+
+    ``first``/``early``/``late``/``absent`` share one denominator: the `found`
+    rows with a non-empty answer. ``ahead`` counts only rows that mention at
+    least one candidate host, and a success needs the brand strictly earlier
+    than every mentioned candidate, so a mention in the same paragraph is not
+    ahead. Both denominators are empty when nothing qualifies, and their
+    ``share`` is then `None`.
+    """
+    answered = [
+        row
+        for row in rows
+        if row.connection_id == connection_id and row.status == "found" and _answered(row)
+    ]
+    first = early = late = absent = 0
+    ahead_denominator = 0
+    ahead_successes = 0
+    for row in answered:
+        if not isinstance(row.answer, str):  # `_answered` already guarantees this
+            continue
+        paragraph = _first_mention_paragraph(row.answer, company_name, host)
+        if paragraph is None:
+            absent += 1
+        elif paragraph == 1:
+            first += 1
+        elif paragraph <= 3:
+            early += 1
+        else:
+            late += 1
+        candidate_paragraphs = [
+            number
+            for candidate_host in candidate_hosts
+            if (number := _first_mention_paragraph(row.answer, "", candidate_host)) is not None
+        ]
+        if candidate_paragraphs:
+            ahead_denominator += 1
+            if paragraph is not None and all(paragraph < number for number in candidate_paragraphs):
+                ahead_successes += 1
+    total = len(answered)
+    return {
+        "first": _metric(total, first),
+        "early": _metric(total, early),
+        "late": _metric(total, late),
+        "absent": _metric(total, absent),
+        "ahead": _metric(ahead_denominator, ahead_successes),
+    }
 
 
 def _citation_metric(rows: Iterable[ModelRowValue], connection_id: str, host: str) -> Metric:
