@@ -17,6 +17,7 @@
   let ids = $state<string[]>(untrack(() => initial?.connection_ids.slice() ?? []));
   let yandex = $state(untrack(() => initial?.yandex_enabled ?? false));
   let region = $state(untrack(() => initial?.yandex_region ?? 213));
+  let subdomains = $state(untrack(() => initial?.include_subdomains ?? true));
   let description = $state(untrack(() => initial?.brand_description ?? ''));
   let aliases = $state(untrack(() => initial?.brand_aliases?.join('\n') ?? ''));
   let saving = $state(false);
@@ -69,6 +70,7 @@
           .map((a) => a.trim())
           .filter(Boolean),
         site_url: site,
+        include_subdomains: subdomains,
         queries: initial ? queries : [],
         competitors: initial ? competitors : [],
         connection_ids: initial ? ids : [],
@@ -127,6 +129,9 @@
     </div>
   </section>
   {#if initial}
+    <label class="flex gap-3 text-sm"
+      ><input type="checkbox" bind:checked={subdomains} />Учитывать поддомены сайта</label
+    >
     <section>
       <h2 class="text-lg font-semibold">Описание и варианты названия</h2>
       <label class="mt-4 block text-sm"
@@ -247,7 +252,6 @@
               bind:value={c.site_url}
               type="url"
               placeholder="https://competitor.ru"
-              required
               class="min-w-40 flex-1 rounded-lg border border-line px-3 py-2 text-sm"
             /><button
               type="button"
