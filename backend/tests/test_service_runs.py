@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from app.core.errors import StorageError, ValidationError
+from app.db.projects import ProjectRepository
 from app.db.runs import RunRepository
 from app.service.checks import CheckService
 from app.service.connections import ConnectionService
@@ -16,12 +17,18 @@ from tests.fakes import ProviderFactorySpy
 from tests.test_service_search import FakeGateway
 
 
-def make_runs(tmp_path, connection_repository, settings, gateway=None):
+@pytest.fixture
+def project_id(database_dsn: str) -> str:
+    """Every run belongs to a project, so each test starts with one."""
+    project = ProjectRepository(database_dsn).create({"domain": "example.ru"})
+    return str(project["id"])
+
+
+def make_runs(database_dsn, connection_repository, settings, gateway=None):
     connections = ConnectionService(connection_repository, settings)
     connections.save({"api_key": "test-key"}, "openai")
     factory = ProviderFactorySpy()
-    repository = RunRepository(tmp_path)
-    repository.initialize()
+    repository = RunRepository(database_dsn)
     search = SearchService(gateway, poll_interval=0, max_requests_per_second=0)
     return RunService(repository, CheckService(connections, factory), search), factory, search
 
@@ -37,14 +44,15 @@ async def finished(runs, run_id):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("providers,regions", [(["openai"], []), ([], [1]), (["openai"], [1])])
-async def test_run_modes_are_durable(tmp_path, repository, settings, providers, regions):
-    runs, factory, search = make_runs(tmp_path, repository, settings, FakeGateway(polls_before_answer=0))
-    created = await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-                                "provider_ids": providers, "regions": regions})
+async def test_run_modes_are_durable(database_dsn, project_id, repository, settings, providers, regions):
+    runs, factory, search = make_runs(database_dsn, repository, settings, FakeGateway(polls_before_answer=0))
+    created = await runs.start({"project_id": project_id, "brand": "Ромашка", "domain": "example.ru",
+                                "prompts_text": "цветы", "provider_ids": providers, "regions": regions})
     assert created["id"]
     assert len(runs.list_page()["items"]) == 1
     saved = await finished(runs, created["id"])
     assert saved["status"] == "done"
+    assert saved["project_id"] == project_id
     assert len(saved["models"]) == len(providers)
     assert len(saved["search"]) == len(regions)
     assert len(saved["summary_rows"]) == len(providers) + len(regions)
@@ -54,13 +62,13 @@ async def test_run_modes_are_durable(tmp_path, repository, settings, providers, 
 
 
 @pytest.mark.anyio
-async def test_unknown_provider_and_region_rejected_before_paid_calls(tmp_path, repository, settings):
+async def test_unknown_provider_and_region_rejected_before_paid_calls(database_dsn, project_id, repository, settings):
     gateway = FakeGateway()
-    runs, factory, search = make_runs(tmp_path, repository, settings, gateway)
+    runs, factory, search = make_runs(database_dsn, repository, settings, gateway)
     for provider_ids, regions in [(["missing"], [1]), (["openai"], [999999])]:
         with pytest.raises(ValidationError):
-            await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-                              "provider_ids": provider_ids, "regions": regions})
+            await runs.start({"project_id": project_id, "brand": "Ромашка", "domain": "example.ru",
+                              "prompts_text": "цветы", "provider_ids": provider_ids, "regions": regions})
     assert factory.keys == []
     assert gateway.submitted == []
     assert runs.list_page()["items"] == []
@@ -69,10 +77,24 @@ async def test_unknown_provider_and_region_rejected_before_paid_calls(tmp_path, 
 
 
 @pytest.mark.anyio
-async def test_missing_search_credentials_marks_branch_error_and_models_continue(tmp_path, repository, settings):
-    runs, _factory, search = make_runs(tmp_path, repository, settings)
-    created = await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-                                "provider_ids": ["openai"], "regions": [1]})
+async def test_a_run_without_a_project_is_refused(database_dsn, repository, settings):
+    runs, factory, search = make_runs(database_dsn, repository, settings, FakeGateway())
+    with pytest.raises(ValidationError):
+        await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
+                          "provider_ids": ["openai"], "regions": [1]})
+    assert factory.keys == []
+    assert runs.list_page()["items"] == []
+    await runs.close()
+    await search.close()
+
+
+@pytest.mark.anyio
+async def test_missing_search_credentials_marks_branch_error_and_models_continue(
+    database_dsn, project_id, repository, settings,
+):
+    runs, _factory, search = make_runs(database_dsn, repository, settings)
+    created = await runs.start({"project_id": project_id, "brand": "Ромашка", "domain": "example.ru",
+                                "prompts_text": "цветы", "provider_ids": ["openai"], "regions": [1]})
     saved = await finished(runs, created["id"])
     assert saved["models"][0]["status"] == "mentioned"
     assert saved["search"][0]["status"] == "error"
@@ -82,16 +104,16 @@ async def test_missing_search_credentials_marks_branch_error_and_models_continue
 
 
 @pytest.mark.anyio
-async def test_storage_failure_prevents_external_calls(tmp_path, repository, settings):
-    runs, factory, search = make_runs(tmp_path, repository, settings, FakeGateway())
+async def test_storage_failure_prevents_external_calls(database_dsn, project_id, repository, settings):
+    runs, factory, search = make_runs(database_dsn, repository, settings, FakeGateway())
 
     def fail(*_args):
         raise StorageError("storage unavailable")
 
     runs.repository.create = fail
     with pytest.raises(StorageError):
-        await runs.start({"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-                          "provider_ids": ["openai"], "regions": [1]})
+        await runs.start({"project_id": project_id, "brand": "Ромашка", "domain": "example.ru",
+                          "prompts_text": "цветы", "provider_ids": ["openai"], "regions": [1]})
     assert factory.keys == []
     assert search.gateway.submitted == []
     await runs.close()
@@ -101,7 +123,7 @@ async def test_storage_failure_prevents_external_calls(tmp_path, repository, set
 @pytest.mark.anyio
 @pytest.mark.parametrize("failed_branch", ["model", "search"])
 async def test_storage_failure_stops_paid_work_and_reports_unavailable(
-    tmp_path, repository, settings, failed_branch,
+    database_dsn, project_id, repository, settings, failed_branch,
 ):
     class SlowGateway(FakeGateway):
         async def submit(self, prompt, region):
@@ -109,7 +131,7 @@ async def test_storage_failure_stops_paid_work_and_reports_unavailable(
             return await super().submit(prompt, region)
 
     gateway = SlowGateway(polls_before_answer=0)
-    runs, factory, search = make_runs(tmp_path, repository, settings, gateway)
+    runs, factory, search = make_runs(database_dsn, repository, settings, gateway)
 
     def fail(*_args):
         raise StorageError("storage unavailable")
@@ -118,7 +140,7 @@ async def test_storage_failure_stops_paid_work_and_reports_unavailable(
         runs.repository.save_model = fail
     else:
         runs.repository.save_search = fail
-    payload = {"brand": "Ромашка", "domain": "example.ru",
+    payload = {"project_id": project_id, "brand": "Ромашка", "domain": "example.ru",
                "prompts_text": "\n".join(f"вопрос {index}" for index in range(20)),
                "provider_ids": ["openai"], "regions": [1, 213, 2, 54, 65]}
     created = await runs.start(payload)
@@ -141,14 +163,14 @@ async def test_storage_failure_stops_paid_work_and_reports_unavailable(
 
 
 @pytest.mark.anyio
-async def test_branch_error_write_failure_degrades_the_run_service(tmp_path, repository, settings):
-    runs, _factory, search = make_runs(tmp_path, repository, settings)
+async def test_branch_error_write_failure_degrades_the_run_service(database_dsn, project_id, repository, settings):
+    runs, _factory, search = make_runs(database_dsn, repository, settings)
 
     def fail(*_args):
         raise StorageError("storage unavailable")
 
     runs.repository.fail_pending_branch = fail
-    payload = {"brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
+    payload = {"project_id": project_id, "brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
                "provider_ids": ["openai"], "regions": [1]}
     with pytest.raises(StorageError):
         await runs.start(payload)
@@ -160,15 +182,16 @@ async def test_branch_error_write_failure_degrades_the_run_service(tmp_path, rep
 
 
 @pytest.mark.anyio
-async def test_read_failure_cancels_pending_paid_search(tmp_path, repository, settings):
+async def test_read_failure_cancels_pending_paid_search(database_dsn, project_id, repository, settings):
     class SlowGateway(FakeGateway):
         async def submit(self, prompt, region):
             await asyncio.sleep(0.002)
             return await super().submit(prompt, region)
 
     gateway = SlowGateway(polls_before_answer=0)
-    runs, _factory, search = make_runs(tmp_path, repository, settings, gateway)
-    payload = {"domain": "example.ru", "prompts_text": "\n".join(f"вопрос {i}" for i in range(20)),
+    runs, _factory, search = make_runs(database_dsn, repository, settings, gateway)
+    payload = {"project_id": project_id, "domain": "example.ru",
+               "prompts_text": "\n".join(f"вопрос {i}" for i in range(20)),
                "provider_ids": [], "regions": [1, 213, 2, 54, 65]}
     created = await runs.start(payload)
 
@@ -187,7 +210,9 @@ async def test_read_failure_cancels_pending_paid_search(tmp_path, repository, se
 
 
 @pytest.mark.anyio
-async def test_search_storage_failure_cancels_waiting_submissions_before_yield(tmp_path, repository, settings):
+async def test_search_storage_failure_cancels_waiting_submissions_before_yield(
+    database_dsn, project_id, repository, settings,
+):
     release_waiters = asyncio.Event()
 
     class GatedGateway(FakeGateway):
@@ -199,7 +224,7 @@ async def test_search_storage_failure_cancels_waiting_submissions_before_yield(t
             return await super().submit(prompt, region)
 
     gateway = GatedGateway(polls_before_answer=0)
-    runs, _factory, search = make_runs(tmp_path, repository, settings, gateway)
+    runs, _factory, search = make_runs(database_dsn, repository, settings, gateway)
 
     def fail(*_args):
         release_waiters.set()
@@ -207,7 +232,7 @@ async def test_search_storage_failure_cancels_waiting_submissions_before_yield(t
 
     runs.repository.save_search = fail
     created = await runs.start({
-        "brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
+        "project_id": project_id, "brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
         "provider_ids": [], "regions": [1, 213, 2, 54, 65],
     })
     for _ in range(100):
