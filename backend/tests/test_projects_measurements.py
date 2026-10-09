@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from app.core import database
 from app.core.errors import RunConflict, ValidationError
 from app.db.measurements import MeasurementRepository
 from app.db.projects import ProjectRepository
@@ -100,6 +101,26 @@ def test_storage_snapshot_cancel_and_measurement_isolation(database_dsn):
     stored = second.get(run)
     assert stored["status"] == "cancelled"
     assert stored["project_id"] == p["id"]
+
+
+def test_the_history_page_reads_a_whole_page_on_one_connection(database_dsn):
+    """A page of measurements must not borrow one connection per row."""
+    projects = ProjectRepository(database_dsn)
+    runs = MeasurementRepository(database_dsn)
+    p = projects.create(normalize_project(project()))
+    created = []
+    for _ in range(3):
+        run = runs.create(p["id"], snapshot(), {})
+        runs.finish(run, "completed")
+        created.append(run)
+
+    pool = database.pool(database_dsn)
+    before = pool.get_stats()["requests_num"]
+    page = runs.list_page(p["id"])
+    borrowed = pool.get_stats()["requests_num"] - before
+
+    assert {item["id"] for item in page["items"]} == set(created)
+    assert borrowed == 1
 
 
 def test_report_denominators_unknown_and_comparison():
