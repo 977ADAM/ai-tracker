@@ -24,7 +24,7 @@ describe('ConfigPanel', () => {
     expect(screen.getByText('/data')).toBeTruthy();
     // The window explains what the document holds and what it never holds.
     const text = (screen.getByRole('dialog').textContent ?? '').replace(/\s+/g, ' ');
-    expect(text).toContain('поисковая система и SEO-анализ');
+    expect(text).toContain('поисковая система и служебная LLM');
     expect(text).toContain('Ключи API в файлы не записываются');
   });
 
