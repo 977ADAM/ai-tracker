@@ -71,7 +71,7 @@ describe('settings dialog navigation', () => {
     const tabs = screen.getByRole('tablist', { name: 'Разделы настроек' });
     const models = within(tabs).getByRole('tab', { name: 'Модели' });
     const search = within(tabs).getByRole('tab', { name: 'Поисковые системы' });
-    const seo = within(tabs).getByRole('tab', { name: 'SEO-анализ' });
+    const seo = within(tabs).getByRole('tab', { name: 'Служебная LLM' });
     expect([models, search, seo].map((tab) => tab.getAttribute('aria-selected'))).toEqual([
       'true',
       'false',
@@ -108,11 +108,11 @@ describe('settings dialog navigation', () => {
   it('renders the service-LLM settings panel on the SEO tab without exposing a key field value', async () => {
     await openSettings();
     const seo = within(screen.getByRole('tablist', { name: 'Разделы настроек' })).getByRole('tab', {
-      name: 'SEO-анализ',
+      name: 'Служебная LLM',
     });
     expect(screen.queryByRole('heading', { name: 'Служебная LLM' })).toBeNull();
     await fireEvent.click(seo);
-    const panel = screen.getByRole('tabpanel', { name: 'SEO-анализ' });
+    const panel = screen.getByRole('tabpanel', { name: 'Служебная LLM' });
     expect(panel).toBeTruthy();
     expect(document.getElementById(seo.getAttribute('aria-controls')!)?.hidden).toBe(false);
     expect(screen.getByRole('heading', { name: 'Служебная LLM' })).toBeTruthy();
