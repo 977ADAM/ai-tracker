@@ -27,10 +27,8 @@ from app.db.secrets import KeyringSecrets, SecretStore
 from app.db.seo_settings import SeoSettingsRepository
 from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
-from app.domain.site_fetch import SiteFetcher
 from app.integrations.factory import build_provider
 from app.integrations.seo_answer import build_seo_answer_provider
-from app.integrations.site_fetcher import HttpxSiteFetcher
 from app.service.checks import CheckService
 from app.service.config import ConfigService
 from app.service.connections import ConnectionService
@@ -79,7 +77,6 @@ def build_container(
     search_settings_repository: SearchSettingsRepository | None = None,
     seo_settings_repository: SeoSettingsRepository | None = None,
     seo_settings_service: SeoSettingsService | None = None,
-    fetcher: SiteFetcher | None = None,
 ) -> Container:
     """Assemble the services of one application; every collaborator is injectable."""
     secret_store = secrets or KeyringSecrets()
@@ -128,7 +125,6 @@ def build_container(
         # next measurement or generation request.
         seo_settings_service = SeoSettingsService(seo_settings_repository, search_client)
 
-    resolved_fetcher = fetcher if fetcher is not None else HttpxSiteFetcher(search_client)
     form = FormService(connections)
     project_repository = ProjectRepository(settings.database_url)
     measurement_repository = MeasurementRepository(settings.database_url)
@@ -153,6 +149,6 @@ def build_container(
         search_client=search_client,
         seo_settings=seo_settings_service,
         projects=projects,
-        project_generation=ProjectGenerationService(project_repository, resolved_fetcher, seo_settings_service),
+        project_generation=ProjectGenerationService(project_repository, seo_settings_service),
         measurements=measurements,
     )
