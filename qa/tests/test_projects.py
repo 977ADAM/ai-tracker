@@ -6,6 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 from urllib.request import urlopen
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import uuid4
 
 import pytest
 from playwright.sync_api import expect
@@ -29,9 +31,27 @@ def project_instance(tmp_path):
         "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
         "AI_TRACKER_API_URL": f"http://127.0.0.1:{api_port}",
     }
+    # A throwaway PostgreSQL schema replaces the old temporary SQLite file.
+    schema = "qa_" + uuid4().hex[:12]
+    base_dsn = os.environ.get("AI_TRACKER_TEST_DATABASE_URL", "postgresql://adam977@localhost:5432/ai-tracker")
+    parsed = urlsplit(base_dsn)
+    options = dict(parse_qsl(parsed.query))
+    options["options"] = "-csearch_path=" + schema
+    env["AI_TRACKER_DATABASE_URL"] = urlunsplit(parsed._replace(query=urlencode(options)))
+    def schema_command(statement):
+        subprocess.run(
+            [str(ROOT / "backend/.venv/bin/python"), "-c",
+             "import sys, psycopg; c=psycopg.connect(sys.argv[1],autocommit=True); c.execute(sys.argv[2]); c.close()",
+             base_dsn, statement], check=True, capture_output=True,
+        )
+    schema_command("CREATE SCHEMA " + schema)
     logs = []
     processes = []
     try:
+        subprocess.run(
+            [str(ROOT / "backend/.venv/bin/python"), "-m", "alembic", "upgrade", "head"],
+            cwd=ROOT / "backend", env=env, check=True, capture_output=True,
+        )
         for name, args, cwd in [
             (
                 "api",
@@ -97,6 +117,7 @@ def project_instance(tmp_path):
                 process.wait()
         for log in logs:
             log.close()
+        schema_command("DROP SCHEMA " + schema + " CASCADE")
 
 
 def test_project_creation_configuration_two_measurements_and_delete(
@@ -145,7 +166,9 @@ def test_project_creation_configuration_two_measurements_and_delete(
     # Confirming setup never launches a paid measurement by itself.
     projects = page.request.get(project_instance+"/api/projects").json()["items"]
     assert projects[0]["active_measurement"] is None and projects[0]["latest_measurement"] is None
-    page.get_by_role("button", name="↻ Создать и запустить проверку").click()
+    page.get_by_role("button", name="↻ Сохранить и запустить проверку").click()
+    expect(page.get_by_text("Замер запущен", exact=True)).to_be_visible()
+    page.screenshot(path=str(tmp_path / "launch-toast.png"), full_page=True)
     expect(page.locator("[data-measurement-report]")).to_contain_text(
         "2 из 2", timeout=15000
     )
@@ -155,7 +178,7 @@ def test_project_creation_configuration_two_measurements_and_delete(
     page.get_by_role("button", name="Читать полностью").first.click()
     expect(page.get_by_role("dialog")).to_contain_text("Оценка служебной модели")
     page.keyboard.press("Escape")
-    page.get_by_role("button", name="Обновить",exact=True).click()
+    page.get_by_role("button", name="Запустить замер",exact=True).click()
     expect(page.get_by_role("button", name="Удалить замер")).to_have_count(
         2, timeout=15000
     )
@@ -181,5 +204,5 @@ def test_project_creation_configuration_two_measurements_and_delete(
     page.screenshot(path=str(tmp_path / "projects.png"), full_page=True)
     page.get_by_role("button", name="Удалить проект Пицца — проверено").click()
     page.get_by_role("button", name="Удалить", exact=True).click()
-    expect(page.get_by_role("heading", name="Ваш первый проект")).to_be_visible()
+    expect(page.get_by_role("heading", name="Узнайте, видят ли нейросети ваш бренд")).to_be_visible()
     assert errors == []
