@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { notify } from '$lib/notifications';
+  import { countLabel } from '$lib/count';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import ProjectHeader from '$lib/components/ProjectHeader.svelte';
@@ -93,6 +95,7 @@
         `/api/projects/${project.id}/measurements`,
         'POST',
       );
+      notify('Замер запущен');
       await refreshHistory();
       const m = await projectRequest<Measurement>(`/api/measurements/${r.id}`);
       await choose(m);
@@ -107,6 +110,7 @@
     busy = true;
     try {
       const m = await projectRequest<Measurement>(`/api/measurements/${active.id}/cancel`, 'POST');
+      notify('Замер отменён');
       if (selected?.id === m.id) selected = m;
       await refreshHistory();
     } catch (e) {
@@ -120,6 +124,7 @@
     busy = true;
     try {
       await projectRequest(`/api/measurements/${deleteRun}`, 'DELETE');
+      notify('Замер удалён');
       history = history.filter((r) => r.id !== deleteRun);
       if (selected?.id === deleteRun) {
         selected = null;
@@ -152,6 +157,7 @@
         yandex_region: project.yandex_region,
       };
       project = await projectRequest<Project>(`/api/projects/${project.id}`, 'PUT', payload);
+      notify('Название проекта сохранено');
     } finally {
       busy = false;
     }
@@ -160,6 +166,7 @@
     busy = true;
     try {
       await projectRequest(`/api/projects/${project.id}`, 'DELETE');
+      notify('Проект удалён');
       await goto(resolve('/'));
     } catch (e) {
       error = e instanceof Error ? e.message : 'Не удалось удалить проект';
@@ -231,16 +238,26 @@
     active={!!active}
     {busy}
     onStart={start}
-    onDelete={() => (deleteProject = true)}
     onRename={renameProject}
   />
   <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
     <p class="text-xs text-muted">
-      {project.queries.length} запросов × {project.connection_ids.length} моделей = {project.queries
-        .length * project.connection_ids.length} ответов; до {project.queries.length *
-        project.connection_ids.length} оценок тональности{project.yandex_enabled
-        ? `; ${project.queries.length} поисков Яндекса`
-        : ''}.
+      {countLabel(project.queries.length, 'запрос', 'запроса', 'запросов')} × {countLabel(
+        project.connection_ids.length,
+        'модель',
+        'модели',
+        'моделей',
+      )} = {countLabel(
+        project.queries.length * project.connection_ids.length,
+        'ответ',
+        'ответа',
+        'ответов',
+      )}; до {countLabel(
+        project.queries.length * project.connection_ids.length,
+        'оценки',
+        'оценок',
+        'оценок',
+      )} тональности{project.yandex_enabled ? `; ${project.queries.length} поисков Яндекса` : ''}.
     </p>
     <a href={`/projects/${project.id}/setup`} class="text-xs text-accent">Мастер настройки</a>
   </div>
@@ -311,7 +328,12 @@
             {measurementLabels[selected.status] ?? selected.status}
           </h2>
           <p class="text-xs text-muted">
-            Снимок: {selected.snapshot.project.brand} · {selected.snapshot.project.queries.length} запросов
+            Снимок: {selected.snapshot.project.brand} · {countLabel(
+              selected.snapshot.project.queries.length,
+              'запрос',
+              'запроса',
+              'запросов',
+            )}
           </p>
         </div>
         <MeasurementReport
@@ -330,6 +352,22 @@
         </div>{/if}
     </div>
   </div>
+  <section
+    class="mt-12 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-red-100 bg-white p-5"
+    aria-labelledby="delete-project-title"
+  >
+    <div>
+      <h2 id="delete-project-title" class="text-sm font-semibold text-ink">Удаление проекта</h2>
+      <p class="mt-1 text-sm text-muted">Будут удалены проект и все его замеры.</p>
+    </div>
+    <button
+      type="button"
+      disabled={busy || !!active}
+      onclick={() => (deleteProject = true)}
+      class="rounded-xl border border-red-300 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-40"
+      >Удалить проект</button
+    >
+  </section>
   {#if deleteRun}<ConfirmDialog
       title="Удалить замер?"
       description="Ответы и отчёт этого замера будут удалены."
