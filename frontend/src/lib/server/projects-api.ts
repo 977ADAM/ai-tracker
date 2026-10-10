@@ -343,17 +343,39 @@ function projection(path: string, value: unknown, method: string): unknown {
     const r = obj(value),
       p = obj(r.proposal);
     const kind = str(r.kind);
+    const warning = r.warning == null ? null : str(r.warning);
+    const sources = arr(r.sources ?? [], (value) => {
+      const source = obj(value);
+      return { url: safeUrl(source.url), title: str(source.title) };
+    });
+    const search_status = r.search_status == null ? null : str(r.search_status);
     if (kind === 'description')
       return {
         kind,
+        warning,
+        sources,
+        search_status,
         proposal: {
           brand_description: str(p.brand_description),
           brand_aliases: arr(p.brand_aliases, str),
         },
       };
-    if (kind === 'queries') return { kind, proposal: { queries: arr(p.queries, query) } };
+    if (kind === 'queries')
+      return {
+        kind,
+        warning,
+        sources,
+        search_status,
+        proposal: { queries: arr(p.queries, query) },
+      };
     if (kind === 'competitors')
-      return { kind, proposal: { competitors: arr(p.competitors, competitor) } };
+      return {
+        kind,
+        warning,
+        sources,
+        search_status,
+        proposal: { competitors: arr(p.competitors, competitor) },
+      };
     throw new Error('Некорректное предложение');
   }
   if (u.pathname.endsWith('/cancel')) return publicMeasurement(value);
