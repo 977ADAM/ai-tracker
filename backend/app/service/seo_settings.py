@@ -14,6 +14,7 @@ support native tool calling, and the run must be refused before it costs money.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -21,6 +22,7 @@ from app.core.errors import AppError, ConfigurationError
 from app.db.seo_settings import SeoSettingsRepository
 from app.domain.seo_llm import AgentMessage, AgentModel, AgentTurn, ToolSchema
 from app.domain.seo_settings import SeoSettings
+from app.integrations.deepseek_web import DeepSeekWebClient
 from app.integrations.seo_llm import LangChainSeoLlmClient, SeoLlmClient
 
 NOT_CONFIGURED = "Не настроена служебная LLM для SEO-анализа"
@@ -117,6 +119,16 @@ class SeoSettingsService:
         if not settings.configured or settings.api_key is None:
             return None
         return SeoLlmClient(settings.endpoint, settings.api_key, settings.model, self.client)
+
+    def build_search_client(self) -> DeepSeekWebClient | None:
+        """Only send the resolved service key to the configured direct DeepSeek API."""
+        settings = self.repository.load()
+        if not settings.configured or settings.api_key is None:
+            return None
+        endpoint = urlsplit(settings.endpoint)
+        if endpoint.scheme != "https" or endpoint.hostname != "api.deepseek.com" or endpoint.port not in (None, 443):
+            raise ConfigurationError("Для генерации со встроенным поиском настройте служебную LLM DeepSeek (api.deepseek.com)")
+        return DeepSeekWebClient(settings.api_key, settings.model)
 
     def build_agent_model(self) -> AgentModel | None:
         """Build the tool-calling adapter, or `None` while settings are incomplete."""
