@@ -3,13 +3,15 @@
 
 @theme {
   --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
-  --color-canvas: #f4f6f2;
-  --color-ink: #18332c;
-  --color-accent: #147a5a;
-  --color-accent-dark: #0c6047;
-  --color-accent-soft: #e8f5ed;
-  --color-line: #dce5de;
-  --color-muted: #587168;
+  --color-canvas: #f5f7fb;
+  --color-ink: #24344b;
+  --color-accent: #1769e0;
+  --color-accent-dark: #1256bd;
+  --color-accent-soft: #eaf2ff;
+  --color-secondary: #16b8b0;
+  --color-secondary-soft: #e7f8f6;
+  --color-line: #e0e7f0;
+  --color-muted: #64748b;
   /* The settings dialog follows its references' charcoal palette. These tones
      stay inside that dialog so the rest of the application keeps its light
      surfaces. */
@@ -21,5 +23,5 @@
   --color-shell-line: #47484b;
   --color-shell-ink: #f9fafb;
   --color-shell-muted: #a5a9af;
-  --color-shell-accent: #3ddc84;
+  --color-shell-accent: #16b8b0;
 }
