@@ -7,7 +7,6 @@ it('renders breadcrumbs and switches the report view', async () => {
     project: { id: 'p1', name: 'Додопицца — проект', brand: 'Додопицца' },
     ready: true,
     onStart: () => {},
-    onDelete: () => {},
     onRename: async () => {},
   });
   expect(screen.getByRole('navigation', { name: 'Хлебные крошки' })).toBeTruthy();
@@ -18,5 +17,6 @@ it('renders breadcrumbs and switches the report view', async () => {
   expect(
     screen.getByRole('button', { name: 'Источники упоминаний' }).getAttribute('aria-pressed'),
   ).toBe('true');
-  expect(screen.getByRole('button', { name: 'Обновить' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Запустить замер' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Удалить проект' })).toBeNull();
 });
