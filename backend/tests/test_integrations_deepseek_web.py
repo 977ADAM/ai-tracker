@@ -140,3 +140,15 @@ def test_total_timeout_is_shared_across_response_chunks(monkeypatch):
         lambda request: httpx.Response(200, stream=Stream()),
     )) as client, pytest.raises(ProviderError, match="время|таймаут"):
         client.answer("Вопрос")
+
+
+def test_setup_search_preserves_system_and_context_without_measurement_prompt():
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['system'] == 'Найди бренд и верни JSON'
+        assert body['messages'] == [{'role': 'user', 'content': '{"brand":"Додо Пицца"}'}]
+        assert body['tools'][0]['max_uses'] == 1
+        return httpx.Response(200, json=response_body())
+    client = DeepSeekWebClient('secret', 'selected-model', transport=httpx.MockTransport(handler))
+    result = asyncio.run(client.complete_with_search('Найди бренд и верни JSON', '{"brand":"Додо Пицца"}'))
+    assert result.search_status == 'completed'
