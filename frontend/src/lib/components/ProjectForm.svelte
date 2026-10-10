@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { notify } from '$lib/notifications';
+  import { countLabel } from '$lib/count';
   import { untrack } from 'svelte';
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
@@ -82,6 +84,7 @@
         initial ? 'PUT' : 'POST',
         payload,
       );
+      notify(initial ? 'Настройки проекта сохранены' : 'Проект создан');
       await goto(resolve('/projects/[id]', { id: p.id }));
     } catch (e) {
       error = e instanceof Error ? e.message : 'Не удалось сохранить проект';
@@ -272,9 +275,10 @@
           ></label
         >{/if}
       <p class="mt-3 text-xs text-muted">
-        На замер: {queries.length * ids.length} ответов моделей, до {queries.length * ids.length} оценок
-        тональности{yandex ? `, ${queries.length} поисков Яндекса` : ''}. Сохранение не запускает
-        замер.
+        На замер: {countLabel(queries.length * ids.length, 'ответ', 'ответа', 'ответов')} моделей, до
+        {countLabel(queries.length * ids.length, 'оценки', 'оценок', 'оценок')} тональности{yandex
+          ? `, ${queries.length} поисков Яндекса`
+          : ''}. Сохранение не запускает замер.
       </p>
     </section>
   {/if}
