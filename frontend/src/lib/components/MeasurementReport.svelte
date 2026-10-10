@@ -2,6 +2,7 @@
   import type { Measurement, ModelRow, SearchRow } from '$lib/project-types';
   import { percent, sentimentLabels } from '$lib/project-client';
   import { plainText } from '$lib/markdown';
+  import MeasurementOverview from './MeasurementOverview.svelte';
   import AnswerDialog from './AnswerDialog.svelte';
   let {
     snapshot,
@@ -40,24 +41,7 @@
 
 <div class="space-y-6" data-measurement-report>
   {#if view === 'mentions'}
-    <div class="grid gap-3 sm:grid-cols-4">
-      <div class="rounded-xl border border-line bg-white p-4">
-        <p class="text-xs text-muted">Видимость в ИИ</p>
-        <strong class="mt-2 block text-2xl">{percent(a.visibility)}</strong
-        >{#if snapshot.comparison.visibility_delta != null}<p class="mt-1 text-xs text-muted">
-            {snapshot.comparison.visibility_delta > 0 ? '+' : ''}{snapshot.comparison
-              .visibility_delta} п.п.
-          </p>{/if}
-      </div>
-      {#each ['positive', 'neutral', 'negative'] as key (key)}<div
-          class="rounded-xl border border-line bg-white p-4"
-        >
-          <p class="text-xs text-muted">{sentimentLabels[key]} тональность</p>
-          <strong class="mt-2 block text-2xl"
-            >{a.sentiment[key as 'positive' | 'neutral' | 'negative']}</strong
-          >
-        </div>{/each}
-    </div>
+    <MeasurementOverview aggregates={a} comparison={snapshot.comparison} />
     <div class="rounded-xl bg-accent-soft p-4 text-sm">
       <p>
         Бренд упомянут в <strong>{a.mentioned} из {a.successful}</strong> успешных ответов. Получено {a.successful}
