@@ -363,3 +363,23 @@ async def test_test_requires_a_complete_configuration(config_dir, secrets):
         await service.client.aclose()
 
     assert str(error.value) == NOT_CONFIGURED
+
+
+def test_native_search_uses_only_direct_deepseek_settings(config_dir, secrets):
+    service = make_service(config_dir, secrets, env_endpoint='https://api.deepseek.com/chat/completions', env_model='deepseek-flash', env_api_key=KEY)
+    try:
+        client = service.build_search_client()
+        assert client.model == 'deepseek-flash'
+        assert client.api_key == KEY
+    finally:
+        asyncio.run(service.client.aclose())
+
+
+def test_native_search_refuses_to_forward_another_providers_key(config_dir, secrets):
+    service = make_service(config_dir, secrets, env_endpoint=ENDPOINT, env_model=MODEL, env_api_key=KEY)
+    try:
+        with pytest.raises(ConfigurationError, match='DeepSeek') as error:
+            service.build_search_client()
+        assert KEY not in str(error.value)
+    finally:
+        asyncio.run(service.client.aclose())
