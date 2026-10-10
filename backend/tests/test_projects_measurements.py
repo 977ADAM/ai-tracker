@@ -263,30 +263,22 @@ def test_project_alias_is_counted_in_measurement(database_dsn):
 
 
 def test_generation_proposes_fields_without_saving_or_starting(database_dsn):
-    from app.domain.site_fetch import FetchedPage
     from app.service.project_generation import ProjectGenerationService
 
     projects = ProjectRepository(database_dsn)
     p = projects.create(normalize_project(project()))
 
-    class Fetcher:
-        async def fetch(self, host):
-            return (
-                FetchedPage("https://example.ru", "Пицца", "Сеть пиццерий Додопицца"),
-            )
-
     class Client:
-        async def complete(self, system, user):
-            return '{"brand_description":"Сеть пиццерий","brand_aliases":["Додошка","dodo"]}'
+        async def complete_with_search(self, system, user):
+            from app.domain.seo_answer import SeoAnswer
+            return SeoAnswer('{"brand_description":"Сеть пиццерий","brand_aliases":["Додошка","dodo"]}', "deepseek_web", "completed", (), (), "test", 1)
 
     class Settings:
-        def build_client(self):
+        def build_search_client(self):
             return Client()
 
     value = asyncio.run(
-        ProjectGenerationService(projects, Fetcher(), Settings()).generate(
-            p["id"], "description"
-        )
+        ProjectGenerationService(projects, Settings()).generate(p["id"], "description")
     )
     assert value["proposal"]["brand_aliases"] == ["Додошка", "dodo"]
     assert projects.get(p["id"])["brand_description"] == ""
