@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '$lib/notifications';
   import { base } from '$app/paths';
   import { invalidateAll } from '$app/navigation';
   import type { SeoSettings, SeoSource } from '$lib/types';
@@ -65,6 +66,7 @@
       apiKey = '';
       await invalidateAll();
       feedback = { kind: 'notice', text: 'Настройки служебной LLM сохранены' };
+      notify('Настройки служебной LLM сохранены');
     } catch {
       feedback = {
         kind: 'error',
@@ -131,8 +133,8 @@
 
 <h3 class="text-xs font-bold tracking-tight text-shell-ink">Служебная LLM</h3>
 <p class="mt-1.5 text-xs leading-5 text-shell-muted">
-  Модель, которая извлекает данные сайта, генерирует запросы и собирает отчёт. Используется только
-  для SEO-анализа.
+  Для генерации описания, промптов и конкурентов используется встроенный веб-поиск DeepSeek. Укажите
+  служебную модель DeepSeek и адрес api.deepseek.com. Эта же модель оценивает тональность ответов.
 </p>
 
 {#if loadError}
