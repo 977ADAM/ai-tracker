@@ -41,7 +41,7 @@ def mentions_brand(answer: str, brand: str) -> bool:
 def mentions_phrase(answer: str, phrase: str) -> bool:
     """Return True when the answer contains the whole phrase on word boundaries.
 
-    Matching is literal after `normalize_text`: no morphology, translation,
+    Matching ignores internal whitespace after `normalize_text`: no morphology, translation,
     transliteration, or aliases. Punctuation separates words, so `«Ромашка»`
     contains `ромашка` while `Суперромашка` does not.
     """
@@ -51,7 +51,11 @@ def mentions_phrase(answer: str, phrase: str) -> bool:
     normalized_answer = normalize_text(answer)
     if not normalized_answer:
         return False
-    return re.search(rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)", normalized_answer) is not None
+    # Word boundaries remain mandatory, but spacing inside a brand can vary:
+    # «Додо Пицца» and «Додопицца» are the same name, not «Супердодопицца».
+    compact = normalized_phrase.replace(" ", "")
+    pattern = r"\s*".join(re.escape(char) for char in compact)
+    return re.search(rf"(?<!\w){pattern}(?!\w)", normalized_answer) is not None
 
 
 def mentions_host(text: str, host: str) -> bool:
