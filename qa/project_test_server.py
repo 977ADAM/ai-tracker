@@ -10,7 +10,6 @@ from app.main import app
 from app.api.deps import build_container
 from app.core.config import Settings
 from tests.fakes import MemorySecrets
-from app.domain.site_fetch import FetchedPage
 
 
 class Provider:
@@ -42,9 +41,20 @@ class ClassifierSettings:
     def build_client(self):
         return ClassifierClient()
 
+    def build_search_client(self):
+        return SetupSearchClient()
+
+
+class SetupSearchClient:
+    async def complete_with_search(self, system, user):
+        from app.domain.seo_answer import SeoAnswer, Citation
+        text = await ClassifierClient().complete(system, user)
+        return SeoAnswer(text, "deepseek_web", "completed", (),
+                         (Citation("https://example.ru/about", "О компании", None, 0, 1),), "test", 1)
+
 
 container = build_container(
-    Settings(config_dir=Path(os.environ["AI_TRACKER_CONFIG_DIR"]), presets=()),
+    Settings(config_dir=Path(os.environ["AI_TRACKER_CONFIG_DIR"]), presets=(), database_url=os.environ["AI_TRACKER_DATABASE_URL"]),
     secrets=MemorySecrets(),
     provider_factory=lambda c, k: Provider(),
 )
@@ -60,10 +70,4 @@ container.connections.save(
 container.measurements.seo_settings = ClassifierSettings()
 app.state.container = container
 
-
-class SiteFetcher:
-    async def fetch(self, host):
-        return (FetchedPage('https://example.ru','Додопицца','Додопицца — сеть пиццерий'),)
-
-container.project_generation.fetcher = SiteFetcher()
 container.project_generation.settings = ClassifierSettings()
