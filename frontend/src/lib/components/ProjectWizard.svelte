@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { notify } from '$lib/notifications';
+  import { countLabel } from '$lib/count';
   import PromptSetup from './PromptSetup.svelte';
   import { normalizeSiteInput, parseCompetitorInput } from '$lib/project-setup';
   import { onMount, untrack } from 'svelte';
@@ -47,10 +49,12 @@
   let busy = $state(false),
     generating = $state(false),
     error = $state('');
+  let warning = $state('');
+  let sources = $state<{ url: string; title: string }[]>([]);
   let dialog: HTMLDialogElement;
   const labels = ['Бренд и сайт', 'Описание', 'Промпты', 'Конкуренты', 'Нейросети', 'Запуск'];
   const input =
-    'mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-lime-500 focus:ring-1 focus:ring-lime-500';
+    'mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-accent focus:ring-1 focus:ring-accent';
   let estimate = $derived(queries.length * ids.length);
   let selectable = $derived(providers.slice(0, 5).map((p) => p.id));
   let allSelected = $derived(selectable.length > 0 && selectable.every((id) => ids.includes(id)));
@@ -94,7 +98,10 @@
     busy = true;
     error = '';
     try {
-      if (id) await save();
+      if (id) {
+        await save();
+        notify('Настройки проекта сохранены');
+      }
       await leave();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Не удалось сохранить черновик';
@@ -117,9 +124,14 @@
     if (!id || generating || importing) return;
     generating = true;
     error = '';
+    warning = '';
+    sources = [];
     try {
+      await save();
       const value = await projectRequest<{
         kind: string;
+        warning?: string | null;
+        sources?: { url: string; title: string }[];
         proposal: {
           brand_description?: string;
           brand_aliases?: string[];
@@ -127,6 +139,8 @@
           competitors?: Competitor[];
         };
       }>(`/api/projects/${id}/generate`, 'POST', { kind, count });
+      warning = value.warning ?? '';
+      sources = value.sources ?? [];
       if (kind === 'description') {
         description = value.proposal.brand_description ?? '';
         aliases = value.proposal.brand_aliases?.join('\n') ?? '';
@@ -151,6 +165,8 @@
       await save();
       step++;
       reached = Math.max(reached, step);
+      warning = '';
+      sources = [];
       if (step === 2 && !description) await generate('description');
       else if (step === 3 && !queries.length) await generate('queries');
       else if (step === 4 && !competitors.length) await generate('competitors');
@@ -167,6 +183,7 @@
     try {
       await save();
       await projectRequest(`/api/projects/${id}/measurements`, 'POST');
+      notify('Замер запущен');
       await goto(resolve('/projects/[id]', { id }));
     } catch (e) {
       error = e instanceof Error ? e.message : 'Не удалось запустить замер';
@@ -221,7 +238,9 @@
   aria-labelledby="wizard-title"
 >
   <div class="flex items-center justify-between gap-4 px-5 pt-6 sm:px-7">
-    <h1 id="wizard-title" class="text-lg font-bold">Создание проекта в Трекере ИИ</h1>
+    <h1 id="wizard-title" class="text-lg font-bold">
+      {initial ? 'Настройка проекта в Трекере ИИ' : 'Создание проекта в Трекере ИИ'}
+    </h1>
     <button
       aria-label="Закрыть мастер"
       class="size-8 rounded-lg text-2xl text-slate-400 hover:bg-slate-100"
@@ -240,9 +259,9 @@
             error = '';
           }}
           aria-current={step === i + 1 ? 'step' : undefined}
-          class={`flex shrink-0 items-center gap-2 rounded-full px-2 py-1 text-xs ${step === i + 1 ? 'bg-lime-600 font-semibold text-white' : i + 1 < step ? 'text-lime-600' : 'text-slate-500'}`}
+          class={`flex shrink-0 items-center gap-2 rounded-full px-2 py-1 text-xs ${step === i + 1 ? 'bg-accent font-semibold text-white' : i + 1 < step ? 'text-accent' : 'text-slate-500'}`}
           ><span
-            class={`grid size-5 place-items-center rounded-full border ${i + 1 < step ? 'border-lime-600 bg-lime-600 text-white' : 'border-current'}`}
+            class={`grid size-5 place-items-center rounded-full border ${i + 1 < step ? 'border-accent bg-accent text-white' : 'border-current'}`}
             >{i + 1 < step ? '✓' : i + 1}</span
           >{label}</button
         >{#if i < 5}<span class="my-auto text-slate-300" aria-hidden="true">›</span>{/if}{/each}
@@ -255,8 +274,30 @@
     {#if error}<p role="alert" class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
         {error}
       </p>{/if}
-    {#if generating}<p role="status" class="mt-4 rounded-lg bg-lime-50 p-3 text-sm text-lime-700">
-        Читаем сайт и готовим предложения…
+    {#if warning}<p role="status" class="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+        {warning}
+      </p>{/if}
+    {#if sources.length}<details open class="mt-4 rounded-lg bg-slate-50 p-3 text-sm">
+        <summary class="cursor-pointer font-semibold"
+          >Источники поиска DeepSeek ({sources.length})</summary
+        >
+        <ul class="mt-2 max-h-28 space-y-1 overflow-y-auto">
+          {#each sources as source (source.url)}<li>
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-blue-700 underline">{source.title}</a
+              >
+            </li>{/each}
+        </ul>
+        <p class="mt-2 text-xs text-slate-500">Проверьте предложение перед сохранением.</p>
+      </details>{/if}
+    {#if generating}<p
+        role="status"
+        class="mt-4 rounded-lg bg-accent-soft p-3 text-sm text-accent-dark"
+      >
+        DeepSeek ищет сведения и готовит предложения…
       </p>{/if}
     {#if step === 1}<p class="mt-4 text-sm text-slate-500">
         Укажите название бренда для поиска упоминаний, а сайт — для проверки цитируемости в ИИ.
@@ -273,10 +314,10 @@
             maxlength="100"
             required
             class={input}
-            placeholder="Например, додо или додопицца"
+            placeholder="Например, Додо Пицца"
           /></label
         >
-        <p class="-mt-3 text-xs text-slate-500">Пример: додо или додопицца</p>
+        <p class="-mt-3 text-xs text-slate-500">Пример: Додо Пицца</p>
         <label class="block text-sm text-slate-400"
           ><span class="flex justify-between"
             ><span>Сайт</span><span class="text-xs">{site.length} / 2048</span></span
@@ -292,16 +333,15 @@
           Сохраним как {savedHost() || 'example.ru'}, {subdomains ? 'с учётом' : 'без учёта'} поддоменов
         </p>
         <label class="flex items-center gap-3 text-sm text-slate-500"
-          ><input
-            type="checkbox"
-            bind:checked={subdomains}
-            class="size-5 accent-lime-600"
-          />Учитывать поддомены сайта</label
+          ><input type="checkbox" bind:checked={subdomains} class="size-5 accent-accent" />Учитывать
+          поддомены сайта</label
         >
       </div>
     {:else if step === 2}<p class="mt-4 max-w-2xl text-sm leading-relaxed text-slate-500">
         Добавьте описание бренда и варианты его названия — синонимы и сокращения.<br />Так проверка
-        упоминаний будет точнее.
+        упоминаний будет точнее. DeepSeek использует встроенный веб-поиск. Генерация новых
+        предложений выполняется при переходе на шаг и расходует токены служебной модели. Приложение
+        не загружает ваш сайт напрямую.
       </p>
       <div class="mt-7 space-y-5">
         <label class="block text-sm text-slate-400"
@@ -326,14 +366,16 @@
             class={input}
             placeholder="Введите варианты названия бренда, каждый с новой строки"></textarea></label
         >
-        <p class="-mt-3 text-xs text-slate-500">Пример:<br />Додошка<br />dodo</p>
+        <p class="-mt-3 text-xs text-slate-500">
+          Пример:<br />Додо Пицца<br />Додопицца<br />Dodo Pizza
+        </p>
       </div>
       <div class="mt-7 flex justify-end">
         <button
           disabled={busy || generating || importing}
           onclick={() => generate('description')}
           class="rounded-lg bg-slate-400 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
-          >✧ Сгенерировать заново</button
+          >✧ Сгенерировать</button
         >
       </div>
     {:else if step === 3}<PromptSetup
@@ -359,7 +401,7 @@
               aria-label="Бренд или сайт конкурента"
               bind:value={competitorInput}
               maxlength="100"
-              class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-lime-500"
+              class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-accent"
               placeholder="Введите бренд или сайт конкурента"
             /><button
               disabled={!competitorInput.trim() || competitors.length >= 10}
@@ -390,7 +432,7 @@
           disabled={busy || generating || importing}
           onclick={() => generate('competitors')}
           class="rounded-lg bg-slate-400 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
-          >✧ Сгенерировать заново</button
+          >✧ Сгенерировать</button
         >
       </div>
     {:else if step === 5}<p class="text-sm text-slate-500">
@@ -449,8 +491,12 @@
         </table>
       </div>
       <p class="mt-4 text-xs text-slate-400">
-        Выбрано {ids.length} из {providers.length} нейросетей · В проекте {queries.length} промптов ·
-        За проверку: {estimate} вызовов
+        Выбрано нейросетей: {ids.length} из {providers.length} · В проекте {countLabel(
+          queries.length,
+          'промпт',
+          'промпта',
+          'промптов',
+        )} · За проверку: {countLabel(estimate, 'вызов', 'вызова', 'вызовов')}
       </p>
       {#if !providers.length}<p class="mt-4 text-sm text-slate-500">
           Добавьте подключения в общих настройках API. Черновик сохранён.
@@ -469,21 +515,24 @@
         </div>
         <div class="flex flex-wrap gap-2">
           <span class="rounded-lg bg-slate-100 px-5 py-4"
-            >Выбрано: <strong>{ids.length} из {providers.length} нейросетей</strong></span
+            >Выбрано: <strong>{ids.length} из {providers.length}</strong></span
           ><span class="rounded-lg bg-slate-100 px-5 py-4"
-            >В проекте: <strong>{queries.length} промптов</strong></span
-          ><span class="rounded-lg bg-lime-50 px-5 py-4"
-            >За проверку: <strong>{estimate} вызовов</strong></span
+            >В проекте: <strong
+              >{countLabel(queries.length, 'промпт', 'промпта', 'промптов')}</strong
+            ></span
+          ><span class="rounded-lg bg-accent-soft px-5 py-4"
+            >За проверку: <strong>{countLabel(estimate, 'вызов', 'вызова', 'вызовов')}</strong
+            ></span
           >
         </div>
       </div>
       <p class="mt-4 text-xs text-slate-400">
-        До {estimate} дополнительных вызовов служебной модели для оценки тональности.
+        Дополнительные вызовы служебной модели для оценки тональности: до {estimate}.
       </p>
       <details class="mt-6 text-sm text-slate-500">
         <summary class="cursor-pointer">Дополнительно: выдача Яндекса</summary><label
           class="mt-4 flex items-center gap-3"
-          ><input type="checkbox" bind:checked={yandex} class="size-5 accent-lime-600" />Также
+          ><input type="checkbox" bind:checked={yandex} class="size-5 accent-accent" />Также
           проверить выдачу Яндекса</label
         >{#if yandex}<label class="mt-3 block"
             >Регион<select bind:value={region} class={input}
@@ -516,18 +565,18 @@
         >{/if}{#if step < 6}<button
           disabled={busy || generating || importing}
           onclick={next}
-          class="rounded-lg bg-lime-600 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
+          class="rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
           >✓ Далее</button
         >{:else}<button
           disabled={busy || generating || importing}
           onclick={pause}
-          class="rounded-lg border border-lime-600 px-6 py-3 text-sm font-medium text-lime-600"
-          >Создать проект ›</button
+          class="rounded-lg border border-accent px-6 py-3 text-sm font-medium text-accent"
+          >{initial ? 'Сохранить проект' : 'Создать проект'} ›</button
         ><button
           disabled={busy || generating || importing}
           onclick={start}
-          class="rounded-lg bg-lime-600 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
-          >↻ Создать и запустить проверку</button
+          class="rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
+          >↻ {initial ? 'Сохранить и запустить проверку' : 'Создать и запустить проверку'}</button
         >{/if}
     </div>
     {#if step < 6}<button
@@ -566,13 +615,13 @@
     transition: transform 0.15s;
   }
   .model-toggle:checked {
-    background: #65a30d;
+    background: var(--color-secondary);
   }
   .model-toggle:checked::before {
     transform: translateX(14px);
   }
   .model-toggle:focus-visible {
-    outline: 2px solid #65a30d;
+    outline: 2px solid var(--color-accent);
     outline-offset: 3px;
   }
   .model-toggle:disabled {
