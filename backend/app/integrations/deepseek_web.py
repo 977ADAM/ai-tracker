@@ -40,7 +40,11 @@ class DeepSeekWebClient:
         # client avoids sharing connection pools across those threads/loops.
         return asyncio.run(self._answer(prompt))
 
-    async def _answer(self, prompt: str) -> SeoAnswer:
+    async def complete_with_search(self, system: str, user: str) -> SeoAnswer:
+        """Project setup: one native search and a structured proposal."""
+        return await self._answer(user, system=system)
+
+    async def _answer(self, prompt: str, *, system: str | None = None) -> SeoAnswer:
         body = {
             "model": self.model, "max_tokens": 4096,
             "messages": [{"role": "user", "content": [{"type": "text", "text": (
@@ -51,6 +55,9 @@ class DeepSeekWebClient:
             )}]}],
             "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}],
         }
+        if system is not None:
+            body["system"] = system
+            body["messages"] = [{"role": "user", "content": prompt}]
         try:
             async with asyncio.timeout(TOTAL_TIMEOUT), httpx.AsyncClient(
                 transport=self.transport, follow_redirects=False, timeout=TOTAL_TIMEOUT,
