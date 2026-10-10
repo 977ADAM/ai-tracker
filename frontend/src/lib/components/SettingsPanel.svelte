@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '$lib/notifications';
   import { base } from '$app/paths';
   import { invalidateAll } from '$app/navigation';
   import type { SettingsProvider } from '$lib/types';
@@ -150,6 +151,7 @@
       );
       const value = await readJson(response);
       if (!response.ok) throw new Error(detail(value, fallback));
+      notify(isCreate ? 'Провайдер добавлен' : 'Настройки провайдера сохранены');
       const saved = value as SettingsProvider;
       closeDraft();
       feedback = {
