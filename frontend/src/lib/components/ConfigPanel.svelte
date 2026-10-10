@@ -131,7 +131,7 @@
           <p class="text-xs text-shell-muted">Читаем настройки…</p>
         {:else if config.exists && config.content !== null}
           <p class="mb-1.5 text-xs leading-5 text-shell-muted">
-            Провайдеры, поисковая система и SEO-анализ в одном документе. Ключи API в файлы не
+            Провайдеры, поисковая система и служебная LLM в одном документе. Ключи API в файлы не
             записываются: они лежат в системном хранилище ключей.
           </p>
           <pre
