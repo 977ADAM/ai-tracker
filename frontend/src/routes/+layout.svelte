@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { resolve } from '$app/paths';
+  import { base, resolve } from '$app/paths';
   import { tick } from 'svelte';
   import '../app.css';
+  import NotificationToast from '$lib/components/NotificationToast.svelte';
   import ConfigPanel from '$lib/components/ConfigPanel.svelte';
   import SettingsPanel from '$lib/components/SettingsPanel.svelte';
   import SearchSettingsPanel from '$lib/components/SearchSettingsPanel.svelte';
@@ -121,6 +122,11 @@
   });
 </script>
 
+<svelte:head>
+  <link rel="icon" type="image/svg+xml" href={`${base}/logo.svg`} />
+  <meta name="theme-color" content="#1769e0" />
+</svelte:head>
+
 <svelte:window onkeydown={onKeydown} />
 
 <div class="min-h-screen bg-canvas font-sans text-ink antialiased">
@@ -132,10 +138,7 @@
         href={resolve('/')}
         class="inline-flex items-center gap-2 rounded-lg font-bold tracking-tight text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
       >
-        <span
-          class="grid size-8 place-items-center rounded-xl bg-ink text-xl text-white"
-          aria-hidden="true">✳</span
-        >
+        <img src={`${base}/logo.svg`} width="36" height="36" class="size-9" alt="" />
         <span class="text-base">ИИ-трекинг</span>
       </a>
       <nav
@@ -157,6 +160,7 @@
   </header>
 
   {@render children()}
+  <NotificationToast />
 
   {#if settingsOpen}
     <!-- затемнение: клик по нему закрывает панель -->
@@ -288,7 +292,7 @@
               >
                 <path d="M4 15.5V11m4 4.5V6m4 9.5V8.5m4 7V4.5" stroke-linecap="round" />
               </svg>
-              SEO-анализ
+              Служебная LLM
             </button>
           </div>
 
