@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { notify } from '$lib/notifications';
   import { base } from '$app/paths';
   import { invalidateAll } from '$app/navigation';
   import type { YandexSearchSettings } from '$lib/types';
@@ -60,6 +61,7 @@
       apiKey = '';
       await invalidateAll();
       feedback = { kind: 'notice', text: 'Настройки Яндекса сохранены' };
+      notify('Настройки Яндекса сохранены');
     } catch {
       feedback = {
         kind: 'error',
