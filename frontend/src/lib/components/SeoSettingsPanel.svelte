@@ -88,20 +88,18 @@
         ok?: unknown;
         model?: unknown;
         error?: unknown;
-        tools?: unknown;
       };
-      // The SEO run needs tool calling, so the probe result always names it.
-      const tools =
-        value.tools === true ? 'Инструменты: поддерживаются.' : 'Инструменты: не поддерживаются.';
       if (value.ok === true) {
         const model = typeof value.model === 'string' && value.model ? `: ${value.model}` : '';
-        feedback = { kind: 'notice', text: `Подключение работает${model}. ${tools}` };
+        feedback = { kind: 'notice', text: `Подключение работает${model}` };
       } else {
-        const reason =
-          typeof value.error === 'string' && value.error
-            ? value.error
-            : 'Не удалось подключиться к служебной LLM';
-        feedback = { kind: 'error', text: `${reason} ${tools}` };
+        feedback = {
+          kind: 'error',
+          text:
+            typeof value.error === 'string' && value.error
+              ? value.error
+              : 'Не удалось подключиться к служебной LLM',
+        };
       }
     } catch {
       feedback = { kind: 'error', text: 'Не удалось проверить подключение. Попробуйте ещё раз.' };
