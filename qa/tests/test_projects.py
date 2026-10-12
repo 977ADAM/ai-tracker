@@ -22,14 +22,19 @@ def port():
         return s.getsockname()[1]
 
 
-@pytest.fixture
-def project_instance(tmp_path):
+@pytest.fixture(params=["", "/clustering/tracker"], ids=["root", "deploy-prefix"])
+def project_instance(tmp_path, request):
+    base_path = request.param
     api_port, ui_port = port(), port()
     env = {
         **os.environ,
         "AI_TRACKER_CONFIG_DIR": str(tmp_path / "data"),
         "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
         "AI_TRACKER_API_URL": f"http://127.0.0.1:{api_port}",
+        "AI_TRACKER_BASE_PATH": base_path,
+        "HOST": "127.0.0.1",
+        "PORT": str(ui_port),
+        "ORIGIN": f"http://127.0.0.1:{ui_port}",
     }
     # A throwaway PostgreSQL schema replaces the old temporary SQLite file.
     schema = "qa_" + uuid4().hex[:12]
@@ -69,7 +74,9 @@ def project_instance(tmp_path):
             ),
             (
                 "ui",
-                [
+                ["node", "build/index.js"]
+                if os.environ.get("QA_PROJECT_PRODUCTION") == "1"
+                else [
                     str(ROOT / "frontend/node_modules/.bin/vite"),
                     "dev",
                     "--host",
@@ -90,7 +97,7 @@ def project_instance(tmp_path):
             )
         for endpoint in [
             f"http://127.0.0.1:{api_port}/api/projects",
-            f"http://127.0.0.1:{ui_port}/",
+            f"http://127.0.0.1:{ui_port}{base_path}/",
         ]:
             deadline = time.monotonic() + 30
             while True:
@@ -105,7 +112,7 @@ def project_instance(tmp_path):
                             + "".join(p.read_text() for p in tmp_path.glob("*.log"))
                         )
                     time.sleep(0.1)
-        yield f"http://127.0.0.1:{ui_port}"
+        yield f"http://127.0.0.1:{ui_port}{base_path}"
     finally:
         for process in processes:
             process.terminate()
@@ -145,6 +152,11 @@ def test_project_creation_configuration_two_measurements_and_delete(
     page.get_by_role("link", name="Мастер настройки").click()
     expect(page.get_by_label("Промпт 1", exact=True)).to_have_value("Где заказать пиццу?", timeout=15000)
     page.get_by_role('tab',name='Из списка').click()
+    for kind in ('txt', 'csv', 'xlsx'):
+        link = page.get_by_role('link', name=f'▧ {kind}', exact=True)
+        href = link.get_attribute('href')
+        assert href == urlsplit(project_instance).path + f'/templates/prompts.{kind}'
+        assert page.request.get(project_instance + f'/templates/prompts.{kind}').status == 200
     def importing(route):
         expect(page.get_by_role('button',name='✓ Далее')).to_be_disabled()
         route.continue_()
