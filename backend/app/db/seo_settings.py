@@ -17,8 +17,8 @@ METADATA_FILE = "seo-settings.json"
 KEYRING_ACCOUNT = "seo-llm"
 FIELDS = ("endpoint", "model")
 
-READ_ERROR = "Не удалось прочитать настройки SEO-анализа"
-WRITE_ERROR = "Не удалось сохранить настройки SEO-анализа"
+READ_ERROR = "Не удалось прочитать настройки служебной LLM"
+WRITE_ERROR = "Не удалось сохранить настройки служебной LLM"
 
 
 class SeoSettingsRepository:
@@ -107,7 +107,7 @@ class SeoSettingsRepository:
     @staticmethod
     def _validate(payload: Mapping[str, object]) -> None:
         if set(payload) - {*FIELDS, "api_key"}:
-            raise ValidationError("Неизвестное поле настроек SEO-анализа")
+            raise ValidationError("Неизвестное поле настроек служебной LLM")
         for name in (*FIELDS, "api_key"):
             if name in payload and not isinstance(payload[name], str):
                 raise ValidationError("Некорректные настройки служебной LLM")
@@ -159,7 +159,7 @@ class SeoSettingsRepository:
                     os.unlink(temporary)
                 except OSError as exc:
                     if not write_failed:
-                        raise StorageError("Не удалось очистить временные настройки SEO-анализа") from exc
+                        raise StorageError("Не удалось очистить временные настройки служебной LLM") from exc
 
     def _saved_key(self) -> str | None:
         try:
