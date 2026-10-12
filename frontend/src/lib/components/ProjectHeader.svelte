@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import type { Project } from '$lib/project-types';
   let {
     project,
@@ -45,8 +46,9 @@
   aria-label="Хлебные крошки"
   class="mb-6 flex min-w-0 items-center gap-3 rounded-lg bg-slate-50 px-3 py-3 text-xs text-slate-500"
 >
-  <a href="/" aria-label="Главная" class="hover:text-accent">⌂</a><span aria-hidden="true">›</span
-  ><a href="/" aria-label="Проекты" class="shrink-0 hover:text-accent">Трекер ИИ</a><span
+  <a href={`${base}/`} aria-label="Главная" class="hover:text-accent">⌂</a><span aria-hidden="true"
+    >›</span
+  ><a href={`${base}/`} aria-label="Проекты" class="shrink-0 hover:text-accent">Трекер ИИ</a><span
     aria-hidden="true">›</span
   ><span aria-current="page" class="truncate text-slate-600">{project.name}</span>
 </nav>
@@ -95,7 +97,7 @@
         class="inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-40"
         ><span aria-hidden="true">↻</span>Запустить замер</button
       ><a
-        href={`/projects/${project.id}/settings`}
+        href={`${base}/projects/${project.id}/settings`}
         class="inline-flex items-center gap-2 rounded-xl border border-line px-4 py-2.5 text-sm text-muted hover:bg-canvas focus-visible:outline-2 focus-visible:outline-accent"
         ><span aria-hidden="true">☷</span>Настройки</a
       >
