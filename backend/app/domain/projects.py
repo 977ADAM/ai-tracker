@@ -1,7 +1,7 @@
 """Validated project settings and order-independent measurement identity.
 
 A company is one project: it holds the brand, the site, the fixed query list,
-and the competitors, and every measurement and run belongs to it.
+and the competitors, and every measurement belongs to it.
 """
 
 import hashlib
