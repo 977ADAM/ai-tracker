@@ -8,15 +8,8 @@ import httpx
 import pytest
 
 from app.db.seo_settings import SeoSettingsRepository
-from app.domain.seo_llm import AgentTurn
 from app.integrations.seo_llm import AUTHORIZATION_ERROR
-from app.service.seo_settings import (
-    NOT_CONFIGURED,
-    TOOL_TEST_SCHEMA,
-    TOOLS_UNSUPPORTED,
-    SeoSettingsService,
-)
-from tests.fakes import FakeAgentModel, tool_call_turn
+from app.service.seo_settings import NOT_CONFIGURED, SeoSettingsService
 
 ENDPOINT = "https://api.example.com/v1/chat/completions"
 OTHER_ENDPOINT = "https://llm.example.com/v1/chat/completions"
@@ -46,7 +39,7 @@ def fake_settings_service(settings, secrets):
     services: list[SeoSettingsService] = []
 
     def build(
-        handler=None, *, endpoint=None, model=None, api_key=None, agent_model=None,
+        handler=None, *, endpoint=None, model=None, api_key=None,
     ) -> SeoSettingsService:
         repository = make_repository(
             settings, secrets, env_endpoint=endpoint, env_model=model, env_api_key=api_key,
@@ -55,8 +48,7 @@ def fake_settings_service(settings, secrets):
             transport=httpx.MockTransport(handler or (lambda request: completion())),
             follow_redirects=False,
         )
-        factory = None if agent_model is None else (lambda resolved: agent_model)
-        service = SeoSettingsService(repository, client, agent_model_factory=factory)
+        service = SeoSettingsService(repository, client)
         services.append(service)
         return service
 
@@ -155,32 +147,13 @@ def test_delete_without_saved_values_is_a_safe_noop(make_client):
 
 
 def test_settings_test_reports_success_without_the_key(make_client, fake_settings_service):
-    service = fake_settings_service(
-        endpoint=ENDPOINT, model=MODEL, api_key=KEY,
-        agent_model=FakeAgentModel(tool_call_turn(TOOL_TEST_SCHEMA.name)),
-    )
+    service = fake_settings_service(endpoint=ENDPOINT, model=MODEL, api_key=KEY)
     with make_client(seo_settings_service=service) as client:
         response = client.post("/api/seo/settings/test")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "model": MODEL, "tools": True}
-    assert set(response.json()) == {"ok", "model", "tools"}
-    assert KEY not in response.text
-
-
-def test_settings_test_reports_a_model_without_tool_calling(
-    make_client, fake_settings_service,
-):
-    service = fake_settings_service(
-        endpoint=ENDPOINT, model=MODEL, api_key=KEY,
-        agent_model=FakeAgentModel(AgentTurn(text="OK")),
-    )
-    with make_client(seo_settings_service=service) as client:
-        response = client.post("/api/seo/settings/test")
-
-    assert response.status_code == 200
-    assert response.json() == {"ok": False, "error": TOOLS_UNSUPPORTED}
-    assert set(response.json()) == {"ok", "error"}
+    assert response.json() == {"ok": True, "model": MODEL}
+    assert set(response.json()) == {"ok", "model"}
     assert KEY not in response.text
 
 
@@ -190,10 +163,7 @@ def test_settings_test_reports_a_safe_error_without_the_upstream_body(
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "upstream-secret-detail"})
 
-    service = fake_settings_service(
-        handler, endpoint=ENDPOINT, model=MODEL, api_key=KEY,
-        agent_model=FakeAgentModel(tool_call_turn(TOOL_TEST_SCHEMA.name)),
-    )
+    service = fake_settings_service(handler, endpoint=ENDPOINT, model=MODEL, api_key=KEY)
     with make_client(seo_settings_service=service) as client:
         response = client.post("/api/seo/settings/test")
 
@@ -218,11 +188,11 @@ def test_the_settings_resource_lives_under_the_api_prefix(make_client):
         assert client.get("/seo/settings").status_code == 404
 
 
-def test_the_test_schema_exposes_the_tool_support_flag(make_client):
+def test_the_test_schema_reports_a_chat_probe(make_client):
     with make_client() as client:
         schemas = client.get("/openapi.json").json()["components"]["schemas"]
 
-    assert set(schemas["SeoSettingsTestResponse"]["properties"]) == {"ok", "model", "error", "tools"}
+    assert set(schemas["SeoSettingsTestResponse"]["properties"]) == {"ok", "model", "error"}
 
 
 def test_the_container_builds_the_settings_service_over_the_shared_client(settings, secrets):
@@ -233,6 +203,5 @@ def test_the_container_builds_the_settings_service_over_the_shared_client(settin
         assert isinstance(container.seo_settings, SeoSettingsService)
         assert container.seo_settings.client is container.search_client
         assert container.seo_settings.build_client() is None
-        assert container.seo_settings.build_agent_model() is None
     finally:
         asyncio.run(container.search_client.aclose())
