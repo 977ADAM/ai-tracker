@@ -254,6 +254,7 @@ function modelRow(v: unknown): ModelRow {
     connection_id: str(r.connection_id),
     query: str(r.query),
     category: nullable(r.category),
+    group: nullable(r.group),
     provider_name: str(r.provider_name),
     status: str(r.status),
     answer: nullable(r.answer),
