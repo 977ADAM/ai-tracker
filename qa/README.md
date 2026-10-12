@@ -7,6 +7,12 @@ cd qa
 QA_HEADLESS=1 uv run pytest tests/test_projects.py
 ```
 
+Сценарий выполняется дважды: в корне сайта и под `/clustering/tracker`, включая
+загрузку шаблонов импорта и запросы через BFF.
+Для проверки собранного adapter-node под префиксом сначала выполните
+`cd frontend && AI_TRACKER_BASE_PATH=/clustering/tracker npm run build`, затем
+`cd qa && QA_HEADLESS=1 QA_PROJECT_PRODUCTION=1 uv run pytest tests/test_projects.py -k deploy-prefix`
+(каждую команду запускайте из корня репозитория).
 Набор сам запускает временные Python API и SvelteKit на свободных локальных
 портах. Реальные API моделей заменены детерминированными адаптерами; служебная
 LLM также подменена. SSR и браузер проходят настоящий BFF и сохранение PostgreSQL.
