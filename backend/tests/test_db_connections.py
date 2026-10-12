@@ -216,6 +216,22 @@ def test_legacy_custom_connection_becomes_a_provider_group(config_dir, secrets):
     assert repository.group_key("old") == SECRET
 
 
+def test_a_new_connection_becomes_a_group_in_a_versioned_file(config_dir, secrets):
+    """A file the settings dialog already rewrote keeps its versioned shape."""
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "providers.json").write_text(
+        json.dumps({"version": 2, "groups": [], "presets": {}}), encoding="utf-8"
+    )
+    repository = ConnectionRepository(config_dir, secrets)
+
+    saved = custom()
+    repository.save(saved, SECRET)
+
+    assert repository.find(saved.id).model == "example-model"
+    assert repository.key(saved.id) == SECRET
+    assert json.loads(metadata_text(config_dir))["version"] == 2
+
+
 def test_provider_group_round_trip_shares_one_key(config_dir, secrets):
     repository = ConnectionRepository(config_dir, secrets)
     group = ProviderGroup(

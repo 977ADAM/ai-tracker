@@ -1,4 +1,4 @@
-"""Public Yandex settings and live configuration for future search jobs."""
+"""Public Yandex settings and the live gateway of future measurements."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class SearchSettingsService:
         try:
             self._configure(repository.load())
         except (ConfigurationError, StorageError):
-            # Search settings cannot take model configuration or model runs down.
+            # Search settings cannot take model configuration or measurements down.
             self.search.configure(None, True)
 
     def public(self) -> dict[str, object]:
@@ -58,11 +58,11 @@ class SearchSettingsService:
             return self._public(settings)
 
     def gateway_snapshot(self) -> SearchGateway | None:
-        """Return the gateway currently configured for new jobs, or None.
+        """Return the gateway currently configured for new measurements, or None.
 
-        The orchestrator captures this value once per run, so a settings change
-        made while a run is in flight never swaps the gateway underneath it. No
-        credential ever leaves this method: only the configured adapter.
+        A measurement captures this value once at start, so a settings change made
+        while it is in flight never swaps the gateway underneath it. No credential
+        ever leaves this method: only the configured adapter.
         """
         with self._lock:
             return self.search.gateway

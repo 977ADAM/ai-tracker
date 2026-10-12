@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from tests.fakes import ENDPOINT
 
 CUSTOM_BODY = {"name": "Тест", "kind": "openai", "endpoint": ENDPOINT, "model": "m", "api_key": "secret-value"}
@@ -13,6 +15,22 @@ def test_creating_a_connection_never_returns_the_key(client):
     assert "secret-value" not in created.text
     assert created.json()["configured"] is True
     assert "secret-value" not in client.get("/api/providers").text
+
+
+def test_creating_a_connection_keeps_a_versioned_file(client, config_dir):
+    """The settings dialog writes the versioned layout; creation must fit it."""
+    (config_dir / "providers.json").write_text(
+        json.dumps({"version": 2, "groups": [], "presets": {}}), encoding="utf-8"
+    )
+
+    created = client.post("/api/providers", json=CUSTOM_BODY)
+
+    assert created.status_code == 200
+    stored = json.loads((config_dir / "providers.json").read_text(encoding="utf-8"))
+    assert stored["version"] == 2
+    assert len(stored["groups"]) == 1
+    assert stored["groups"][0]["models"][0]["model"] == "m"
+    assert "secret-value" not in (config_dir / "providers.json").read_text(encoding="utf-8")
 
 
 def test_listing_starts_with_the_unconfigured_presets(client):

@@ -124,6 +124,17 @@ class ConnectionRepository:
                                for model in group.models)
                 self.save_group(replace(group, endpoint=connection.endpoint or group.endpoint, models=models, answer_mode=connection.answer_mode), api_key)
                 return
+            # A new connection keeps the file in its single versioned shape: it becomes
+            # a group with that one model, exactly as a migrated legacy row does.
+            self.save_group(
+                ProviderGroup(
+                    id=connection.id, name=connection.name, endpoint=connection.endpoint or "",
+                    models=(ProviderModel(id=connection.id, model=connection.model, name=connection.model),),
+                    kind=connection.kind, answer_mode=connection.answer_mode,
+                ),
+                api_key,
+            )
+            return
         previous_key = self._saved_key(connection.id)
         if api_key is not None:
             self._store_key(connection.id, api_key)
