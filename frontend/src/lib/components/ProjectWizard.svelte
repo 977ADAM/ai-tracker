@@ -399,12 +399,17 @@
           <div class="mt-2 flex gap-4">
             <input
               aria-label="Бренд или сайт конкурента"
+              disabled={busy || generating || importing}
               bind:value={competitorInput}
               maxlength="100"
               class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-accent"
               placeholder="Введите бренд или сайт конкурента"
             /><button
-              disabled={!competitorInput.trim() || competitors.length >= 10}
+              disabled={busy ||
+                generating ||
+                importing ||
+                !competitorInput.trim() ||
+                competitors.length >= 10}
               onclick={addCompetitor}
               class="rounded-lg bg-slate-400 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"
               >＋ Добавить</button
@@ -422,6 +427,7 @@
                 >{c.site_url.replace(/^https?:\/\//, '')}</span
               >{/if}<button
               aria-label={`Удалить конкурента ${i + 1}`}
+              disabled={busy || generating || importing}
               onclick={() => (competitors = competitors.filter((_, n) => n !== i))}
               class="text-lg text-slate-400">×</button
             ></span
