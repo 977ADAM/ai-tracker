@@ -207,7 +207,7 @@ def test_unreadable_metadata_path_is_reported_safely(tmp_path, monkeypatch):
         return original_exists(path)
 
     monkeypatch.setattr(Path, "exists", inaccessible)
-    with pytest.raises(StorageError, match="прочитать настройки SEO-анализа") as error:
+    with pytest.raises(StorageError, match="прочитать настройки служебной LLM") as error:
         repository.load()
     assert "private metadata path" not in str(error.value)
 
