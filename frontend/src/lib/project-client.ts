@@ -3,7 +3,7 @@ export async function projectRequest<T>(
   method = 'GET',
   payload?: unknown,
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(`${base}${path}`, {
     method,
     headers: payload === undefined ? undefined : { 'content-type': 'application/json' },
     body: payload === undefined ? undefined : JSON.stringify(payload),
@@ -31,3 +31,4 @@ export const measurementLabels: Record<string, string> = {
   cancelled: 'Отменён',
   interrupted: 'Прерван',
 };
+import { base } from '$app/paths';
