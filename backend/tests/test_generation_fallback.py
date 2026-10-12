@@ -28,6 +28,9 @@ def test_generation_uses_native_search_and_returns_sources(kind):
     result = asyncio.run(ProjectGenerationService(Projects(), Settings()).generate('p1', kind))
     assert len(calls) == 1
     assert 'pages' not in calls[0][1]
+    assert 'слово «Россия»' in calls[0][0]
+    assert 'русскоязычные' in calls[0][0]
+    assert 'присутствием в России' in calls[0][0]
     assert result['sources'] == [{'url': 'https://example.ru/about', 'title': 'О компании'}]
     assert result['search_status'] == 'completed'
 
