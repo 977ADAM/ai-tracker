@@ -52,9 +52,6 @@ ENV_KEY_VARIABLES = (
 # Every table the application owns, in an order that satisfies foreign keys.
 # `alembic_version` is deliberately absent: the schema must stay at head.
 APPLICATION_TABLES = (
-    "search_rows",
-    "model_rows",
-    "runs",
     "project_search_rows",
     "project_model_rows",
     "project_measurements",
