@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 
 from app.core.errors import (
     AppError,
-    ChatNotFound,
     ConfigurationError,
     RunConflict,
     RunNotFound,
@@ -26,7 +25,6 @@ STATUS_BY_ERROR: tuple[tuple[type[AppError], int], ...] = (
     (ConfigurationError, 400),
     (StorageError, 503),
     (RunNotFound, 404),
-    (ChatNotFound, 404),
     (RunConflict, 409),
 )
 

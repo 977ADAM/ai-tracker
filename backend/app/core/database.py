@@ -19,7 +19,6 @@ repositories a small DB-API-like surface:
   that contain `%` keep working;
 * `table_columns()` wraps `information_schema` where the code used
   `PRAGMA table_info`;
-* `require_project()` refuses a row written for a project that does not exist;
 * `safe_target()` names a database in a log message as `host:port/database`,
   because the DSN itself carries credentials;
 * the driver's error classes are re-exported, so a repository catches one
@@ -37,7 +36,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Self
 
 import psycopg
@@ -46,7 +45,6 @@ from psycopg import errors as psycopg_errors
 from psycopg.rows import dict_row
 
 from app.core.config import DATABASE_URL_VARIABLE, DEFAULT_DATABASE_URL
-from app.core.errors import RunNotFound
 
 Error = psycopg.Error
 IntegrityError = psycopg_errors.IntegrityError
@@ -264,15 +262,6 @@ class Connection:
             return Result(self.raw.cursor().execute(_translate(sql), _adapt_params(params)))
         return Result(self.raw.cursor().execute(sql))
 
-    def executemany(self, sql: str, params: Iterable[Sequence[Any]]) -> Result:
-        cursor = self.raw.cursor()
-        rows = [tuple(row) for row in params]
-        if not rows:
-            return Result(cursor)
-        statement = _translate(sql) if _PLACEHOLDER in sql else sql
-        cursor.executemany(statement, [_adapt_params(row) for row in rows])
-        return Result(cursor)
-
     def executescript(self, script: str) -> None:
         for statement in _split_script(script):
             if _ignored(statement):
@@ -386,10 +375,3 @@ def table_columns(connection: Connection, table: str) -> set[str]:
         (table,),
     ).fetchall()
     return {str(row["column_name"]) for row in rows}
-
-
-def require_project(connection: Connection, project_id: str) -> None:
-    """Fail loudly when a row is written for a project that does not exist."""
-    row = connection.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone()
-    if row is None:
-        raise RunNotFound("Проект не найден")

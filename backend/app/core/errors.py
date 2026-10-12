@@ -34,7 +34,3 @@ class RunNotFound(AppError):
 
 class RunConflict(AppError):
     """An operation needs a terminal run but the run is still active."""
-
-
-class ChatNotFound(AppError):
-    """A chat or chat message ID is unknown or was deleted."""

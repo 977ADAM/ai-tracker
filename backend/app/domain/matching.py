@@ -1,10 +1,9 @@
-"""Exact-name brand matching against a model answer.
+"""Brand matching against a model answer.
 
-Two matchers live here on purpose. `mentions_brand` is the behavior of the old
-`/api/check` flow and stays exactly as it was. `mentions_phrase` is the AI
-tracker matcher: it normalizes Unicode NFKC, casefolds, folds `ё` to `е`,
-collapses whitespace, and then looks for the whole phrase between word
-boundaries. `mentions_host` is the same literal search for a site name.
+`mentions_phrase` is the AI tracker matcher: it normalizes Unicode NFKC,
+casefolds, folds `ё` to `е`, collapses whitespace, and then looks for the whole
+phrase between word boundaries. `mentions_host` is the same literal search for a
+site name.
 """
 
 from __future__ import annotations
@@ -27,15 +26,6 @@ def normalize_text(value: str) -> str:
         return ""
     text = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
     return _WHITESPACE.sub(" ", text).strip()
-
-
-def mentions_brand(answer: str, brand: str) -> bool:
-    """Return True when the answer contains the brand as a whole word or phrase."""
-    folded_answer = answer.casefold()
-    folded_brand = brand.strip().casefold()
-    if not folded_brand:
-        return False
-    return re.search(rf"(?<!\w){re.escape(folded_brand)}(?!\w)", folded_answer) is not None
 
 
 def mentions_phrase(answer: str, phrase: str) -> bool:
