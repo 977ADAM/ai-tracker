@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { notify } from '$lib/notifications';
   import { onMount, untrack } from 'svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -100,7 +101,7 @@
     </div>
     {#if projects.length || error}
       <a
-        href="/projects/new"
+        href={`${base}/projects/new`}
         class="rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white hover:bg-accent-dark"
         >+ Создать проект</a
       >
@@ -154,7 +155,7 @@
         </li>
       </ol>
       <a
-        href="/projects/new"
+        href={`${base}/projects/new`}
         class="mt-6 inline-flex rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white"
         >Создать проект</a
       >
