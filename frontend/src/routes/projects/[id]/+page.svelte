@@ -259,7 +259,9 @@
         'оценок',
       )} тональности{project.yandex_enabled ? `; ${project.queries.length} поисков Яндекса` : ''}.
     </p>
-    <a href={`/projects/${project.id}/setup`} class="text-xs text-accent">Мастер настройки</a>
+    <a href={resolve('/projects/[id]/setup', { id: project.id })} class="text-xs text-accent"
+      >Мастер настройки</a
+    >
   </div>
   {#if !ready}<div class="mt-6 rounded-xl border border-line bg-white p-6">
       <h2 class="font-semibold">Проект создан</h2>
@@ -267,7 +269,7 @@
         Добавьте запросы и выберите модели внутри проекта, чтобы запустить первый замер.
       </p>
       <a
-        href={`/projects/${project.id}/setup`}
+        href={resolve('/projects/[id]/setup', { id: project.id })}
         class="mt-4 inline-flex rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white"
         >Продолжить настройку</a
       >
