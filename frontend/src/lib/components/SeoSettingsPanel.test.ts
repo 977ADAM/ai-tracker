@@ -107,10 +107,8 @@ describe('SeoSettingsPanel', () => {
     });
   });
 
-  it('probes the connection with a bodyless POST and shows the model and tool support', async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(response({ ok: true, model: 'seo-model', tools: true }));
+  it('probes the connection with a bodyless POST and shows the model', async () => {
+    const fetch = vi.fn().mockResolvedValue(response({ ok: true, model: 'seo-model' }));
     vi.stubGlobal('fetch', fetch);
     show();
     await fireEvent.click(screen.getByRole('button', { name: 'Проверить подключение' }));
@@ -120,48 +118,23 @@ describe('SeoSettingsPanel', () => {
     const status = await screen.findByRole('status');
     expect(status.textContent).toContain('Подключение работает');
     expect(status.textContent).toContain('seo-model');
-    expect(status.textContent).toContain('Инструменты: поддерживаются.');
-    expect(status.textContent).not.toContain('не поддерживаются');
-  });
-
-  it('states that the model cannot call tools when the probe reports no support', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(response({ ok: true, model: 'seo-model', tools: false })),
-    );
-    show();
-    await fireEvent.click(screen.getByRole('button', { name: 'Проверить подключение' }));
-    const status = await screen.findByRole('status');
-    expect(status.textContent).toContain('Инструменты: не поддерживаются.');
+    expect(status.textContent).not.toContain('Инструменты');
   });
 
   it('reports a failed connection probe with the safe upstream message', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(response({ ok: false, error: 'Модель недоступна' })),
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ ok: false, error: 'Модель недоступна', api_key: 'secret-value' }),
+        ),
     );
     show();
     await fireEvent.click(screen.getByRole('button', { name: 'Проверить подключение' }));
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Модель недоступна');
-    expect(alert.textContent).toContain('Инструменты: не поддерживаются.');
-  });
-
-  it('reports the tool-calling requirement as a safe error without any upstream secret', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        response({
-          ok: false,
-          error: 'Модель не поддерживает вызов инструментов',
-          api_key: 'secret-value',
-        }),
-      ),
-    );
-    show();
-    await fireEvent.click(screen.getByRole('button', { name: 'Проверить подключение' }));
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('Модель не поддерживает вызов инструментов');
+    expect(alert.textContent).not.toContain('Инструменты');
     expect(alert.textContent).not.toContain('secret-value');
   });
 
