@@ -58,10 +58,9 @@ export type SeoSettings = {
   api_key_source: SeoSource;
 };
 
-/** The availability probe: whether the model answered and whether it can call tools. */
+/** The availability probe: whether one chat completion succeeded. */
 export type SeoSettingsTest = {
   ok: boolean;
   model: string | null;
   error: string | null;
-  tools: boolean | null;
 };
