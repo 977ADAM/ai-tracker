@@ -20,22 +20,22 @@ def test_the_lifespan_closes_every_background_worker():
         async def close(self) -> None:
             self.closed += 1
 
-    runs, measurements, search = Closer(), Closer(), Closer()
+    measurements, search = Closer(), Closer()
     application = SimpleNamespace(
         state=SimpleNamespace(
             settings=SimpleNamespace(config_dir="/tmp/ai-tracker-test"),
             container=SimpleNamespace(
-                runs=runs, measurements=measurements, search=search, search_client=None,
+                measurements=measurements, search=search, search_client=None,
             ),
         ),
     )
 
     async def run() -> None:
         async with lifespan(application):
-            assert runs.closed == 0
+            assert measurements.closed == 0
 
     asyncio.run(run())
-    assert (runs.closed, measurements.closed, search.closed) == (1, 1, 1)
+    assert (measurements.closed, search.closed) == (1, 1)
 
 
 def test_the_module_level_app_is_ready_for_uvicorn():

@@ -46,7 +46,6 @@ async def lifespan(application: FastAPI):
     log.info("ИИ-трекинг API запущен: настройки подключений в %s", settings.config_dir)
     yield
     await container.measurements.close()
-    await container.runs.close()
     await container.search.close()
     if container.search_client is not None:
         await container.search_client.aclose()

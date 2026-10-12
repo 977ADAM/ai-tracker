@@ -60,3 +60,7 @@ def test_the_routers_get_the_service_their_alias_names():
     }
 
     assert set(fields.values()) <= set(container)
+
+
+def test_the_container_drops_the_retired_services():
+    assert {"checks", "runs", "form"}.isdisjoint(deps.Container.__dataclass_fields__)

@@ -6,8 +6,7 @@ whole object graph of the application can be assembled — and replaced in tests
 without starting a server.
 
 The application is an AI tracker: a company is one project, and every durable
-row (a measurement snapshot, a brand-check run) belongs to that project in one
-PostgreSQL database.
+row (a measurement snapshot) belongs to that project in one PostgreSQL database.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from app.core.config import Settings
 from app.db.connections import ConnectionRepository
 from app.db.measurements import MeasurementRepository
 from app.db.projects import ProjectRepository
-from app.db.runs import RunRepository
 from app.db.search_settings import SearchSettingsRepository
 from app.db.secrets import KeyringSecrets, SecretStore
 from app.db.seo_settings import SeoSettingsRepository
@@ -29,15 +27,12 @@ from app.domain.providers import ProviderFactory
 from app.domain.search import SearchGateway
 from app.integrations.factory import build_provider
 from app.integrations.seo_answer import build_seo_answer_provider
-from app.service.checks import CheckService
 from app.service.config import ConfigService
 from app.service.connections import ConnectionService
-from app.service.form import FormService
 from app.service.measurements import MeasurementService
 from app.service.project_generation import ProjectGenerationService
 from app.service.projects import ProjectService
 from app.service.provider_settings import ProviderSettingsService
-from app.service.runs import RunService
 from app.service.search import SearchService
 from app.service.search_settings import SearchSettingsService
 from app.service.seo_settings import SeoSettingsService
@@ -53,12 +48,9 @@ class Container:
     settings: Settings
     repository: ConnectionRepository
     connections: ConnectionService
-    checks: CheckService
-    form: FormService
     provider_settings: ProviderSettingsService
     config: ConfigService
     search: SearchService
-    runs: RunService
     search_settings: SearchSettingsService
     search_client: httpx.AsyncClient
     seo_settings: SeoSettingsService
@@ -103,9 +95,6 @@ def build_container(
     factory = provider_factory or (lambda connection, key: build_provider(connection, key, settings))
     # One PostgreSQL database holds every durable row. Its schema is created and
     # changed by the Alembic CLI (`uv run alembic upgrade head`), never here.
-    run_repository = RunRepository(settings.database_url)
-    run_repository.recover_unfinished()
-    checks = CheckService(connections, factory)
     search = SearchService(None)
     search_settings = SearchSettingsService(
         search_settings_repository, search, search_client, gateway_override=search_gateway,
@@ -125,7 +114,6 @@ def build_container(
         # next measurement or generation request.
         seo_settings_service = SeoSettingsService(seo_settings_repository, search_client)
 
-    form = FormService(connections)
     project_repository = ProjectRepository(settings.database_url)
     measurement_repository = MeasurementRepository(settings.database_url)
     measurement_repository.recover_unfinished()
@@ -139,12 +127,9 @@ def build_container(
         settings=settings,
         repository=repository,
         connections=connections,
-        checks=checks,
-        form=form,
         provider_settings=ProviderSettingsService(repository),
         config=ConfigService(Path(settings.config_dir)),
         search=search,
-        runs=RunService(run_repository, checks, search),
         search_settings=search_settings,
         search_client=search_client,
         seo_settings=seo_settings_service,
