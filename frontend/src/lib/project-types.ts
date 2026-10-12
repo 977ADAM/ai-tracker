@@ -125,6 +125,7 @@ export type ModelRow = {
   connection_id: string;
   query: string;
   category: string | null;
+  group?: string | null;
   provider_name: string;
   status: string;
   answer: string | null;
