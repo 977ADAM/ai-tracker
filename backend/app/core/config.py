@@ -26,7 +26,7 @@ DEFAULT_ALLOWED_HOSTS = ("localhost", "127.0.0.1")
 ALLOWED_HOSTS_VARIABLE = "AI_TRACKER_ALLOWED_HOSTS"
 
 # `.env` lives in the repository root, one level above `backend/`.
-ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 # Yandex search credentials. The prefixed names are the documented ones; the
 # short legacy names keep working for an existing local `.env`.
