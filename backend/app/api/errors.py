@@ -14,7 +14,6 @@ from app.core.errors import (
     ConfigurationError,
     RunConflict,
     RunNotFound,
-    SearchJobNotFound,
     StorageError,
     ValidationError,
 )
@@ -26,7 +25,6 @@ STATUS_BY_ERROR: tuple[tuple[type[AppError], int], ...] = (
     (ValidationError, 400),
     (ConfigurationError, 400),
     (StorageError, 503),
-    (SearchJobNotFound, 404),
     (RunNotFound, 404),
     (ChatNotFound, 404),
     (RunConflict, 409),

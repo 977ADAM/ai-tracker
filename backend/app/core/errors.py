@@ -28,10 +28,6 @@ class ProviderError(AppError):
     """A model provider call failed in a way that is safe to report."""
 
 
-class SearchJobNotFound(AppError):
-    """A search job ID is unknown or its result is no longer retained."""
-
-
 class RunNotFound(AppError):
     """A saved run ID is unknown or was deleted."""
 

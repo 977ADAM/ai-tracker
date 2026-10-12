@@ -197,9 +197,8 @@ def make_client(
         client_options: dict[str, object] | None = None,
         **overrides: object,
     ) -> TestClient:
-        # The container is built once, exactly like `app.main` builds it at
-        # import: the search service keeps job state in memory, so every request
-        # of one client must reach the same service.
+        # The container is built once per client, exactly like `app.main` builds
+        # it at import, so every request of one client reaches the same services.
         container = build_container(settings, secrets=secrets, **overrides)
         application.dependency_overrides[get_container] = lambda: container
         return TestClient(application, base_url=TEST_BASE_URL, **(client_options or {}))
