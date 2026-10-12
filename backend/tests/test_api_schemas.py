@@ -7,7 +7,7 @@ and break the browser BFF. These tests pin both directions.
 
 from __future__ import annotations
 
-from app.api.schemas import CheckResponse, FormResponse, ProviderResponse
+from app.api.schemas import ProviderResponse
 from tests.fakes import ENDPOINT, ProviderFactorySpy
 
 CUSTOM_BODY = {"name": "Тест", "kind": "openai", "endpoint": ENDPOINT, "model": "m", "api_key": "k"}
@@ -18,8 +18,11 @@ BROWSER_PROVIDER_FIELDS = {
     "editable_fields", "can_reset", "can_delete",
     "status_label", "delete_label", "delete_prompt", "delete_success",
 }
-BROWSER_FORM_FIELDS = {"limits", "new_provider_fields", "default_provider_ids"}
-BROWSER_CHECK_FIELDS = {"brand", "domain", "checks", "summary", "rows"}
+INVALID_PROJECT_BODY = {
+    "brand": "Ромашка",
+    "site_url": "https://example.com",
+    "queries": "не список",
+}
 
 
 def test_provider_payload_carries_exactly_the_documented_fields(client):
@@ -45,51 +48,22 @@ def test_a_provider_payload_carries_every_declared_key(client):
     assert providers[0]["endpoint"] == ENDPOINT
 
 
-def test_form_payload_carries_exactly_the_documented_fields(client):
-    form = client.get("/api/form").json()
-
-    assert BROWSER_FORM_FIELDS <= set(form)
-    assert set(form) == set(FormResponse.model_fields)
-    assert set(form["limits"]) == set(FormResponse.model_fields["limits"].annotation.model_fields)
-
-
-def test_check_payload_carries_exactly_the_documented_fields(make_client):
-    client = make_client(provider_factory=ProviderFactorySpy())
-    connection_id = client.post("/api/providers", json=CUSTOM_BODY).json()["id"]
-
-    report = client.post(
-        "/api/check",
-        json={"brand": "Ромашка", "domain": "example.ru", "prompts": ["вопрос"], "provider_ids": [connection_id]},
-    ).json()
-
-    assert set(report) == set(CheckResponse.model_fields)
-    assert set(report["summary"]) == set(CheckResponse.model_fields["summary"].annotation.model_fields)
-    assert set(report["checks"][0]) == {"provider_id", "provider_name", "summary", "results"}
-    assert set(report["checks"][0]["summary"]) == {"successful", "failed", "mentioned"}
-    assert set(report["checks"][0]["results"][0]) == {"prompt", "answer", "mentioned", "error", "status"}
-    assert set(report["rows"][0]) == {"prompt", "answer", "mentioned", "error", "status", "provider_name"}
-    assert BROWSER_CHECK_FIELDS <= set(report)
-
-
 def test_a_wrong_typed_body_is_rejected_as_400_not_422(client):
-    response = client.post(
-        "/api/check",
-        json={"brand": "Ромашка", "prompts": "не список", "provider_ids": ["openai"]},
-    )
+    response = client.post("/api/projects", json=INVALID_PROJECT_BODY)
 
     assert response.status_code == 400
-    assert response.json() == {"detail": "Некорректное поле «prompts»"}
+    assert response.json() == {"detail": "Некорректное поле «queries»"}
 
 
 def test_a_missing_required_field_is_rejected_as_400(client):
-    response = client.post("/api/check", json={"prompts": ["вопрос"], "provider_ids": ["openai"]})
+    response = client.post("/api/projects", json={"site_url": "https://example.com"})
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Некорректное поле «brand»"}
 
 
 def test_a_missing_body_is_rejected_as_400(client):
-    response = client.post("/api/check")
+    response = client.post("/api/projects")
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Некорректный запрос"}
@@ -100,7 +74,7 @@ def test_a_rejected_schema_never_reaches_the_service(make_client):
     client = make_client(provider_factory=spy)
     client.post("/api/providers", json=CUSTOM_BODY)
 
-    client.post("/api/check", json={"prompts": ["вопрос"], "provider_ids": ["openai"]})
+    client.post("/api/projects", json=INVALID_PROJECT_BODY)
 
     assert spy.keys == []
 
@@ -112,11 +86,9 @@ def test_openapi_documents_every_operation(client):
         "/api/projects", "/api/projects/{id}", "/api/projects/{id}/measurements", "/api/projects/{id}/generate", "/api/projects/import-prompts",
         "/api/measurements/{id}", "/api/measurements/{id}/rows", "/api/measurements/{id}/cancel",
         "/api/config",
-        "/api/form", "/api/providers", "/api/providers/{connection_id}", "/api/check",
+        "/api/providers", "/api/providers/{connection_id}",
         "/api/providers/settings", "/api/providers/settings/{group_id}",
-        "/api/search", "/api/search/regions", "/api/search/{job_id}",
         "/api/search/settings", "/api/search/settings/credentials",
-        "/api/runs", "/api/runs/{run_id}", "/api/runs/{run_id}/export.csv",
         "/api/seo/settings", "/api/seo/settings/credentials", "/api/seo/settings/test",
     }
     for path, operations in spec["paths"].items():
@@ -125,13 +97,12 @@ def test_openapi_documents_every_operation(client):
             # 202 for a job that keeps running in the background.
             success = [status for status in ("200", "201", "202", "204") if status in operation["responses"]]
             assert len(success) == 1, (method, path)
-            if success[0] != "204" and not path.endswith("/export.csv"):
+            if success[0] != "204":
                 assert operation["responses"][success[0]]["content"]["application/json"]["schema"], (method, path)
             # Schema violations answer 400, so an advertised 422 would be a lie.
             assert "422" not in operation["responses"], (method, path)
 
-    for name in ("CheckRequest", "CheckResponse", "ProviderWriteRequest", "ProviderResponse", "FormResponse", "ErrorResponse",
-                 "RunRequest", "RunCreatedResponse", "RunSnapshotResponse", "RunHistoryPage",
+    for name in ("ProviderWriteRequest", "ProviderResponse", "ErrorResponse",
                  "SearchSettingsWriteRequest", "SearchSettingsResponse", "YandexSettingsResponse",
                  "SeoSettingsWriteRequest", "SeoSettingsResponse", "SeoSettingsTestResponse"):
         assert name in spec["components"]["schemas"]

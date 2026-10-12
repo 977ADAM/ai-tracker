@@ -17,13 +17,9 @@ from app.api.deps import dependencies
 
 DEPENDENCIES = {
     "ConnectionServiceDep": "get_connection_service",
-    "CheckServiceDep": "get_check_service",
-    "FormServiceDep": "get_form_service",
     "ProviderSettingsServiceDep": "get_provider_settings_service",
     "ConfigServiceDep": "get_config_service",
-    "SearchServiceDep": "get_search_service",
     "SearchSettingsServiceDep": "get_search_settings_service",
-    "RunServiceDep": "get_run_service",
     "SeoSettingsServiceDep": "get_seo_settings_service",
 }
 
@@ -57,13 +53,9 @@ def test_the_routers_get_the_service_their_alias_names():
     container = deps.Container.__dataclass_fields__
     fields = {
         "ConnectionServiceDep": "connections",
-        "CheckServiceDep": "checks",
-        "FormServiceDep": "form",
         "ProviderSettingsServiceDep": "provider_settings",
         "ConfigServiceDep": "config",
-        "SearchServiceDep": "search",
         "SearchSettingsServiceDep": "search_settings",
-        "RunServiceDep": "runs",
         "SeoSettingsServiceDep": "seo_settings",
     }
 

@@ -71,9 +71,8 @@ def test_delete_noop_reports_no_environment_sources(make_client):
         }}
 
 
-def _assert_model_configuration_and_model_only_run_work(client, database_dsn):
-    import time
-
+def _assert_model_configuration_and_project_storage_work(client, database_dsn):
+    """Broken search metadata must not block the rest of the application."""
     from app.db.projects import ProjectRepository
     from tests.fakes import ENDPOINT
 
@@ -82,25 +81,13 @@ def _assert_model_configuration_and_model_only_run_work(client, database_dsn):
         "model": "m", "api_key": "model-key",
     })
     assert created.status_code == 200
-    provider_id = created.json()["id"]
-    project = ProjectRepository(database_dsn).create({"domain": "example.ru"})
-    response = client.post("/api/runs", json={
-        "project_id": project["id"],
-        "brand": "Ромашка", "domain": "example.ru", "prompts_text": "цветы",
-        "provider_ids": [provider_id], "regions": [],
-    })
-    assert response.status_code == 202
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        snapshot = client.get(f"/api/runs/{response.json()['id']}").json()
-        if snapshot["status"] != "pending":
-            break
-        time.sleep(0.01)
-    else:
-        raise AssertionError("model-only run did not finish")
-    assert snapshot["status"] == "done"
-    assert snapshot["models"][0]["status"] == "mentioned"
-    assert snapshot["search"] == []
+    assert client.get("/api/providers").status_code == 200
+    project = ProjectRepository(database_dsn).create(
+        {"site_url": "https://example.ru", "brand": "Ромашка"}
+    )
+    history = client.get(f"/api/projects/{project['id']}/measurements")
+    assert history.status_code == 200
+    assert history.json()["items"] == []
 
 
 @pytest.mark.parametrize("broken_file", ["malformed", "unreadable"])
@@ -128,10 +115,7 @@ def test_bad_search_metadata_does_not_block_model_configuration_or_runs(
         assert failure.status_code == 503
         assert failure.json() == {"detail": "Не удалось прочитать настройки поиска"}
         assert str(config_dir) not in failure.text
-        assert client.post("/api/search", json={
-            "domain": "example.ru", "prompts_text": "цветы", "regions": [1],
-        }).status_code == 400
-        _assert_model_configuration_and_model_only_run_work(client, database_dsn)
+        _assert_model_configuration_and_project_storage_work(client, database_dsn)
         if path.is_dir():
             path.rmdir()
         path.write_text('{"enabled": true}', encoding="utf-8")
@@ -166,7 +150,7 @@ def test_search_keyring_read_failure_does_not_block_models_and_recovers(
         assert failure.status_code == 400
         assert failure.json() == {"detail": "Системное хранилище ключей недоступно"}
         assert "private keyring path" not in failure.text
-        _assert_model_configuration_and_model_only_run_work(client, database_dsn)
+        _assert_model_configuration_and_project_storage_work(client, database_dsn)
         secrets.get_password = original_get
         restored = client.put("/api/search/settings", json={
             "api_key": "search-key", "folder_id": "search-folder",

@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_check_service
+from app.api.deps import get_provider_settings_service
 from app.main import API_PREFIX, TITLE, app, container, lifespan, settings
 
 
@@ -45,8 +46,21 @@ def test_the_module_level_app_is_ready_for_uvicorn():
 
 def test_the_api_lives_under_a_prefix(client):
     assert API_PREFIX == "/api"
-    assert client.get("/api/form").status_code == 200
+    assert client.get("/api/providers").status_code == 200
     assert client.get("/form").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/check", "/api/form", "/api/runs", "/api/search/regions"],
+)
+def test_the_retired_routes_are_gone(client, path):
+    assert client.get(path).status_code == 404
+
+
+def test_the_search_settings_routes_survive_the_cleanup(client):
+    assert client.get("/api/search/settings").status_code == 200
+    assert client.delete("/api/search/settings/credentials").status_code == 200
 
 
 def test_the_service_exposes_api_routes_only(client):
@@ -66,26 +80,21 @@ def test_a_loopback_host_is_allowed(client):
 
 
 def test_an_application_error_is_reported_as_one_string(client):
-    response = client.post(
-        "/api/check",
-        json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["нет такого"]},
-    )
+    response = client.post("/api/providers/settings", json={})
+
     assert response.status_code == 400
-    assert response.json() == {"detail": "Выбрано неизвестное подключение"}
+    assert response.json() == {"detail": "Укажите название до 100 символов"}
 
 
 def test_an_unexpected_error_stays_json_shaped_and_silent(make_client):
     class Broken:
-        def run(self, _payload: object) -> dict:
+        def save(self, _payload: object) -> dict:
             raise RuntimeError("private traceback")
 
     client = make_client(client_options={"raise_server_exceptions": False})
-    app.dependency_overrides[get_check_service] = lambda: Broken()
+    app.dependency_overrides[get_provider_settings_service] = lambda: Broken()
 
-    response = client.post(
-        "/api/check",
-        json={"brand": "Ромашка", "prompts": ["вопрос"], "provider_ids": ["x"]},
-    )
+    response = client.post("/api/providers/settings", json={})
 
     assert response.status_code == 500
     assert response.json() == {"detail": "Внутренняя ошибка сервиса"}
