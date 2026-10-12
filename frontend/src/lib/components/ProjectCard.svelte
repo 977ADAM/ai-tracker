@@ -50,7 +50,7 @@
   <header>
     <div class="flex items-center justify-between gap-2">
       <a
-        href={`/projects/${project.id}`}
+        href={`${base}/projects/${project.id}`}
         class="min-w-0 flex-1 text-[22px] font-semibold tracking-tight text-slate-700 hover:text-accent"
         title={project.name}><h2 class="truncate">{project.name}</h2></a
       >
