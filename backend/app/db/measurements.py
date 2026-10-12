@@ -24,8 +24,9 @@ from app.domain.seo_answer import answer_from_dict
 class MeasurementRepository(ProjectStorage):
     @staticmethod
     def require(db, id):
+        lock = " FOR UPDATE" if db.writing else ""
         row = db.execute(
-            "SELECT * FROM project_measurements WHERE id=?", (id,)
+            "SELECT * FROM project_measurements WHERE id=?" + lock, (id,)
         ).fetchone()
         if row is None:
             raise RunNotFound("Замер не найден")
@@ -40,7 +41,7 @@ class MeasurementRepository(ProjectStorage):
         try:
             with self.connection(True) as db:
                 if not db.execute(
-                    "SELECT 1 FROM projects WHERE id=?", (project_id,)
+                    "SELECT 1 FROM projects WHERE id=? FOR UPDATE", (project_id,)
                 ).fetchone():
                     raise RunNotFound("Проект не найден")
                 if db.execute(
