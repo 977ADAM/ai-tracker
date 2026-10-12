@@ -289,7 +289,7 @@
       class="rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
       >{saving ? 'Сохраняем…' : initial ? 'Сохранить проект' : 'Создать проект'}</button
     ><a
-      href={initial ? `/projects/${initial.id}` : '/'}
+      href={initial ? resolve('/projects/[id]', { id: initial.id }) : resolve('/')}
       class="rounded-xl border border-line px-5 py-3 text-sm">Отмена</a
     >
   </div>
