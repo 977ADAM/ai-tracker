@@ -82,6 +82,11 @@ class ProjectRepository(ProjectStorage):
 
     def delete(self, id: str):
         with self.connection(True) as db:
+            # Serialize with measurement creation before checking active work.
+            if not db.execute(
+                "SELECT 1 FROM projects WHERE id=? FOR UPDATE", (id,)
+            ).fetchone():
+                raise RunNotFound("Проект не найден")
             if db.execute(
                 "SELECT 1 FROM project_measurements WHERE project_id=? AND status='running'",
                 (id,),
