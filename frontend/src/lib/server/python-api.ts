@@ -50,11 +50,6 @@ function requiredBoolean(value: unknown): boolean {
   return value;
 }
 
-function optionalBoolean(value: unknown): boolean | null {
-  if (value === null || value === undefined) return null;
-  return requiredBoolean(value);
-}
-
 /** Hosts the BFF may call without being told: the API of a local run. */
 const DEFAULT_API_HOSTS = ['127.0.0.1', 'localhost'];
 
@@ -260,8 +255,6 @@ export function publicSeoSettingsTest(value: unknown): SeoSettingsTest {
     ok: requiredBoolean(item.ok),
     model: optionalString(item.model),
     error: optionalString(item.error),
-    // Omitted when the probe failed or the model cannot call tools at all.
-    tools: optionalBoolean(item.tools),
   };
 }
 
