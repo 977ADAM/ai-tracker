@@ -1,36 +1,3 @@
-"""PostgreSQL access for every durable row of the application.
-
-The application used to keep its rows in SQLite files beside the JSON settings.
-All durable rows — projects, their measurements, and the saved runs — now live
-in one PostgreSQL database addressed by `AI_TRACKER_DATABASE_URL`, which
-defaults to the local Postgres.app server.
-
-This module is the only place that talks to the driver. It gives the
-repositories a small DB-API-like surface:
-
-* `connect()` borrows a connection from the pool of that database and returns
-  rows as `Row` objects, addressable both by column name and by position,
-  exactly as the repositories and their callers use them;
-* `pool()` keeps one `psycopg_pool.ConnectionPool` per database URL for the
-  whole process, so an operation does not pay for a new connection, and
-  `close_pools()` shuts them down with the application;
-* `?` placeholders are translated to the driver's `%s`, so a statement stays
-  readable next to the PostgreSQL schema in `backend/migrations/`, and literals
-  that contain `%` keep working;
-* `table_columns()` wraps `information_schema` where the code used
-  `PRAGMA table_info`;
-* `safe_target()` names a database in a log message as `host:port/database`,
-  because the DSN itself carries credentials;
-* the driver's error classes are re-exported, so a repository catches one
-  vocabulary (`Error`, `IntegrityError`, `OperationalError`) regardless of the
-  driver below it.
-
-A connection is in a transaction from its first statement until `commit()` or
-`rollback()`; there is no `BEGIN IMMEDIATE`, because PostgreSQL takes the locks
-a statement needs. Callers that read and then write the same row take the row
-lock explicitly with `SELECT ... FOR UPDATE`.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -52,12 +19,8 @@ OperationalError = psycopg.OperationalError
 UniqueViolation = psycopg_errors.UniqueViolation
 ForeignKeyViolation = psycopg_errors.ForeignKeyViolation
 
-# One permanent connection is always ready; the pool only grows when concurrent
-# work needs it. The ceiling is per process, so a deployment multiplies it by its
-# workers and replicas and keeps the total under the server's `max_connections`.
 POOL_MIN_SIZE = 1
 DEFAULT_POOL_MAX_SIZE = 8
-# How long a caller waits for a free connection before the operation fails.
 POOL_TIMEOUT_SECONDS = 5.0
 POOL_MAX_SIZE_VARIABLE = "AI_TRACKER_DB_POOL_MAX_SIZE"
 
@@ -66,8 +29,6 @@ LOGGER = logging.getLogger(__name__)
 _POOLS: dict[str, psycopg_pool.ConnectionPool] = {}
 _POOLS_LOCK = threading.Lock()
 
-# Statements that only make sense to SQLite. They are accepted and ignored so a
-# caller that still carries one does not have to know which engine runs below.
 _IGNORED_PREFIXES = ("begin", "commit", "rollback", "pragma", "vacuum", "analyze")
 _PLACEHOLDER = "?"
 
