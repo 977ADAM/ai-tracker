@@ -23,7 +23,9 @@ from sqlalchemy import create_engine, pool
 # The backend root must be importable when Alembic is started from anywhere.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.config import DATABASE_URL_VARIABLE, DEFAULT_DATABASE_URL
+from app.core.config import DATABASE_URL_VARIABLE, DEFAULT_DATABASE_URL, load_env_file
+
+load_env_file()
 
 config = context.config
 
