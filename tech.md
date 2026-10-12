@@ -108,7 +108,7 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 | API | `backend/app/api` | Роутеры FastAPI, pydantic-схемы, DI-контейнер, обработчики ошибок |
 | Сервисы | `backend/app/service` | Сценарии: замеры проектов, генерация, настройки подключений, поиска и служебной LLM |
 | Домен | `backend/app/domain` | Чистые правила и модели без I/O: валидация входа, проекты, метрики ответов, матчинг, промпты |
-| Инфраструктура | `backend/app/db`, `backend/app/integrations` | PostgreSQL (подключение в `backend/app/core/database.py`), JSON-настройки, keyring; адаптеры Яндекса, моделей и обхода сайта |
+| Инфраструктура | `backend/app/db`, `backend/app/integrations` | PostgreSQL (подключение в `backend/app/core/database.py`), JSON-настройки, keyring; адаптеры Яндекса и моделей |
 
 - Точка входа — [main.py](backend/app/main.py): приложение и контейнер собираются на импорте,
   `Settings.from_env()` читает окружение и корневой `.env`. Тесты подменяют `get_container`.
@@ -178,7 +178,7 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 | `DELETE /api/search/settings/credentials` | Сбросить учётные данные Яндекса |
 | `GET`, `PUT /api/seo/settings` | Настройки служебной LLM |
 | `DELETE /api/seo/settings/credentials` | Сбросить ключ служебной LLM |
-| `POST /api/seo/settings/test` | Проверить LLM и поддержку вызова инструментов |
+| `POST /api/seo/settings/test` | Проверить служебную LLM одним чат-вызовом |
 
 Замер (`GET /api/measurements/{id}`) отдаёт агрегаты: доля ответов подключения, где модель
 сослалась на домен сайта; доли `first/early/late/absent` по абзацу первого упоминания бренда
@@ -207,7 +207,7 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 в сообщениях только `host:port/база` — логин, пароль и `options` не попадают в лог.
 
 `projects` — корневая таблица, и каждая компания ведётся отдельным проектом:
-`project_measurements` и `runs` ссылаются на неё через
+`project_measurements` ссылается на неё через
 `project_id NOT NULL ... ON DELETE CASCADE`.
 
 Каталог данных — `AI_TRACKER_CONFIG_DIR`, по умолчанию `~/.config/ai-tracker`
@@ -256,8 +256,8 @@ SEO-анализ сайта и конкурентов, чат и агентны�
   их применяет `migrate`, и backend зависит от её успешного завершения.
 - Backend-тесты: `cd backend && uv run pytest` — модули в [backend/tests](backend/tests) по слоям
   (api, db, domain, integrations, service); PostgreSQL в тестах живой (случайная схема,
-  мигрированная Alembic), а внешние HTTP-вызовы — модели, Яндекс, обход сайтов и
-  служебная LLM — замоканы фикстурами, поэтому платных запросов нет.
+  мигрированная Alembic), а внешние HTTP-вызовы — модели, Яндекс и служебная LLM —
+  замоканы фикстурами, поэтому платных запросов нет.
 - Frontend-тесты: `cd frontend && npx vitest run` — тесты лежат рядом с кодом (`*.test.ts`);
   отдельного скрипта `test` в `package.json` нет. Форматирование и правила заданы
   `frontend/.prettierrc.json` и `frontend/eslint.config.js`, команды — `npm run format`,
@@ -275,7 +275,7 @@ SEO-анализ сайта и конкурентов, чат и агентны�
 | [backend/app/core/database.py](backend/app/core/database.py) | Подключение к PostgreSQL: строки `Row`, транзакции, ошибки драйвера |
 | [backend/migrations](backend/migrations) | Миграции Alembic: вся схема PostgreSQL, `projects` — корневая таблица |
 | [backend/app/db](backend/app/db) | Репозитории PostgreSQL, JSON-настройки, keyring |
-| [backend/app/integrations](backend/app/integrations) | Адаптеры: OpenAI-совместимый чат моделей, служебная LLM, Яндекс, обход сайта |
+| [backend/app/integrations](backend/app/integrations) | Адаптеры: OpenAI-совместимый чат моделей, служебная LLM и Яндекс |
 | [backend/tests](backend/tests) | Модульные и API-тесты pytest |
 | [frontend/src/routes](frontend/src/routes) | Страницы и BFF-роуты `api/**/+server.ts` |
 | [frontend/src/lib](frontend/src/lib) | Компоненты Svelte, типы, клиентская валидация, серверный прокси |
