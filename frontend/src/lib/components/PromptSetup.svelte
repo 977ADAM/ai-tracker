@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { base } from '$app/paths';
   import type { ProjectQuery } from '$lib/project-types';
   import { parseQueryList, readFileBase64 } from '$lib/project-setup';
   import { projectRequest } from '$lib/project-client';
@@ -211,10 +212,12 @@
       <p>Загрузите TXT, CSV или XLSX, каждый промпт с новой строки.</p>
       <p>Для групп используйте CSV или XLSX с колонками «Промпт» и «Группа». До 256 КБ.</p>
       <p class="mt-1">
-        Примеры файлов: <a href="/templates/prompts.txt" download class="ml-2 text-blue-600"
-          >▧ txt</a
-        ><a href="/templates/prompts.csv" download class="ml-2 text-blue-600">▧ csv</a><a
-          href="/templates/prompts.xlsx"
+        Примеры файлов: <a
+          href={`${base}/templates/prompts.txt`}
+          download
+          class="ml-2 text-blue-600">▧ txt</a
+        ><a href={`${base}/templates/prompts.csv`} download class="ml-2 text-blue-600">▧ csv</a><a
+          href={`${base}/templates/prompts.xlsx`}
           download
           class="ml-2 text-blue-600">▧ xlsx</a
         >
