@@ -1,49 +1,19 @@
-"""Host, address, and limit rules of the SSRF-safe public site fetcher.
+"""Host rules for a project site and for cited URLs.
 
-The SEO flow enters one public HTTP(S) URL and crawls only that host and its
-subdomains, so the host rules live here and are imported by the request
-normalizer (Task 3) and the orchestrator (Task 5) instead of being repeated.
-Nothing in this module performs I/O: the adapter resolves and connects.
+Nothing here performs I/O. `canonical_host` and `same_site_host` compare one
+spelling of a site, including its subdomains. `is_public_address` refuses a
+literal that is not a public IP, so a citation cannot point at a private host.
 """
 
 from __future__ import annotations
 
 import ipaddress
-from dataclasses import dataclass
-from typing import Protocol
 
 from app.core.errors import ValidationError
 from app.domain.search import INVALID_SITE, normalize_search_host
 
-# Crawl bounds: at most five pages of the entered host, 1 MiB per response, five
-# redirects per request, and 60 seconds for the whole crawl including robots.txt.
-MAX_FETCH_PAGES = 5
-MAX_FETCH_BYTES = 1024 * 1024
-FETCH_TOTAL_TIMEOUT = 60.0
-FETCH_CONNECT_TIMEOUT = 10.0
-MAX_FETCH_REDIRECTS = 5
-
-# Page text is sent to the configured service LLM, so every page is cut to a
-# fixed length: five pages must not turn into tens of megabytes of prompt text.
-MAX_PAGE_TEXT_CHARS = 20_000
-
 LOCAL_NAMES = frozenset({"localhost", "local", "localdomain"})
 LOCAL_NAME_SUFFIXES = (".localhost", ".local", ".localdomain", ".internal", ".home.arpa")
-
-
-@dataclass(frozen=True)
-class FetchedPage:
-    """One crawled page: its URL, HTML title, and visible text."""
-
-    url: str
-    title: str
-    text: str
-
-
-class SiteFetcher(Protocol):
-    """Outbound port: read the public pages of one host without network surprises."""
-
-    async def fetch(self, host: str) -> tuple[FetchedPage, ...]: ...
 
 
 def canonical_host(value: object) -> str:
