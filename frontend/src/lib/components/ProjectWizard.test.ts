@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProjectWizard from './ProjectWizard.svelte';
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
+vi.mock('$app/paths', () => ({ base: '', resolve: (path: string) => path }));
 const project = {
   id: 'p1',
   name: 'Додо',
@@ -61,4 +61,83 @@ it('uses save labels when configuring an existing project', () => {
   });
   expect(screen.getByRole('button', { name: 'Сохранить проект ›' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '↻ Сохранить и запустить проверку' })).toBeTruthy();
+});
+
+it('prevents manual competitor edits while generation can replace the list', async () => {
+  let completeSearch!: (value: Response) => void;
+  vi.stubGlobal('fetch', async (path: string, init: RequestInit) => {
+    if (!path.endsWith('/generate')) return new Response(JSON.stringify(project));
+    const { kind } = JSON.parse(String(init.body));
+    if (kind === 'queries')
+      return new Response(
+        JSON.stringify({
+          kind,
+          proposal: { queries: [{ text: 'Pizza?', category: null }] },
+          sources: [],
+        }),
+      );
+    return new Promise<Response>((resolve) => {
+      completeSearch = resolve;
+    });
+  });
+  const { fireEvent } = await import('@testing-library/svelte');
+  render(ProjectWizard, { initial: project, providers: [] });
+  await waitFor(() =>
+    expect(screen.getByLabelText('Промпт 1').getAttribute('aria-label')).toBe('Промпт 1'),
+  );
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: '✓ Далее' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  await fireEvent.click(screen.getByRole('button', { name: '✓ Далее' }));
+  await waitFor(() => expect(completeSearch).toBeTypeOf('function'));
+  const input = screen.getByLabelText('Бренд или сайт конкурента') as HTMLInputElement;
+  try {
+    expect(input.disabled).toBe(true);
+  } finally {
+    completeSearch(
+      new Response(
+        JSON.stringify({ kind: 'competitors', proposal: { competitors: [] }, sources: [] }),
+      ),
+    );
+  }
+  await waitFor(() => expect(input.disabled).toBe(false));
+});
+
+it('prevents deleting competitors while regeneration can restore them', async () => {
+  let completeSearch!: (value: Response) => void;
+  vi.stubGlobal('fetch', async (path: string) => {
+    if (!path.endsWith('/generate')) return new Response(JSON.stringify(project));
+    return new Promise<Response>((resolve) => {
+      completeSearch = resolve;
+    });
+  });
+  const { fireEvent } = await import('@testing-library/svelte');
+  render(ProjectWizard, {
+    initial: {
+      ...project,
+      queries: [{ text: 'Pizza?', category: null }],
+      connection_ids: ['m1'],
+      competitors: [{ brand: 'Pizza Hut', site_url: '' }],
+    },
+    providers: [],
+  });
+  await fireEvent.click(screen.getByRole('button', { name: /Конкуренты/ }));
+  await fireEvent.click(screen.getByRole('button', { name: '✧ Сгенерировать' }));
+  await waitFor(() => expect(completeSearch).toBeTypeOf('function'));
+  try {
+    expect(
+      (screen.getByRole('button', { name: 'Удалить конкурента 1' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  } finally {
+    completeSearch(
+      new Response(
+        JSON.stringify({ kind: 'competitors', proposal: { competitors: [] }, sources: [] }),
+      ),
+    );
+  }
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: 'Удалить конкурента 1' })).toBeNull(),
+  );
 });
