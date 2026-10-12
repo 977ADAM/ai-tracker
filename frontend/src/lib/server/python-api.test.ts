@@ -511,18 +511,15 @@ describe('SEO BFF', () => {
       ok: true,
       model: 'seo-model',
       error: null,
-      tools: true,
     });
-    // `tools` is omitted when the probe failed or the model cannot call tools.
     expect(publicSeoSettingsTest({ ok: true, model: 'seo-model' })).toEqual({
       ok: true,
       model: 'seo-model',
       error: null,
-      tools: null,
     });
     expect(
       publicSeoSettingsTest({ ok: false, error: 'Модель недоступна', api_key: 'secret' }),
-    ).toEqual({ ok: false, model: null, error: 'Модель недоступна', tools: null });
+    ).toEqual({ ok: false, model: null, error: 'Модель недоступна' });
     expect(() => publicSeoSettingsTest({ ok: 'yes' })).toThrow();
   });
 
@@ -624,7 +621,7 @@ describe('SEO BFF', () => {
     const fetchSpy = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: true, model: 'seo-model', tools: true }), {
+        new Response(JSON.stringify({ ok: true, model: 'seo-model' }), {
           headers: { 'content-type': 'application/json' },
         }),
       )
@@ -637,7 +634,7 @@ describe('SEO BFF', () => {
     const request = new Request('http://127.0.0.1:5173/api/seo/settings/test', { method: 'POST' });
     const ok = await proxyJson(request, '/api/seo/settings/test', 'POST');
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ ok: true, model: 'seo-model', error: null, tools: true });
+    expect(await ok.json()).toEqual({ ok: true, model: 'seo-model', error: null });
     expect(fetchSpy).toHaveBeenLastCalledWith(
       'http://127.0.0.1:8000/api/seo/settings/test',
       expect.objectContaining({ method: 'POST', body: undefined }),
@@ -647,7 +644,6 @@ describe('SEO BFF', () => {
       ok: false,
       model: null,
       error: 'Модель недоступна',
-      tools: null,
     });
   });
 
