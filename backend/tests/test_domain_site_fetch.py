@@ -1,22 +1,11 @@
-"""Pure rules of the SSRF-safe public site fetcher: hosts, addresses, and limits."""
+"""Host and address rules used by projects, citations, and measurements."""
 
 from __future__ import annotations
 
 import pytest
 
 from app.core.errors import ValidationError
-from app.domain.site_fetch import (
-    FETCH_CONNECT_TIMEOUT,
-    FETCH_TOTAL_TIMEOUT,
-    MAX_FETCH_BYTES,
-    MAX_FETCH_PAGES,
-    MAX_FETCH_REDIRECTS,
-    MAX_PAGE_TEXT_CHARS,
-    FetchedPage,
-    canonical_host,
-    is_public_address,
-    same_site_host,
-)
+from app.domain.site_fetch import canonical_host, is_public_address, same_site_host
 
 
 def test_canonical_host_keeps_only_the_host_of_a_url():
@@ -145,17 +134,3 @@ def test_is_public_address_rejects_every_blocked_range_and_local_name(value):
 )
 def test_is_public_address_accepts_a_public_address(value):
     assert is_public_address(value) is True
-
-
-def test_the_fetch_limits_are_the_agreed_ones():
-    assert MAX_FETCH_PAGES == 5
-    assert MAX_FETCH_BYTES == 1024 * 1024
-    assert FETCH_TOTAL_TIMEOUT == 60.0
-    assert FETCH_CONNECT_TIMEOUT == 10.0
-    assert MAX_FETCH_REDIRECTS == 5
-    assert MAX_PAGE_TEXT_CHARS == 20_000
-
-
-def test_a_fetched_page_carries_its_url_title_and_text():
-    page = FetchedPage(url="https://example.ru/", title="Заголовок", text="Видимый текст")
-    assert (page.url, page.title, page.text) == ("https://example.ru/", "Заголовок", "Видимый текст")
