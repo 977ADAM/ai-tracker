@@ -9,12 +9,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: SSH Deploy
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2   
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        env:
+          DEPLOY_COMMIT: ${{ github.sha }}
+          DEPLOY_REF: ${{ github.ref }}
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.KEY }}
           port: ${{ secrets.PORT }}
           command_timeout: 15m
-          envs: GITHUB_REF_NAME
-          script:
+          envs: DEPLOY_COMMIT,DEPLOY_REF
+          script: |
+            bash -se <<'DEPLOY'
+            set -euo pipefail
+            case "$DEPLOY_REF" in
+              refs/heads/main|refs/tags/v*) ;;
+              *) echo 'Select main or a v-tag to deploy.' >&2; exit 1 ;;
+            esac
+            [[ "$DEPLOY_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+              echo 'Invalid deployment commit.' >&2
+              exit 1
+            }
+            cd /opt/ai-tracker
+            git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
+            git cat-file -e "$DEPLOY_COMMIT^{commit}"
+            git merge-base --is-ancestor "$DEPLOY_COMMIT" origin/main
+            deploy_script=$(mktemp)
+            trap 'rm -f "$deploy_script"' EXIT
+            git show "$DEPLOY_COMMIT:deploy/deploy.sh" > "$deploy_script"
+            bash "$deploy_script" "$DEPLOY_COMMIT" /opt/ai-tracker https://dev.coresmart.tech
+            DEPLOY
