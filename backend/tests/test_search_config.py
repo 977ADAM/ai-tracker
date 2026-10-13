@@ -86,8 +86,8 @@ def test_absent_seo_llm_credentials_stay_none(monkeypatch):
     assert settings.has_seo_llm_credentials is False
 
 
-def test_a_container_without_credentials_keeps_a_client_for_later_configuration(tmp_path):
-    container = build_container(Settings(config_dir=tmp_path), secrets=MemorySecrets())
+def test_a_container_without_credentials_keeps_a_client_for_later_configuration(tmp_path, database_dsn):
+    container = build_container(Settings(config_dir=tmp_path, database_url=database_dsn), secrets=MemorySecrets())
 
     try:
         assert container.search.gateway is None
@@ -99,9 +99,9 @@ def test_a_container_without_credentials_keeps_a_client_for_later_configuration(
         asyncio.run(container.search_client.aclose())
 
 
-def test_a_container_builds_the_gateway_from_credentials(tmp_path):
+def test_a_container_builds_the_gateway_from_credentials(tmp_path, database_dsn):
     container = build_container(
-        Settings(config_dir=tmp_path, yandex_search_api_key="key", yandex_search_folder_id="folder"),
+        Settings(config_dir=tmp_path, database_url=database_dsn, yandex_search_api_key="key", yandex_search_folder_id="folder"),
         secrets=MemorySecrets(),
     )
 
@@ -115,10 +115,10 @@ def test_a_container_builds_the_gateway_from_credentials(tmp_path):
             asyncio.run(container.search_client.aclose())
 
 
-def test_an_injected_gateway_wins_over_the_environment(tmp_path):
+def test_an_injected_gateway_wins_over_the_environment(tmp_path, database_dsn):
     injected = object()
     container = build_container(
-        Settings(config_dir=tmp_path, yandex_search_api_key="key", yandex_search_folder_id="folder"),
+        Settings(config_dir=tmp_path, database_url=database_dsn, yandex_search_api_key="key", yandex_search_folder_id="folder"),
         search_gateway=injected, secrets=MemorySecrets(),
     )
 
