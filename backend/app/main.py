@@ -24,9 +24,10 @@ from app.api.router import api_router
 from app.core import database
 from app.core.config import Settings, load_env_file
 from app.core.errors import AppError
+from app.version import application_version
 
 TITLE = "ИИ-трекинг API"
-VERSION = "0.1.0"
+VERSION = application_version()
 API_PREFIX = "/api"
 
 # No-op when the host application (or pytest) already configured logging.
