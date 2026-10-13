@@ -6,23 +6,9 @@ on:
 
 jobs:
   deploy:
-    needs: [release, ci]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    environment: production
-    env:
-      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '77.83.119.18' }}
-      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '65133' }}
-      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
-      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/ai-tracker' }}
-      APP_ORIGIN: ${{ vars.APP_ORIGIN || 'https://dev.coresmart.tech' }}
-      DEPLOY_COMMIT: ${{ needs.release.outputs.commit }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ needs.release.outputs.commit }}
-          persist-credentials: false
-      - name: Deploy through SSH
+      - name: SSH Deploy
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
