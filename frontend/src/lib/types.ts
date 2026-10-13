@@ -1,5 +1,6 @@
 export type ApiPath =
   | '/api/config'
+  | '/api/version'
   | '/api/providers'
   | '/api/providers/settings'
   | '/api/search/settings'
