@@ -397,6 +397,24 @@ describe('provider settings BFF', () => {
     });
   });
 
+  it('returns only the application version from Python', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ version: '0.1.0', extra: 'ignored' }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    const response = await proxyJson(
+      new Request('http://127.0.0.1:5173/api/version'),
+      '/api/version',
+      'GET',
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ version: '0.1.0' });
+  });
+
   it('projects settings list responses from Python', async () => {
     vi.stubGlobal(
       'fetch',
@@ -774,6 +792,8 @@ describe('the layout data the pages consume', () => {
               api_key_source: 'ui',
             }),
           );
+        if (String(url).endsWith('/api/version'))
+          return Promise.resolve(jsonResponse({ version: '0.1.0' }));
         return Promise.resolve(new Response('nope', { status: 500 }));
       }),
     );
@@ -786,7 +806,9 @@ describe('the layout data the pages consume', () => {
       'seoSettings',
       'seoSettingsError',
       'settingsProviders',
+      'version',
     ]);
+    expect(data.version).toBe('0.1.0');
     expect(data.providers).toEqual([]);
     expect(data.loadError).toBe('');
   });
