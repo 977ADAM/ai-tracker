@@ -1,6 +1,6 @@
 [project]
 name = "ai-tracker"
-version = "0.1.0"
+version = "0.1.1"
 description = "API проверки упоминаний бренда в ответах ИИ-моделей"
 readme = "README.md"
 authors = [
