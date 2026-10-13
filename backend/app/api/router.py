@@ -12,6 +12,7 @@ from app.api.routers import (
     providers,
     search_settings,
     seo_settings,
+    version,
 )
 
 api_router = APIRouter()
@@ -22,3 +23,4 @@ api_router.include_router(search_settings.router)
 api_router.include_router(seo_settings.router)
 api_router.include_router(projects.router)
 api_router.include_router(measurements.router)
+api_router.include_router(version.router)
