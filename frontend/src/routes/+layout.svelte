@@ -134,13 +134,18 @@
     <div
       class="mx-auto flex max-w-[1920px] flex-wrap items-center justify-between gap-4 px-4 py-2 sm:px-6 lg:px-8"
     >
-      <a
-        href={resolve('/')}
-        class="inline-flex items-center gap-2 rounded-lg font-bold tracking-tight text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
-      >
-        <img src={`${base}/logo.svg`} width="36" height="36" class="size-9" alt="" />
-        <span class="text-base">ИИ-трекинг</span>
-      </a>
+      <div class="inline-flex items-baseline gap-2">
+        <a
+          href={resolve('/')}
+          class="inline-flex items-center gap-2 rounded-lg font-bold tracking-tight text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+        >
+          <img src={`${base}/logo.svg`} width="36" height="36" class="size-9" alt="" />
+          <span class="text-base">ИИ-трекинг</span>
+        </a>
+        {#if data.version}
+          <span class="text-xs font-medium text-muted">{data.version}</span>
+        {/if}
+      </div>
       <nav
         aria-label="Основная навигация"
         class="flex items-center gap-1 rounded-full border border-line bg-canvas p-1 text-xs font-semibold"
