@@ -85,7 +85,7 @@ def test_openapi_documents_every_operation(client):
     assert set(spec["paths"]) == {
         "/api/projects", "/api/projects/{id}", "/api/projects/{id}/measurements", "/api/projects/{id}/generate", "/api/projects/import-prompts",
         "/api/measurements/{id}", "/api/measurements/{id}/rows", "/api/measurements/{id}/cancel",
-        "/api/config",
+        "/api/config", "/api/version",
         "/api/providers", "/api/providers/{connection_id}",
         "/api/providers/settings", "/api/providers/settings/{group_id}",
         "/api/search/settings", "/api/search/settings/credentials",
