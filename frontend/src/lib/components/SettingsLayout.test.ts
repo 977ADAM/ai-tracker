@@ -30,6 +30,7 @@ const data = {
   },
   seoSettingsError: '',
   loadError: '',
+  version: '',
 };
 
 function openSettings() {
@@ -119,5 +120,16 @@ describe('settings dialog navigation', () => {
     expect((within(panel).getByLabelText('Новый API-ключ') as HTMLInputElement).value).toBe('');
     expect(within(panel).getByRole('button', { name: 'Проверить подключение' })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Сбросить учётные данные' })).toBeTruthy();
+  });
+
+  it('shows the application version beside the title', () => {
+    render(Layout, {
+      props: {
+        data: { ...data, version: '0.1.0' },
+        children: createRawSnippet(() => ({ render: () => '<main>Page</main>' })),
+      },
+    });
+    expect(screen.getByText('0.1.0')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'ИИ-трекинг' })).toBeTruthy();
   });
 });
