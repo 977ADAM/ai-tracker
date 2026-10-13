@@ -9,28 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: SSH Deploy
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_SSH_KEY" && test -n "$DEPLOY_KNOWN_HOSTS" || {
-            echo 'Configure DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS in production.' >&2
-            exit 1
-          }
-          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
-          [[ "$DEPLOY_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
-          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
-          [[ "$DEPLOY_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          ssh_dir=$(mktemp -d)
-          trap 'rm -rf "$ssh_dir"' EXIT
-          chmod 700 "$ssh_dir"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
-          printf -v remote_command 'bash -se -- %q %q %q' "$DEPLOY_COMMIT" "$DEPLOY_DIR" "$APP_ORIGIN"
-          ssh -T -p "$DEPLOY_PORT" -i "$ssh_dir/key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=15 \
-            -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command" < deploy/deploy.sh
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2   
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: ${{ secrets.PORT }}
+          command_timeout: 15m
+          envs: GITHUB_REF_NAME
+          script:
