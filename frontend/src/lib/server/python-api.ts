@@ -123,7 +123,7 @@ function validPath(path: ApiPath): boolean {
     path === '/api/seo/settings/test'
   )
     return true;
-  if (path === '/api/config') return true;
+  if (path === '/api/config' || path === '/api/version') return true;
   if (path === '/api/providers' || path === '/api/providers/settings') return true;
   if (path === '/api/search/settings' || path === '/api/search/settings/credentials') return true;
   if (path.startsWith('/api/providers/settings/')) {
@@ -276,6 +276,20 @@ export async function pythonApi(path: ApiPath, init: RequestInit = {}): Promise<
   return fetch(`${apiOrigin()}${path}`, { ...init, signal, redirect: 'manual' });
 }
 
+async function loadApplicationVersion(): Promise<string> {
+  try {
+    const response = await pythonApi('/api/version');
+    if (
+      !response.ok ||
+      !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')
+    )
+      throw new Error('Invalid API response');
+    return requiredString(record(await response.json()).version);
+  } catch {
+    return '';
+  }
+}
+
 export async function loadPageData(): Promise<{
   providers: PublicProvider[];
   settingsProviders: SettingsProvider[];
@@ -284,11 +298,16 @@ export async function loadPageData(): Promise<{
   seoSettings: SeoSettings | null;
   seoSettingsError: string;
   loadError: string;
+  version: string;
 }> {
   // The search and service-LLM settings are independent requests: a failure
-  // there must not stop the model list, and vice versa.
-  const { settings: searchSettings, error: searchSettingsError } = await loadSearchSettings();
-  const { settings: seoSettings, error: seoSettingsError } = await loadSeoSettings();
+  // there must not stop the model list, and vice versa. The version is the
+  // same kind of independent read.
+  const [
+    { settings: searchSettings, error: searchSettingsError },
+    { settings: seoSettings, error: seoSettingsError },
+    version,
+  ] = await Promise.all([loadSearchSettings(), loadSeoSettings(), loadApplicationVersion()]);
   try {
     const [providerResponse, settingsResponse] = await Promise.all([
       pythonApi('/api/providers'),
@@ -313,6 +332,7 @@ export async function loadPageData(): Promise<{
       seoSettings,
       seoSettingsError,
       loadError: '',
+      version,
     };
   } catch {
     return {
@@ -323,6 +343,7 @@ export async function loadPageData(): Promise<{
       seoSettings,
       seoSettingsError,
       loadError: 'Python API недоступен. Проверьте, запущены ли оба сервиса.',
+      version,
     };
   }
 }
@@ -372,6 +393,8 @@ export async function proxyJson(
     searchSettingsPath &&
     !(path === '/api/search/settings' ? ['GET', 'PUT'].includes(method) : method === 'DELETE')
   )
+    return json({ detail: 'Недопустимый метод' }, 405);
+  if (path === '/api/version' && method !== 'GET')
     return json({ detail: 'Недопустимый метод' }, 405);
   const seoSettingsPath =
     path === '/api/seo/settings' ||
@@ -452,6 +475,8 @@ export async function proxyJson(
     }
     if (path === '/api/config' && method === 'GET')
       return json(publicConfig(value), upstream.status);
+    if (path === '/api/version' && method === 'GET')
+      return json({ version: requiredString(record(value).version) }, upstream.status);
     if (path.startsWith('/api/providers/settings/') && method === 'DELETE')
       return json({ deleted: record(value).deleted === true }, upstream.status);
     if (path.startsWith('/api/providers/settings') && method !== 'DELETE')
