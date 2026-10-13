@@ -1,0 +1,92 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# Do not interrupt a deployment that may already be applying migrations.
+concurrency:
+  group: ai-tracker-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select the deployment commit
+        id: release
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_REF" in
+            refs/heads/main|refs/tags/v*) ;;
+            *) echo 'Select main or a v-tag to deploy.' >&2; exit 1 ;;
+          esac
+          commit=$(git rev-parse HEAD)
+          git merge-base --is-ancestor "$commit" origin/main || {
+            echo 'The deployment commit must belong to main.' >&2
+            exit 1
+          }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: release
+    uses: ./.github/workflows/ci.yml
+    with:
+      commit: ${{ needs.release.outputs.commit }}
+
+  deploy:
+    needs: [release, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '77.83.119.18' }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '65133' }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/ai-tracker' }}
+      APP_ORIGIN: ${{ vars.APP_ORIGIN || 'https://dev.coresmart.tech' }}
+      DEPLOY_COMMIT: ${{ needs.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release.outputs.commit }}
+          persist-credentials: false
+      - name: Deploy through SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_KEY" && test -n "$DEPLOY_KNOWN_HOSTS" || {
+            echo 'Configure DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS in production.' >&2
+            exit 1
+          }
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [[ "$DEPLOY_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          printf -v remote_command 'bash -se -- %q %q %q' "$DEPLOY_COMMIT" "$DEPLOY_DIR" "$APP_ORIGIN"
+          ssh -T -p "$DEPLOY_PORT" -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command" < deploy/deploy.sh
