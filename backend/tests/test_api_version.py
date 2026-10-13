@@ -19,4 +19,4 @@ def test_the_version_endpoint_reads_pyproject(client):
 
     assert response.status_code == 200
     assert response.json() == {"version": expected}
-    assert application_version() == expected == VERSION == "0.1.1"
+    assert application_version() == expected == VERSION == "0.1.2"
