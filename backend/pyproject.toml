@@ -1,7 +1,7 @@
 [project]
 name = "ai-tracker"
 version = "0.1.0"
-description = "Локальный API проверки упоминаний бренда в ответах ИИ-моделей"
+description = "API проверки упоминаний бренда в ответах ИИ-моделей"
 readme = "README.md"
 authors = [
     { name = "977ADAM", email = "977team.95@gmail.com" }
